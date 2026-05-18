@@ -1,5 +1,83 @@
-# EBD.ia — Docker Compose principal
-# TODO Fase 0.5: adicionar serviços (traefik, postgres, redis, otel, prometheus, grafana, loki)
-# TODO Fase 1: adicionar gateway, worker, mcps
-# TODO Fase 2: adicionar frontend, metabase
-# TODO Fase 3: adicionar bots
+# ============================================================
+# EBD.ia — Docker Compose
+# Stage atual: Fase 0.5 — Postgres + Redis (validação de stack)
+# ============================================================
+
+services:
+
+  # ----------------------------------------------------------
+  # PostgreSQL 16 — sessões, auditoria, logs de tool_use
+  # ----------------------------------------------------------
+  postgres:
+    image: postgres:16.6-alpine
+    container_name: ebdia_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      LANG: pt_BR.UTF-8
+      LC_ALL: pt_BR.UTF-8
+      PGTZ: America/Sao_Paulo
+      TZ: America/Sao_Paulo
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - /data/postgres:/var/lib/postgresql/data
+      - ./infra/postgres/init:/docker-entrypoint-initdb.d:ro
+    networks:
+      - ebdia_net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
+
+  # ----------------------------------------------------------
+  # Redis 7 — fila, cache, idempotência, cache PCLIB
+  # ----------------------------------------------------------
+  redis:
+    image: redis:7.4-alpine
+    container_name: ebdia_redis
+    restart: unless-stopped
+    command: >
+      redis-server
+      --requirepass ${REDIS_PASSWORD}
+      --appendonly yes
+      --appendfsync everysec
+      --maxmemory 1gb
+      --maxmemory-policy allkeys-lru
+    environment:
+      TZ: America/Sao_Paulo
+    ports:
+      - "127.0.0.1:6379:6379"
+    volumes:
+      - /data/redis:/data
+    networks:
+      - ebdia_net
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "--no-auth-warning", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
+
+# ============================================================
+# Rede interna do EBD.ia
+# Containers se enxergam pelos nomes (postgres, redis)
+# ============================================================
+networks:
+  ebdia_net:
+    name: ebdia_net
+    driver: bridge
