@@ -1,0 +1,5 @@
+# EBD.ia — Docker Compose principal
+# TODO Fase 0.5: adicionar serviços (traefik, postgres, redis, otel, prometheus, grafana, loki)
+# TODO Fase 1: adicionar gateway, worker, mcps
+# TODO Fase 2: adicionar frontend, metabase
+# TODO Fase 3: adicionar bots
