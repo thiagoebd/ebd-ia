@@ -66,3 +66,5 @@ tmp/
 temp/
 compose.yaml.bak
 *.bak
+*.bak
+*.bak
