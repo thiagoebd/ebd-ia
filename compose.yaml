@@ -1,6 +1,8 @@
 # ============================================================
 # EBD.ia — Docker Compose
-# Stage atual: Fase 0.5 — Postgres + Redis (validação de stack)
+# Stage atual: Fase 0.5 + Fase 1 inicial
+#   - postgres + redis (Fase 0.5)
+#   - mcp-oracle (Fase 1)
 # ============================================================
 
 services:
@@ -73,9 +75,60 @@ services:
         max-size: "50m"
         max-file: "5"
 
+  # ----------------------------------------------------------
+  # MCP Oracle — leitura read-only do Winthor (Camada 4)
+  # Conecta no ODA via SCAN, executa queries via SQL Guard
+  # ----------------------------------------------------------
+  mcp-oracle:
+    build:
+      context: ./mcps/oracle
+      dockerfile: Dockerfile
+    image: ebdia/mcp-oracle:0.1.0
+    container_name: ebdia_mcp_oracle
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      # Oracle (lido do .env)
+      ORACLE_USER: ${ORACLE_USER}
+      ORACLE_PASSWORD: ${ORACLE_PASSWORD}
+      ORACLE_DSN: ${ORACLE_DSN}
+      ORACLE_POOL_MIN: ${ORACLE_POOL_MIN:-2}
+      ORACLE_POOL_MAX: ${ORACLE_POOL_MAX:-10}
+      ORACLE_QUERY_TIMEOUT_MS: ${ORACLE_QUERY_TIMEOUT_MS:-30000}
+      ORACLE_DEFAULT_ROW_LIMIT: ${ORACLE_DEFAULT_ROW_LIMIT:-10000}
+      # Postgres (para uso futuro: audit log)
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      # Redis (para uso futuro: cache PCLIB)
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      # Runtime
+      TZ: America/Sao_Paulo
+    networks:
+      - ebdia_net
+    healthcheck:
+      test: ["CMD", "python", "-m", "app.scripts.health_check"]
+      interval: 60s
+      timeout: 30s
+      retries: 3
+      start_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
+
 # ============================================================
 # Rede interna do EBD.ia
-# Containers se enxergam pelos nomes (postgres, redis)
+# Containers se enxergam pelos nomes (postgres, redis, mcp-oracle)
 # ============================================================
 networks:
   ebdia_net:

@@ -1,0 +1,36 @@
+# ============================================================
+# mcp-oracle — Servidor MCP read-only para Winthor (Oracle)
+# ============================================================
+
+[project]
+name = "ebd-ia-mcp-oracle"
+version = "0.1.0"
+description = "Servidor MCP para acesso read-only ao Winthor (Oracle) com SQL Guard"
+requires-python = ">=3.12"
+license = { text = "Proprietary" }
+authors = [
+    { name = "Thiago Martins Parreira", email = "thiago.parreira@ebdgrupo.com.br" }
+]
+
+dependencies = [
+    # Driver Oracle modo Thin (sem Instant Client)
+    "oracledb>=4.0.0,<5.0.0",
+    # Carregar .env
+    "python-dotenv>=1.0.0,<2.0.0",
+    # Servidor MCP (será usado quando integrarmos com Claude Agent SDK)
+    # "mcp>=1.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "ruff>=0.5.0",
+]
+
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["app*"]

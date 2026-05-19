@@ -64,3 +64,5 @@ Thumbs.db
 *.tmp
 tmp/
 temp/
+compose.yaml.bak
+*.bak
