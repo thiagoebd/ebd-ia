@@ -4,8 +4,8 @@
 
 [project]
 name = "ebd-ia-mcp-oracle"
-version = "0.1.0"
-description = "Servidor MCP para acesso read-only ao Winthor (Oracle) com SQL Guard"
+version = "0.2.0"
+description = "Servidor MCP HTTP streamable para acesso read-only ao Winthor (Oracle) com SQL Guard mínimo"
 requires-python = ">=3.12"
 license = { text = "Proprietary" }
 authors = [
@@ -17,13 +17,22 @@ dependencies = [
     "oracledb>=4.0.0,<5.0.0",
     # Carregar .env
     "python-dotenv>=1.0.0,<2.0.0",
-    # Servidor MCP (será usado quando integrarmos com Claude Agent SDK)
-    # "mcp>=1.0.0",
+    # Servidor MCP HTTP streamable (SDK oficial Anthropic)
+    "mcp>=1.2.0,<2.0.0",
+    # ASGI server (transporte HTTP do MCP)
+    "uvicorn[standard]>=0.30.0,<1.0.0",
+    # Cliente HTTP (smoke tests + futuros consumers)
+    "httpx>=0.27.0,<1.0.0",
+    # Logging estruturado JSONL (Loki-friendly)
+    "structlog>=24.4.0,<25.0.0",
+    # Validação de modelos (já vem com mcp, mas explícito é melhor)
+    "pydantic>=2.0.0,<3.0.0",
 ]
 
 [project.optional-dependencies]
 dev = [
     "pytest>=8.0.0",
+    "pytest-asyncio>=0.24.0",
     "ruff>=0.5.0",
 ]
 

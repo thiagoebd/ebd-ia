@@ -68,3 +68,7 @@ compose.yaml.bak
 *.bak
 *.bak
 *.bak
+
+# Logs do MCP
+logs/
+*.jsonl
