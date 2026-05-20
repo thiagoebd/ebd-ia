@@ -788,3 +788,26 @@ Top operacional (financeiro, comercial) quer ver Pedidos travados pra agir.
 PENDENCIA: sondar PCPEDC.POSICAO pra mapear estados (liberado, preso
 financeiro, preso comercial, em digitacao).
 
+
+---
+
+## #38 — SEMPRE buscar GD_FATO/GD_DIM antes de derivar de PC* (20/05/2026)
+
+**Sintoma:** Tentei derivar carteira BR de PCCLIENT chutando filtros (bloqueio, datas, RCA1/2/3). Errado por 6 horas.
+
+**Causa:** Não verifiquei se Winthor já expõe a métrica via view DW.
+
+**Solução:** ANTES de qualquer query derivativa em tabela PC*, executar:
+
+```sql
+SELECT view_name FROM all_views
+WHERE owner='EBD' AND view_name LIKE 'GD_FATO_%';
+
+SELECT table_name FROM all_tables
+WHERE owner='EBD' AND table_name LIKE 'GD_DIM_%';
+```
+
+**Padrão Winthor DW:** GD_DIM_* = dimensões, GD_FATO_* = fatos. Métricas usadas no BI estão lá prontas.
+
+**Caso concreto:** carteira BR (77.315 do BI) vem de `GD_FATO_ROTACLIENTE` direto — 1 linha de SQL, não 6h de chute de filtros.
+

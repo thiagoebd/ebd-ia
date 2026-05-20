@@ -898,3 +898,51 @@ Quando EBD cadastrar TIPOMETA='R' no PCMETA, T120 vira meta real.
 
 Latência: 19,9s.
 
+
+---
+
+# Parte 7 — 8ª Fórmula Universal: CARTEIRA BR (20/05/2026)
+
+## Descoberta: GD_FATO_ROTACLIENTE é a fonte oficial
+
+Após 6 horas de sondagem testando filtros derivados (PCCLIENT bloqueios, datas de compra 90/180/365/540/660/730 dias), descobrimos que a "carteira" no BI EBD vem de uma fonte simples:
+
+```sql
+SELECT COUNT(DISTINCT CODIGOCLIENTE)
+FROM EBD.GD_FATO_ROTACLIENTE
+
+ALVO BI: 77.315
+MCP:     77.453  delta +138 (+0,18%) ✅ CENTAVO
+```
+
+## Definição de negócio (cf. Thiago)
+
+Carteira é gerenciada **manualmente** via inclusão/exclusão de cliente em rota de visita pelo supervisor/gerente. NÃO há regra de "X dias sem compra = sai da carteira".
+Cliente em GD_FATO_ROTACLIENTE = cliente em rota de visita ATIVA = carteira
+
+## Estrutura da view
+CODIGOCLIENTE   ← cliente
+CODIGORCA       ← RCA designado
+DIASEMANA       ← dia da visita
+
+142.308 linhas (cliente × dia da semana), 77.453 distintos.
+
+## CICATRIZ NOVA — SEMPRE BUSCAR GD_FATO/GD_DIM PRIMEIRO
+
+Erro recorrente da sessão: tentei derivar carteira de PCCLIENT cru com filtros chutados. **Antes de derivar, SEMPRE consultar:**
+
+```sql
+SELECT view_name FROM all_views
+WHERE owner='EBD' AND view_name LIKE 'GD_FATO_%CLI%'
+   OR view_name LIKE 'GD_FATO_%CART%'
+   OR view_name LIKE 'GD_FATO_%ROTA%'
+```
+
+Outras views DW oficiais descobertas:
+GD_DIM_CARTEIRACLIENTE     histórico (todos vínculos)
+GD_FATO_CLIENTE            snapshot (limites/dias)
+GD_FATO_ROTACLIENTE        carteira ativa ★ fonte do BI
+GD_FATO_METACLIENTE        meta por cliente
+GD_FATO_COBRANCACLIENTE    cobrança por cliente
+VW_CLIENTESRCA             clientes por RCA
+
