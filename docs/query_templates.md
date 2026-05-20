@@ -806,3 +806,95 @@ FETCH FIRST 10 ROWS ONLY
 
 **Validado Manaus:** Top 10 100% B2B (atacado/super). C L A COMERCIO #1 R$ 28K integralmente bloqueado. Latência: 552ms.
 
+
+---
+
+# Parte 6 — Família Meta-Dia (T215-T218 + T120) — descoberta 20/05/2026
+
+Padrão de gestão de ritmo: comparar Real vs Meta proporcional aos dias úteis
+DECORRIDOS, projetar ritmo necessário pra fechar o mês.
+
+## Lógica universal de dias úteis
+
+**PCFERIADO NÃO existe na EBD.** Usamos CTE inline com feriados nacionais
+hardcoded + exclusão sáb/dom via `TO_CHAR(DIA,'D')` (1=domingo, 7=sábado).
+
+PENDÊNCIA: criar tabela `EBD_IA_FERIADOS(DATA, CODFILIAL, DESCRICAO)` pra
+suportar feriados estaduais (Manaus 8/9, Caruaru 12/3, etc.).
+
+## CTE reutilizável (todos os templates desta família)
+
+```sql
+WITH feriados_2026 AS (
+    SELECT TO_DATE('2026-01-01','YYYY-MM-DD') AS DIA FROM DUAL UNION ALL
+    SELECT TO_DATE('2026-02-17','YYYY-MM-DD') FROM DUAL UNION ALL  -- Carnaval
+    SELECT TO_DATE('2026-04-03','YYYY-MM-DD') FROM DUAL UNION ALL  -- Sexta Santa
+    SELECT TO_DATE('2026-04-21','YYYY-MM-DD') FROM DUAL UNION ALL  -- Tiradentes
+    SELECT TO_DATE('2026-05-01','YYYY-MM-DD') FROM DUAL UNION ALL  -- Trabalho
+    SELECT TO_DATE('2026-06-04','YYYY-MM-DD') FROM DUAL UNION ALL  -- Corpus
+    SELECT TO_DATE('2026-09-07','YYYY-MM-DD') FROM DUAL UNION ALL  -- Independência
+    SELECT TO_DATE('2026-10-12','YYYY-MM-DD') FROM DUAL UNION ALL  -- N.S. Aparecida
+    SELECT TO_DATE('2026-11-02','YYYY-MM-DD') FROM DUAL UNION ALL  -- Finados
+    SELECT TO_DATE('2026-11-15','YYYY-MM-DD') FROM DUAL UNION ALL  -- Proc. República
+    SELECT TO_DATE('2026-11-20','YYYY-MM-DD') FROM DUAL UNION ALL  -- Consc. Negra
+    SELECT TO_DATE('2026-12-25','YYYY-MM-DD') FROM DUAL            -- Natal
+),
+dias_mes AS (
+    SELECT TRUNC(SYSDATE,'MM') + LEVEL - 1 AS DIA
+    FROM DUAL CONNECT BY LEVEL <= EXTRACT(DAY FROM LAST_DAY(SYSDATE))
+),
+calendario AS (
+    SELECT
+        SUM(CASE WHEN TO_CHAR(dm.DIA,'D') IN ('1','7') THEN 0
+                 WHEN EXISTS (SELECT 1 FROM feriados_2026 f WHERE f.DIA = dm.DIA) THEN 0
+                 ELSE 1 END) AS DU_MES,
+        SUM(CASE WHEN dm.DIA <= TRUNC(SYSDATE)
+                  AND TO_CHAR(dm.DIA,'D') NOT IN ('1','7')
+                  AND NOT EXISTS (SELECT 1 FROM feriados_2026 f WHERE f.DIA = dm.DIA)
+                 THEN 1 ELSE 0 END) AS DU_ATE_HOJE,
+        SUM(CASE WHEN dm.DIA > TRUNC(SYSDATE)
+                  AND TO_CHAR(dm.DIA,'D') NOT IN ('1','7')
+                  AND NOT EXISTS (SELECT 1 FROM feriados_2026 f WHERE f.DIA = dm.DIA)
+                 THEN 1 ELSE 0 END) AS DU_RESTANTES
+    FROM dias_mes dm
+)
+```
+
+## Fórmulas finais
+META_DIA       = META_MES / DU_MES
+REAL_ESPERADO  = META_DIA × DU_ATE_HOJE
+DESVIO_VAL     = REAL - REAL_ESPERADO
+DESVIO_PCT     = (REAL / REAL_ESPERADO - 1) × 100
+RITMO_ATUAL    = REAL / DU_ATE_HOJE
+RITMO_NEC      = (META_MES - REAL) / DU_RESTANTES
+FATOR_ACEL     = RITMO_NEC / RITMO_ATUAL
+
+## T215 — Meta-Dia BRASIL ✅
+
+**Validado 20/05:** Meta R$ 333M, Real R$ 120,8M, Desvio -44,19%, Ritmo necessário 3,26x atual. ALERTA: meta provavelmente não fecha. Latência: 43s.
+
+## T216 — Meta-Dia por Filial (Top 10)
+
+Idêntico ao T215 mas com agregação por CODFILIAL + JOIN meta_filial (TIPOMETA='FL'). Latência: 7,7s warm.
+
+## T217 — Meta-Dia por Gerente Comercial (Top 10)
+
+Usa GD_FATO_VENDAFATURAMENTO + GD_DIM_RCA.CODIGOGERENTE + PCMETA TIPOMETA='GC'. **Validado:** Davya Cordeiro -5,0% (quase no ritmo). Latência: 52s.
+
+## T218 — Meta-Dia por Supervisor (Top 10)
+
+Mesma estrutura T217 mas com CODIGOSUPERVISOR + TIPOMETA='SV'. **Heróis revelados:** Pedro Raesky +75% meta batida, Clayton +35%, Priscila +32%. Latência: 19,6s.
+
+## T120 — Meta-Dia RCA DERIVADA ⚠️ APROXIMAÇÃO
+
+Como **TIPOMETA='R' não existe na EBD**, meta de RCA é derivada:
+`meta_rca = meta_sup / qtd_RCAs_ativos_do_sup`
+
+**LIMITAÇÃO METODOLÓGICA:** divisão igual é aproximação grosseira quando
+RCAs do supervisor são desiguais (caso Priscila+Michelly: Michelly faz +557%
+da meta derivada). Apresentar como **"estimativa de pressão"**, não meta oficial.
+
+Quando EBD cadastrar TIPOMETA='R' no PCMETA, T120 vira meta real.
+
+Latência: 19,9s.
+
