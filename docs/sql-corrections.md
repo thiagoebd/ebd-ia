@@ -811,3 +811,30 @@ WHERE owner='EBD' AND table_name LIKE 'GD_DIM_%';
 
 **Caso concreto:** carteira BR (77.315 do BI) vem de `GD_FATO_ROTACLIENTE` direto — 1 linha de SQL, não 6h de chute de filtros.
 
+
+---
+
+## #39 — Excluir RCAs ÓRFÃOS/VAGOS de métricas de produtividade
+
+RCAs com nome iniciando em 'ORFAO' ou 'RCA VAGO' são códigos fictícios
+de filial usados como "depósito" de clientes parados/desistidos. Eles
+nunca visitam. **Filtro obrigatório em qualquer métrica de rota:**
+
+```sql
+AND UPPER(NVL(dr.RCA,'')) NOT LIKE 'ORFAO%'
+AND UPPER(NVL(dr.RCA,'')) NOT LIKE 'RCA VAGO%'
+```
+
+## #40 — DIASEMANA tem inconsistências TERCA/TERÇA e SABADO/SÁBADO
+
+Cadastro misturado. Sempre usar:
+```sql
+WHERE UPPER(DIASEMANA) IN (NOME, REPLACE(NOME,'C','Ç'))
+```
+
+## #41 — Cobertura de rota entre RCAs
+
+Aproveitamento por RCA NÃO pode usar CODUSUR = CODIGORCA do par
+da rota. Quando RCA falta, colega cobre. Métrica correta:
+"clientes DA rota do RCA X atendidos hoje (por qualquer um)".
+

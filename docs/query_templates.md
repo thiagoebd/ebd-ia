@@ -946,3 +946,79 @@ GD_FATO_METACLIENTE        meta por cliente
 GD_FATO_COBRANCACLIENTE    cobrança por cliente
 VW_CLIENTESRCA             clientes por RCA
 
+
+---
+
+# Parte 8 — Aproveitamento de Rota (T180+) — descoberto 20/05/2026 23h
+
+## Conceito de negócio
+
+"Da rota DO DIA da FILIAL X, quantos clientes foram atendidos hoje?"
+
+Atendimento = qualquer pedido aberto, INCLUINDO cobertura entre RCAs
+quando o titular falta. RCAs órfãos (ORFAO%, RCA VAGO%) são fictícios:
+servem só como "depósito" de clientes parados. Excluídos das métricas.
+
+## Mapeamento de DIASEMANA (cicatriz nova)
+Oracle TO_CHAR(DT,'D')   → texto da tabela
+'1' DOMINGO              → 'DOMINGO'
+'2' SEGUNDA              → 'SEGUNDA'
+'3' TERCA                → 'TERCA' OU 'TERÇA' (inconsistência!)
+'4' QUARTA               → 'QUARTA'
+'5' QUINTA               → 'QUINTA'
+'6' SEXTA                → 'SEXTA'
+'7' SABADO               → 'SABADO' OU 'SÁBADO' (inconsistência!)
+
+Bug de cadastro: terça e sábado têm variantes com Ç. Solução:
+`UPPER(DIASEMANA) IN (NOME, REPLACE(NOME,'C','Ç'))`
+
+## T180 — Aproveitamento de Rota por Filial ✅ Validado
+
+Validado Manaus 20/05 quarta-feira (parcial 22h40):
+- 1.530 clientes na rota
+- 125 RCAs ativos (sem órfãos)
+- 224 visitados → APROV 14,6% (dia ainda fechando)
+- 91 NF → CONV 5,9%
+- Latência: 0,6s
+
+```sql
+WITH dia_ref AS (
+    SELECT TRUNC(SYSDATE) AS DT,
+           CASE TO_CHAR(TRUNC(SYSDATE),'D')
+             WHEN '1' THEN 'DOMINGO' WHEN '2' THEN 'SEGUNDA'
+             WHEN '3' THEN 'TERCA'   WHEN '4' THEN 'QUARTA'
+             WHEN '5' THEN 'QUINTA'  WHEN '6' THEN 'SEXTA'
+             WHEN '7' THEN 'SABADO' END AS NOME
+    FROM DUAL
+),
+rota_filial AS (
+    SELECT DISTINCT r.CODIGOCLIENTE
+    FROM EBD.GD_FATO_ROTACLIENTE r
+    JOIN EBD.GD_DIM_RCA dr ON dr.CODIGORCA = r.CODIGORCA
+    JOIN EBD.PCCLIENT cli ON cli.CODCLI = r.CODIGOCLIENTE
+    , dia_ref d
+    WHERE UPPER(r.DIASEMANA) IN (d.NOME, REPLACE(d.NOME,'C','Ç'))
+      AND UPPER(NVL(dr.RCA,'')) NOT LIKE 'ORFAO%'
+      AND UPPER(NVL(dr.RCA,'')) NOT LIKE 'RCA VAGO%'
+      AND cli.CODFILIALNF = :codFilial
+)
+SELECT (SELECT COUNT(*) FROM rota_filial) AS NA_ROTA,
+       (SELECT COUNT(DISTINCT ped.CODCLI) FROM EBD.PCPEDC ped, dia_ref d
+        WHERE TRUNC(ped.DATA) = d.DT AND ped.POSICAO != 'C'
+          AND ped.CODFILIAL = :codFilial
+          AND ped.CODCLI IN (SELECT CODIGOCLIENTE FROM rota_filial)) AS VISITADOS,
+       (SELECT COUNT(DISTINCT v.CODCLI) FROM EBD.VIEW_VENDAS_RESUMO_FATURAMENTO v, dia_ref d
+        WHERE TRUNC(v.DTSAIDA) = d.DT AND v.CONDVENDA = 1
+          AND v.CODFILIAL = :codFilial
+          AND v.CODCLI IN (SELECT CODIGOCLIENTE FROM rota_filial)) AS FATURADOS
+FROM DUAL
+```
+
+## T181 — Aproveitamento por RCA (com cobertura) ✅
+
+JOIN com rota_rca cruzado com PCPEDC e VIEW_VENDAS pra atribuir
+visitas/fat aos clientes da rota DO RCA (mesmo se outro coberto).
+
+**Cicatriz #40:** RCA pode cobrir rota de colega. Não restringir visitas
+ao mesmo CODUSUR; usar conjunto de clientes da rota do RCA.
+
