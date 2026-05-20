@@ -1,444 +1,506 @@
-# Query Templates — SQL pronto para o agente Winthor
+# Query Templates EBD.ia — v2 consolidado (20/05/2026)
 
-> **Como funciona este arquivo:** templates SQL validados e estáveis que o
-> agente DEVE preferir adaptar em vez de gerar SQL do zero. Cada template tem
-> um nome, descrição, bind variables, e exemplo de uso.
->
-> **Convenção:** templates usam SEMPRE bind variables (:userFilial, :dtInicio,
-> :dtFim, etc), nunca string concatenation. SQL Guard valida.
->
-> **Status atual (19/05/2026 v2):** REESCRITO baseado nas 224 views do Data
-> Warehouse Oracle descobertas em winthor_discovery.md. Templates antigos
-> (T001-T003) baseados em tabelas raw foram REMOVIDOS — todos usam views
-> dimensionais agora.
+Catálogo de queries validadas centavo-a-centavo contra ERP/BI Winthor da EBD.
 
----
+## Convenções universais
 
-## Convenções de bind variables
-
-Toda query do projeto usa estas bind variables com nomes consistentes:
-
-| Bind var | Tipo | Exemplo | Descrição |
-|---|---|---|---|
-| :userFilial | string | '05' | Código da filial (sempre obrigatório) |
-| :userFiliais | lista | ('10','13') | Lista de filiais (regional) — usar com IN |
-| :dtInicio | date | DATE '2026-05-01' | Início do período |
-| :dtFim | date | DATE '2026-05-31' | Fim do período |
-| :topN | number | 10 | Quantidade para Top N |
-| :codFornec | number | 1 | Código do fornecedor (filtrado) |
-| :codProduto | number | 1 | Código do produto (filtrado) |
-| :codUsur | number | 146 | Código do vendedor/RCA |
-| :codGerente | number | 12 | Código do gerente |
-
-## Convenção crítica de datas em views GD_*
-
-As views dimensionais retornam datas como STRINGS YYYYMMDD. SEMPRE converter
-:dtInicio e :dtFim antes de comparar:
-
-    AND DATAFATURAMENTO BETWEEN TO_CHAR(:dtInicio, 'YYYYMMDD')
-                            AND TO_CHAR(:dtFim, 'YYYYMMDD')
+- **Período "mês corrente"** = `BETWEEN TRUNC(SYSDATE,'MM') AND SYSDATE` (até ESTE SEGUNDO, nunca até ontem)
+- **Faturamento Bruto** = `EBD.GD_FATO_VENDAFATURAMENTO.VALORTOTAL` (já filtra cancelamento/bonificação internamente)
+- **Venda Líquida Oficial EBD** = `VIEW_VENDAS_RESUMO_FATURAMENTO` + `CONDVENDA=1` menos devoluções (2 views UNION)
+- **Meta de fornecedor** = `PCMETA TIPOMETA='F' AND CODIGO = CODFORNECPRINC` (NÃO CODFORNEC qualquer)
+- **Alias mínimo 2 letras** descritivos (vf, dr, fp...) — alias `v` quebra com PLS-306
+- **PCFILIAL** apenas com `CODIGO + FANTASIA` (UF/Cidade não usado; SELECT * quebra serializer)
+- **Cache Redis 5-10min** obrigatório em produção pra queries com VENDAFATURAMENTO
 
 ---
 
-## Template T100 — Faturamento por Filial (mês corrente)
+# Parte 1 — Templates Single-Filial (T100-T107)
 
-**Descrição:** faturamento real (NF emitida) por filial no mês corrente.
+Todos rodam contra UMA filial via `:codFilial`. Validados em filial 06 (Manaus).
 
-**Quando usar:** usuário pede "faturamento do mês", "vendas da filial X",
-"como está o mês até agora".
+## T100 — Faturamento Bruto Filial (✅ ERP centavo)
 
-**View principal:** GD_FATO_VENDAFATURAMENTO
+```sql
+-- Faturamento Bruto consolidado da filial no periodo
+SELECT
+    :codFilial                                   AS CODFILIAL,
+    SUM(vf.VALORTOTAL)                           AS FATURAMENTO_BRUTO,
+    COUNT(DISTINCT vf.NUMEROTRANSVENDA)          AS QTD_NOTAS,
+    COUNT(DISTINCT vf.CODIGOCLIENTE)             AS QTD_CLIENTES,
+    COUNT(DISTINCT vf.CODIGOPRODUTO)             AS QTD_SKUS
+FROM EBD.GD_FATO_VENDAFATURAMENTO vf
+WHERE vf.CODIGOFILIAL = :codFilial
+  AND vf.DATAFATURAMENTO BETWEEN TO_CHAR(:dtInicio,'YYYYMMDD')
+                            AND TO_CHAR(:dtFim,'YYYYMMDD')
+```
 
-**Bind variables:** :userFilial
-
-**SQL:**
-
-    SELECT
-        CODIGOFILIAL,
-        COUNT(DISTINCT NUMEROTRANSVENDA) AS QTD_NOTAS,
-        SUM(VALORTOTAL) AS FATURAMENTO_BRUTO,
-        SUM(QUANTIDADE) AS QUANTIDADE_TOTAL
-    FROM EBD.GD_FATO_VENDAFATURAMENTO
-    WHERE CODIGOFILIAL = :userFilial
-      AND DATAFATURAMENTO >= TO_CHAR(TRUNC(SYSDATE, 'MM'), 'YYYYMMDD')
-      AND DATAFATURAMENTO <= TO_CHAR(SYSDATE, 'YYYYMMDD')
-    GROUP BY CODIGOFILIAL
-
-**Variações:**
-- Para período customizado: substituir o BETWEEN por :dtInicio/:dtFim
-- Para regional: trocar = :userFilial por IN (:userFiliais)
-- Para líquido: subtrair GD_FATO_VENDADEVOLUCAO no mesmo período
-
-**Latência esperada:** 1-3s (depende do tamanho da filial)
+**Validado:** filial 06, 01-19/05/2026: MCP R$ 11.444.947,76 = ERP Winthor R$ 11.444.947,76 (centavo). Latência: 13s warm.
 
 ---
 
-## Template T101 — Top N Fornecedores (Real vs AA vs Meta)
+## T101 v2 — Top N Fornecedores Filial (✅ via fórmula universal)
 
-**Descrição:** ranking de fornecedores no período comparando Real (faturado),
-AA (mesmo período ano anterior) e Meta (fornecedor).
+```sql
+WITH fornec_principal AS (
+    SELECT CODFORNEC, NVL(CODFORNECPRINC, CODFORNEC) AS COD_RAIZ
+    FROM EBD.PCFORNEC
+),
+real_forn AS (
+    SELECT fp.COD_RAIZ, SUM(v.VLATEND) AS REAL_FATURADO
+    FROM EBD.VIEW_VENDAS_RESUMO_FATURAMENTO v
+    JOIN EBD.PCPRODUT p  ON p.CODPROD  = v.CODPROD
+    JOIN fornec_principal fp ON fp.CODFORNEC = p.CODFORNEC
+    WHERE v.DTSAIDA BETWEEN :dtInicio AND :dtFim
+      AND v.CONDVENDA = 1
+      AND v.CODFILIAL = :codFilial
+    GROUP BY fp.COD_RAIZ
+),
+dev_vinc AS (
+    SELECT fp.COD_RAIZ, SUM(d.VLDEVOLUCAO) AS DEV
+    FROM EBD.VIEW_DEVOL_RESUMO_FATURAMENTO d
+    JOIN EBD.PCPRODUT p  ON p.CODPROD  = d.CODPROD
+    JOIN fornec_principal fp ON fp.CODFORNEC = p.CODFORNEC
+    WHERE d.DTENT BETWEEN :dtInicio AND :dtFim
+      AND d.CONDVENDA = 1
+      AND d.CODFILIAL = :codFilial
+    GROUP BY fp.COD_RAIZ
+),
+dev_avul AS (
+    SELECT fp.COD_RAIZ, SUM(d.VLDEVOLUCAO) AS DEV
+    FROM EBD.VIEW_DEVOL_RESUMO_FATURAVULSA d
+    JOIN EBD.PCPRODUT p  ON p.CODPROD  = d.CODPROD
+    JOIN fornec_principal fp ON fp.CODFORNEC = p.CODFORNEC
+    WHERE d.DTENT BETWEEN :dtInicio AND :dtFim
+      AND d.CODFILIAL = :codFilial
+    GROUP BY fp.COD_RAIZ
+),
+meta_forn AS (
+    SELECT CODIGO AS COD_RAIZ, SUM(VLVENDAPREV) AS META
+    FROM EBD.PCMETA
+    WHERE TIPOMETA = 'F'
+      AND TRUNC(DATA,'MM') = TRUNC(SYSDATE,'MM')
+      AND CODFILIAL = :codFilial
+    GROUP BY CODIGO
+)
+SELECT
+    rf.COD_RAIZ,
+    SUBSTR(NVL(f.FORNECEDOR,'?'),1,32)  AS FORNECEDOR,
+    rf.REAL_FATURADO,
+    NVL(dv.DEV,0) + NVL(da.DEV,0)        AS DEV_TOTAL,
+    rf.REAL_FATURADO - NVL(dv.DEV,0) - NVL(da.DEV,0)   AS REAL_LIQUIDO,
+    NVL(m.META,0)                        AS META,
+    CASE WHEN NVL(m.META,0) > 0
+         THEN ROUND((rf.REAL_FATURADO - NVL(dv.DEV,0) - NVL(da.DEV,0))/m.META*100,2)
+         ELSE NULL END                   AS PCT_META
+FROM real_forn rf
+LEFT JOIN dev_vinc dv ON dv.COD_RAIZ = rf.COD_RAIZ
+LEFT JOIN dev_avul da ON da.COD_RAIZ = rf.COD_RAIZ
+LEFT JOIN EBD.PCFORNEC f ON f.CODFORNEC = rf.COD_RAIZ
+LEFT JOIN meta_forn m ON m.COD_RAIZ = rf.COD_RAIZ
+ORDER BY REAL_LIQUIDO DESC NULLS LAST
+FETCH FIRST :topN ROWS ONLY
+```
 
-**Quando usar:** "top 5 fornecedores", "quais marcas estão melhor",
-"ranking de marcas vs meta".
-
-**Views:** GD_FATO_VENDAFATURAMENTO + GD_DIM_PRODUTO + GD_FATO_METAFORNECEDOR
-
-**Bind variables:** :userFilial, :dtInicio, :dtFim, :topN
-
-**SQL:**
-
-    WITH vendas AS (
-        SELECT
-            p.CODIGOFORNECEDOR,
-            p.FORNECEDOR,
-            SUM(CASE
-                WHEN v.DATAFATURAMENTO BETWEEN TO_CHAR(:dtInicio, 'YYYYMMDD')
-                                           AND TO_CHAR(:dtFim, 'YYYYMMDD')
-                THEN v.VALORTOTAL END) AS REAL_VALOR,
-            SUM(CASE
-                WHEN v.DATAFATURAMENTO BETWEEN TO_CHAR(ADD_MONTHS(:dtInicio, -12), 'YYYYMMDD')
-                                           AND TO_CHAR(ADD_MONTHS(:dtFim, -12), 'YYYYMMDD')
-                THEN v.VALORTOTAL END) AS AA_VALOR
-        FROM EBD.GD_FATO_VENDAFATURAMENTO v
-        JOIN EBD.GD_DIM_PRODUTO p ON v.CODIGOPRODUTO = p.CODIGOPRODUTO
-        WHERE v.CODIGOFILIAL = :userFilial
-          AND v.DATAFATURAMENTO >= TO_CHAR(ADD_MONTHS(:dtInicio, -12), 'YYYYMMDD')
-          AND v.DATAFATURAMENTO <= TO_CHAR(:dtFim, 'YYYYMMDD')
-        GROUP BY p.CODIGOFORNECEDOR, p.FORNECEDOR
-    ),
-    metas AS (
-        SELECT
-            CODIGOENTIDADEMETA AS CODIGOFORNECEDOR,
-            SUM(VALOR) AS META_VALOR
-        FROM EBD.GD_FATO_METAFORNECEDOR
-        WHERE CODIGOFILIAL = :userFilial
-          AND DATA BETWEEN TO_CHAR(:dtInicio, 'YYYYMMDD')
-                       AND TO_CHAR(:dtFim, 'YYYYMMDD')
-        GROUP BY CODIGOENTIDADEMETA
-    )
-    SELECT
-        v.CODIGOFORNECEDOR,
-        v.FORNECEDOR,
-        v.REAL_VALOR,
-        v.AA_VALOR,
-        m.META_VALOR,
-        CASE WHEN m.META_VALOR > 0 THEN v.REAL_VALOR / m.META_VALOR END AS PCT_VS_META,
-        CASE WHEN v.AA_VALOR > 0 THEN (v.REAL_VALOR - v.AA_VALOR) / v.AA_VALOR END AS PCT_VS_AA
-    FROM vendas v
-    LEFT JOIN metas m ON v.CODIGOFORNECEDOR = m.CODIGOFORNECEDOR
-    ORDER BY v.REAL_VALOR DESC NULLS LAST
-    FETCH FIRST :topN ROWS ONLY
-
-**Latência esperada:** 3-8s (depende do período)
-
----
-
-## Template T102 — Faturamento por Ramo de Atividade
-
-**Descrição:** faturamento agrupado pelo ramo de atividade do cliente.
-
-**Quando usar:** "vendas por ramo", "quanto vendi pra supermercado",
-"split por canal".
-
-**Views:** GD_FATO_VENDAFATURAMENTO + GD_DIM_CLIENTE
-
-**Bind variables:** :userFilial, :dtInicio, :dtFim
-
-**SQL:**
-
-    SELECT
-        c.RAMOATIVIDADE,
-        COUNT(DISTINCT v.CODIGOCLIENTE) AS QTD_CLIENTES,
-        SUM(v.VALORTOTAL) AS FATURAMENTO,
-        SUM(v.VALORTOTAL) / SUM(SUM(v.VALORTOTAL)) OVER () AS PCT_PARTICIPACAO
-    FROM EBD.GD_FATO_VENDAFATURAMENTO v
-    JOIN EBD.GD_DIM_CLIENTE c ON v.CODIGOCLIENTE = c.CODIGOCLIENTE
-    WHERE v.CODIGOFILIAL = :userFilial
-      AND v.DATAFATURAMENTO BETWEEN TO_CHAR(:dtInicio, 'YYYYMMDD')
-                                AND TO_CHAR(:dtFim, 'YYYYMMDD')
-    GROUP BY c.RAMOATIVIDADE
-    ORDER BY FATURAMENTO DESC NULLS LAST
-
-**Variações:**
-- Para "Ramo Principal" (refinamento mais granular): usar a coluna correta
-  de GD_DIM_CLIENTE (CODIGORAMOATIVIDADE)
-
-**Latência esperada:** 2-5s
+**Validado:** filial 06, mês corrente até agora. Kraft Heinz #1 Manaus 71,7% meta. Latência: 1,3s warm.
 
 ---
 
-## Template T103 — Top N RCAs (com hierarquia)
+## T102 — Faturamento por Ramo de Atividade
 
-**Descrição:** ranking de vendedores no período, mostrando supervisor e
-gerente.
+```sql
+SELECT
+    SUBSTR(NVL(dc.RAMOATIVIDADE,'(sem ramo)'),1,30) AS RAMO,
+    COUNT(DISTINCT vf.CODIGOCLIENTE)                AS QTD_CLIENTES,
+    SUM(vf.VALORTOTAL)                              AS FATURAMENTO
+FROM EBD.GD_FATO_VENDAFATURAMENTO vf
+JOIN EBD.GD_DIM_CLIENTE dc ON dc.CODIGOCLIENTE = vf.CODIGOCLIENTE
+WHERE vf.CODIGOFILIAL = :codFilial
+  AND vf.DATAFATURAMENTO BETWEEN TO_CHAR(:dtInicio,'YYYYMMDD')
+                            AND TO_CHAR(:dtFim,'YYYYMMDD')
+GROUP BY dc.RAMOATIVIDADE
+ORDER BY FATURAMENTO DESC NULLS LAST
+FETCH FIRST :topN ROWS ONLY
+```
 
-**Quando usar:** "top 10 vendedores", "melhores RCAs do mês", "ranking time
-do gerente X".
-
-**Views:** GD_FATO_VENDAFATURAMENTO + GD_DIM_RCA
-
-**Bind variables:** :userFilial, :dtInicio, :dtFim, :topN
-
-**SQL:**
-
-    SELECT
-        r.CODIGORCA,
-        r.RCA AS NOME_RCA,
-        r.SUPERVISOR,
-        r.GERENTE,
-        r.SITUACAO,
-        SUM(v.VALORTOTAL) AS FATURAMENTO,
-        COUNT(DISTINCT v.CODIGOCLIENTE) AS POSITIVACAO,
-        COUNT(DISTINCT v.NUMEROPEDIDO) AS QTD_PEDIDOS
-    FROM EBD.GD_FATO_VENDAFATURAMENTO v
-    JOIN EBD.GD_DIM_RCA r ON v.CODIGORCA = r.CODIGORCA
-    WHERE v.CODIGOFILIAL = :userFilial
-      AND v.DATAFATURAMENTO BETWEEN TO_CHAR(:dtInicio, 'YYYYMMDD')
-                                AND TO_CHAR(:dtFim, 'YYYYMMDD')
-    GROUP BY r.CODIGORCA, r.RCA, r.SUPERVISOR, r.GERENTE, r.SITUACAO
-    ORDER BY FATURAMENTO DESC NULLS LAST
-    FETCH FIRST :topN ROWS ONLY
-
-**Variações:**
-- Filtrar por gerente: adicionar AND r.CODIGOGERENTE = :codGerente
-- Apenas ativos: adicionar AND r.SITUACAO = 'ATIVO'
-
-**Latência esperada:** 2-5s
+**Validado:** top 15 ramos concentram 89,9% filial 06.
 
 ---
 
-## Template T104 — Inadimplência por Filial (ou RCA)
+## T103 — Top N RCAs Filial (validado vs ERP)
 
-**Descrição:** valor e quantidade de títulos inadimplentes, com dias de
-atraso.
+```sql
+SELECT
+    vf.CODIGORCA,
+    SUBSTR(NVL(dr.RCA,'?'),1,32)    AS RCA,
+    SUBSTR(NVL(dr.SUPERVISOR,'-'),1,25) AS SUPERVISOR,
+    SUM(vf.VALORTOTAL)                AS REAL,
+    COUNT(DISTINCT vf.CODIGOCLIENTE)  AS POSITIVACAO,
+    COUNT(DISTINCT vf.NUMEROPEDIDO)   AS PEDIDOS
+FROM EBD.GD_FATO_VENDAFATURAMENTO vf
+JOIN EBD.GD_DIM_RCA dr ON dr.CODIGORCA = vf.CODIGORCA
+WHERE vf.CODIGOFILIAL = :codFilial
+  AND vf.DATAFATURAMENTO BETWEEN TO_CHAR(:dtInicio,'YYYYMMDD')
+                            AND TO_CHAR(:dtFim,'YYYYMMDD')
+GROUP BY vf.CODIGORCA, dr.RCA, dr.SUPERVISOR
+ORDER BY REAL DESC NULLS LAST
+FETCH FIRST :topN ROWS ONLY
+```
 
-**Quando usar:** "qual a inadimplência?", "clientes em atraso", "valor
-vencido por RCA".
+**Validado:** Michelly Keytiane #1 Manaus R$ 2.130.804 = ERP centavo.
 
-**View principal:** GD_FATO_CONTASRECEBER
+---
 
-**Bind variables:** :userFilial
+## T104 — Inadimplência por Filial (rápido)
 
-**SQL (por filial — visão agregada):**
+```sql
+SELECT
+    :codFilial                                                  AS CODFILIAL,
+    COUNT(*)                                                    AS QTD_TITULOS,
+    COUNT(DISTINCT CODIGOCLIENTE)                               AS QTD_CLIENTES,
+    SUM(VALORTITULO)                                            AS CARTEIRA_ABERTA,
+    SUM(CASE WHEN INADIMPLENCIA = 1 THEN VALORTITULO ELSE 0 END) AS VALOR_INAD,
+    ROUND(SUM(CASE WHEN INADIMPLENCIA=1 THEN VALORTITULO ELSE 0 END)
+          / NULLIF(SUM(VALORTITULO),0) * 100, 2)                AS PCT_INAD
+FROM EBD.GD_FATO_CONTASRECEBER
+WHERE CODIGOFILIAL = :codFilial
+  AND DATAPAGAMENTO IS NULL
+```
 
-    SELECT
-        CODIGOFILIAL,
-        COUNT(*) AS QTD_TITULOS_VENCIDOS,
-        SUM(VALORTITULO) AS VALOR_TOTAL_VENCIDO,
-        AVG(DIASATRASO) AS MEDIA_DIAS_ATRASO,
-        SUM(CASE WHEN DIASATRASO BETWEEN 1 AND 30 THEN VALORTITULO END) AS VENCIDO_1_30,
-        SUM(CASE WHEN DIASATRASO BETWEEN 31 AND 60 THEN VALORTITULO END) AS VENCIDO_31_60,
-        SUM(CASE WHEN DIASATRASO BETWEEN 61 AND 90 THEN VALORTITULO END) AS VENCIDO_61_90,
-        SUM(CASE WHEN DIASATRASO > 90 THEN VALORTITULO END) AS VENCIDO_91_MAIS
+**Validado:** Manaus 9,3% inadimplência sobre R$ 21M carteira. Latência: 3,6s.
+
+---
+
+## T105 — Estoque + Cobertura por Produto
+
+```sql
+SELECT
+    dp.CODIGOPRODUTO,
+    SUBSTR(dp.PRODUTO,1,40)        AS PRODUTO,
+    SUBSTR(dp.FORNECEDOR,1,25)     AS FORNECEDOR,
+    ea.QUANTIDADELIVRE             AS ESTOQUE,
+    ea.VALORCMC                    AS VALORCMC_UNIT,
+    ea.QUANTIDADELIVRE * ea.VALORCMC AS VALOR_ESTOQUE,
+    -- Cobertura em dias (estoque / venda media diaria)
+    ROUND(ea.QUANTIDADELIVRE / NULLIF(
+        (SELECT SUM(vf.QUANTIDADE)
+         FROM EBD.GD_FATO_VENDAFATURAMENTO vf
+         WHERE vf.CODIGOPRODUTO = dp.CODIGOPRODUTO
+           AND vf.CODIGOFILIAL = ea.CODIGOFILIAL
+           AND vf.DATAFATURAMENTO BETWEEN
+               TO_CHAR(SYSDATE-30,'YYYYMMDD')
+               AND TO_CHAR(SYSDATE,'YYYYMMDD')) / 30, 0), 0) AS DIAS_COBERTURA
+FROM EBD.GD_FATO_ESTOQUEATUAL ea
+JOIN EBD.GD_DIM_PRODUTO dp ON dp.CODIGOPRODUTO = ea.CODIGOPRODUTO
+WHERE ea.CODIGOFILIAL = :codFilial
+  AND ea.QUANTIDADELIVRE > 0
+ORDER BY VALOR_ESTOQUE DESC NULLS LAST
+FETCH FIRST :topN ROWS ONLY
+```
+
+**Validado:** Nissin Lamen top em Manaus. Latência: 0,6s.
+
+---
+
+## T106 — Clientes Ativos por Filial
+
+```sql
+SELECT
+    dc.SITUACAO,
+    COUNT(*) AS QTD_CLIENTES,
+    SUM(vf.VALORTOTAL) AS FATURAMENTO_MES
+FROM EBD.GD_DIM_CLIENTE dc
+LEFT JOIN EBD.GD_FATO_VENDAFATURAMENTO vf
+    ON vf.CODIGOCLIENTE = dc.CODIGOCLIENTE
+   AND vf.CODIGOFILIAL = :codFilial
+   AND vf.DATAFATURAMENTO BETWEEN TO_CHAR(TRUNC(SYSDATE,'MM'),'YYYYMMDD')
+                              AND TO_CHAR(SYSDATE,'YYYYMMDD')
+WHERE dc.CODIGOFILIAL = :codFilial
+GROUP BY dc.SITUACAO
+ORDER BY QTD_CLIENTES DESC
+```
+
+**Validado:** 1.970 clientes ativos filial 06.
+
+---
+
+## T107 — Positivação por RCA
+
+```sql
+SELECT
+    vf.CODIGORCA,
+    SUBSTR(NVL(dr.RCA,'?'),1,32)             AS RCA,
+    COUNT(DISTINCT vf.CODIGOCLIENTE)         AS POSITIVACAO,
+    COUNT(DISTINCT vf.NUMEROPEDIDO)          AS PEDIDOS,
+    SUM(vf.VALORTOTAL)                       AS REAL
+FROM EBD.GD_FATO_VENDAFATURAMENTO vf
+JOIN EBD.GD_DIM_RCA dr ON dr.CODIGORCA = vf.CODIGORCA
+WHERE vf.CODIGOFILIAL = :codFilial
+  AND vf.DATAFATURAMENTO BETWEEN TO_CHAR(:dtInicio,'YYYYMMDD')
+                            AND TO_CHAR(:dtFim,'YYYYMMDD')
+GROUP BY vf.CODIGORCA, dr.RCA
+ORDER BY POSITIVACAO DESC NULLS LAST
+FETCH FIRST :topN ROWS ONLY
+```
+
+**Validado:** Rosangela #1 positivação Manaus (139 clientes/260 pedidos).
+
+---
+
+# Parte 2 — Templates Executivos BR (T200-T209)
+
+Visão consolidada Brasil. Todos com filtro **até este segundo** (`<= SYSDATE`).
+
+## ★ Bloco Líquido Oficial EBD (reutilizado em vários templates)
+
+```sql
+-- "Venda Liquida EBD" - formula oficial validada centavo
+WITH faturamento AS (
+    SELECT CODFILIAL, SUM(VLATEND) AS BRUTO
+    FROM EBD.VIEW_VENDAS_RESUMO_FATURAMENTO
+    WHERE DTSAIDA BETWEEN :dtInicio AND :dtFim
+      AND CONDVENDA = 1
+    GROUP BY CODFILIAL
+),
+dev_vinc AS (
+    SELECT CODFILIAL, SUM(VLDEVOLUCAO) AS DEV
+    FROM EBD.VIEW_DEVOL_RESUMO_FATURAMENTO
+    WHERE DTENT BETWEEN :dtInicio AND :dtFim
+      AND CONDVENDA = 1
+    GROUP BY CODFILIAL
+),
+dev_avul AS (
+    SELECT CODFILIAL, SUM(VLDEVOLUCAO) AS DEV
+    FROM EBD.VIEW_DEVOL_RESUMO_FATURAVULSA
+    WHERE DTENT BETWEEN :dtInicio AND :dtFim
+    GROUP BY CODFILIAL
+)
+SELECT
+    fa.CODFILIAL,
+    fa.BRUTO,
+    NVL(dv.DEV,0) + NVL(da.DEV,0)               AS DEV_TOTAL,
+    fa.BRUTO - NVL(dv.DEV,0) - NVL(da.DEV,0)    AS LIQUIDO
+FROM faturamento fa
+LEFT JOIN dev_vinc dv ON dv.CODFILIAL = fa.CODFILIAL
+LEFT JOIN dev_avul da ON da.CODFILIAL = fa.CODFILIAL
+```
+
+**Validado:** filial 06, 01-19/05/2026: MCP R$ 9.412.716,30 = BI EBD R$ 9.412.716,30 (centavo). Latência: 1,4s.
+
+---
+
+## T200 — Faturamento Brasil consolidado
+
+Reusa bloco líquido oficial; SOMA todas filiais; junta meta nacional (`TIPOMETA='FL'`).
+
+```sql
+WITH liq_por_filial AS (
+    -- bloco líquido oficial (sem WHERE CODFILIAL)
+    -- ... (ver bloco acima) ...
+)
+SELECT
+    SUM(BRUTO)       AS FATURADO_BR,
+    SUM(DEV_TOTAL)   AS DEVOLUCAO_BR,
+    SUM(LIQUIDO)     AS LIQUIDO_BR,
+    (SELECT SUM(VLVENDAPREV) FROM EBD.PCMETA
+     WHERE TIPOMETA='FL' AND TRUNC(DATA,'MM')=TRUNC(SYSDATE,'MM')) AS META_BR
+FROM liq_por_filial
+```
+
+**Validado:** R$ 120.699.647 líquido / 36,23% meta R$ 333.173.015 (até 20/05 16:31). Latência: 24,6s.
+
+---
+
+## T201 — Top 10 Filiais BR
+
+Bloco líquido + JOIN PCFILIAL pra fantasia + meta `TIPOMETA='FL'` por filial.
+
+**Validado:** EBD DUQUE #1 R$ 15,1M / 33,3% meta. Soma top 10 ≈ R$ 91,6M (76% do BR).
+
+---
+
+## T202 — Top Regionais BR
+
+Mapping regional **hardcoded** (validado vs `CLASSIFICACAO` defasada):
+01→NO2 | 02→SP1 | 03→NE2 | 04→NE1 | 05→RJ2 | 06→NO1 | 07→NO2 | 08→NO1
+09→NE2 | 10→RJ1 | 11→NO1 | 12→NE1 | 13→RJ1 | 14→RJ2 | 15→SP2 | 16→SP1
+18→SP2 | 21→NE2 | 52→NE3 | 53→NE3
+
+**Validado:** RJ1 #1 R$ 23M (São Gonçalo + Taquara).
+
+---
+
+## T203 — Top GCs (Gerentes Comerciais) BR
+
+```sql
+WITH vendas_gc AS (
+    SELECT dr.CODIGOGERENTE, MAX(dr.GERENTE) AS GERENTE,
+           SUM(vf.VALORTOTAL) AS REAL
+    FROM EBD.GD_FATO_VENDAFATURAMENTO vf
+    JOIN EBD.GD_DIM_RCA dr ON vf.CODIGORCA = dr.CODIGORCA
+    WHERE vf.DATAFATURAMENTO BETWEEN TO_CHAR(TRUNC(SYSDATE,'MM'),'YYYYMMDD')
+                                 AND TO_CHAR(SYSDATE,'YYYYMMDD')
+      AND dr.CODIGOGERENTE IS NOT NULL
+    GROUP BY dr.CODIGOGERENTE
+),
+meta_gc AS (
+    SELECT CODIGO AS CODIGOGERENTE, SUM(VLVENDAPREV) AS META
+    FROM EBD.PCMETA
+    WHERE TIPOMETA='GC' AND TRUNC(DATA,'MM')=TRUNC(SYSDATE,'MM')
+    GROUP BY CODIGO
+)
+SELECT vg.CODIGOGERENTE, SUBSTR(vg.GERENTE,1,35) AS GERENTE,
+       vg.REAL, NVL(mg.META,0) AS META,
+       ROUND(vg.REAL/NULLIF(mg.META,0)*100,2) AS PCT_META
+FROM vendas_gc vg LEFT JOIN meta_gc mg ON mg.CODIGOGERENTE=vg.CODIGOGERENTE
+ORDER BY vg.REAL DESC NULLS LAST FETCH FIRST 10 ROWS ONLY
+```
+
+**Validado:** Marcus Vinicius #1 R$ 15,5M / 40,6% meta.
+
+---
+
+## T204 — Top Supervisores BR
+
+Mesma estrutura T203 com `TIPOMETA='SV'` e `CODIGOSUPERVISOR`.
+
+**Validado:** Itamar Pinho #1 R$ 5,19M. Pedro Raesky 113,8% meta (stourou).
+
+---
+
+## T205 — Top RCAs BR
+
+Sem meta de RCA por enquanto (pendente validar `TIPOMETA='R'`).
+
+```sql
+SELECT vf.CODIGORCA, SUBSTR(dr.RCA,1,35) AS NOME_RCA,
+       SUBSTR(dr.SUPERVISOR,1,25) AS SUPERVISOR,
+       SUM(vf.VALORTOTAL) AS REAL,
+       COUNT(DISTINCT vf.CODIGOCLIENTE) AS POSITIVACAO,
+       COUNT(DISTINCT vf.NUMEROPEDIDO) AS PEDIDOS
+FROM EBD.GD_FATO_VENDAFATURAMENTO vf
+JOIN EBD.GD_DIM_RCA dr ON dr.CODIGORCA = vf.CODIGORCA
+WHERE vf.DATAFATURAMENTO BETWEEN TO_CHAR(TRUNC(SYSDATE,'MM'),'YYYYMMDD')
+                             AND TO_CHAR(SYSDATE,'YYYYMMDD')
+GROUP BY vf.CODIGORCA, dr.RCA, dr.SUPERVISOR
+ORDER BY REAL DESC NULLS LAST FETCH FIRST 10 ROWS ONLY
+```
+
+**Validado:** Michelly Keytiane #1 BR (também #1 Manaus — bate cruzado).
+
+---
+
+## T206 v2 — Top Fornecedores BR (✅ Pandurata bate BI)
+
+**Versão FINAL** após descoberta do CODFORNECPRINC. Estrutura idêntica ao T101 v2 sem o filtro de filial. Validado 20/05: Pandurata 47,8% meta = exatamente o BI.
+
+```sql
+-- Identica ao T101 v2, SEM "AND v.CODFILIAL = :codFilial"
+-- e SEM "AND CODFILIAL = :codFilial" na meta_forn
+-- (ver T101 v2 acima como template-base)
+```
+
+**Validado:** Nissin #1 R$ 16,5M / 31,2% meta. Top 10 = 74% do BR.
+
+---
+
+## T207 — Top Clientes BR
+
+```sql
+WITH vendas_cli AS (
+    SELECT vf.CODIGOCLIENTE,
+           SUM(vf.VALORTOTAL) AS REAL,
+           COUNT(DISTINCT vf.NUMEROTRANSVENDA) AS QTD_NOTAS,
+           COUNT(DISTINCT vf.CODIGOFILIAL) AS QTD_FILIAIS
+    FROM EBD.GD_FATO_VENDAFATURAMENTO vf
+    WHERE vf.DATAFATURAMENTO BETWEEN TO_CHAR(TRUNC(SYSDATE,'MM'),'YYYYMMDD')
+                                 AND TO_CHAR(SYSDATE,'YYYYMMDD')
+    GROUP BY vf.CODIGOCLIENTE
+)
+SELECT vc.CODIGOCLIENTE, SUBSTR(NVL(dc.CLIENTE,'?'),1,40) AS CLIENTE,
+       SUBSTR(NVL(dc.RAMOATIVIDADE,'-'),1,25) AS RAMO,
+       NVL(dc.CIDADE,'-') AS CIDADE, NVL(dc.UF,'?') AS UF,
+       vc.QTD_NOTAS, vc.QTD_FILIAIS, vc.REAL
+FROM vendas_cli vc
+LEFT JOIN EBD.GD_DIM_CLIENTE dc ON dc.CODIGOCLIENTE = vc.CODIGOCLIENTE
+ORDER BY vc.REAL DESC NULLS LAST FETCH FIRST 10 ROWS ONLY
+```
+
+**Validado:** SERVI SUPERMERCADOS #1 R$ 1,63M. Top 10 = 7% BR (atacado MUITO pulverizado).
+
+---
+
+## T208 — Inadimplência BR (Top 10 Filiais)
+
+```sql
+WITH inad_filial AS (
+    SELECT CODIGOFILIAL,
+           COUNT(*) AS QTD_TITULOS,
+           COUNT(DISTINCT CODIGOCLIENTE) AS QTD_CLIENTES,
+           SUM(VALORTITULO) AS CARTEIRA_ABERTA,
+           SUM(CASE WHEN INADIMPLENCIA=1 THEN VALORTITULO ELSE 0 END) AS INAD
     FROM EBD.GD_FATO_CONTASRECEBER
-    WHERE CODIGOFILIAL = :userFilial
-      AND INADIMPLENCIA = 1
+    WHERE DATAPAGAMENTO IS NULL
     GROUP BY CODIGOFILIAL
+)
+SELECT ip.CODIGOFILIAL, SUBSTR(NVL(pf.FANTASIA,'?'),1,28) AS FILIAL,
+       ip.QTD_TITULOS, ip.QTD_CLIENTES,
+       ip.CARTEIRA_ABERTA, ip.INAD,
+       ROUND(ip.INAD / NULLIF(ip.CARTEIRA_ABERTA,0) * 100, 2) AS PCT_INAD
+FROM inad_filial ip
+LEFT JOIN EBD.PCFILIAL pf ON pf.CODIGO = ip.CODIGOFILIAL
+ORDER BY ip.INAD DESC NULLS LAST FETCH FIRST 10 ROWS ONLY
+```
 
-**SQL (por RCA — ranking de quem tem mais inadimplência):**
-
-    SELECT
-        r.CODIGORCA,
-        r.RCA AS NOME_RCA,
-        r.GERENTE,
-        COUNT(*) AS QTD_TITULOS_VENCIDOS,
-        SUM(cr.VALORTITULO) AS VALOR_VENCIDO,
-        AVG(cr.DIASATRASO) AS MEDIA_DIAS_ATRASO
-    FROM EBD.GD_FATO_CONTASRECEBER cr
-    JOIN EBD.GD_DIM_RCA r ON cr.CODIGORCA = r.CODIGORCA
-    WHERE cr.CODIGOFILIAL = :userFilial
-      AND cr.INADIMPLENCIA = 1
-    GROUP BY r.CODIGORCA, r.RCA, r.GERENTE
-    ORDER BY VALOR_VENCIDO DESC NULLS LAST
-    FETCH FIRST :topN ROWS ONLY
-
-**Atenção:** GD_FATO_CONTASRECEBER já exclui códigos especiais (DEVP, DEVT,
-BNF, etc) na view. Não precisamos filtrar manualmente.
-
-**Latência esperada:** 1-3s
+**Validado:** EBD FORTALEZA #1 R$ 6,8M (26,6%!) — alerta crítico. Boa Vista 25,4%.
 
 ---
 
-## Template T105 — Estoque + Cobertura por Produto
+## T209 — Top Produtos BR
 
-**Descrição:** posição de estoque por produto, com cobertura em dias e
-classificação de giro.
+```sql
+WITH dim_prod_dedup AS (
+    SELECT CODIGOPRODUTO, MAX(PRODUTO) AS PRODUTO, MAX(FORNECEDOR) AS FORNECEDOR
+    FROM EBD.GD_DIM_PRODUTO GROUP BY CODIGOPRODUTO
+),
+vendas_prod AS (
+    SELECT vf.CODIGOPRODUTO, SUM(vf.VALORTOTAL) AS REAL,
+           SUM(vf.QUANTIDADE) AS QTD,
+           COUNT(DISTINCT vf.CODIGOFILIAL) AS QTD_FILIAIS,
+           COUNT(DISTINCT vf.CODIGOCLIENTE) AS QTD_CLIENTES
+    FROM EBD.GD_FATO_VENDAFATURAMENTO vf
+    WHERE vf.DATAFATURAMENTO BETWEEN TO_CHAR(TRUNC(SYSDATE,'MM'),'YYYYMMDD')
+                                 AND TO_CHAR(SYSDATE,'YYYYMMDD')
+    GROUP BY vf.CODIGOPRODUTO
+)
+SELECT vp.CODIGOPRODUTO, SUBSTR(NVL(dp.PRODUTO,'?'),1,40) AS PRODUTO,
+       SUBSTR(NVL(dp.FORNECEDOR,'?'),1,25) AS FORNECEDOR,
+       vp.QTD, vp.REAL, vp.QTD_FILIAIS, vp.QTD_CLIENTES
+FROM vendas_prod vp
+LEFT JOIN dim_prod_dedup dp ON dp.CODIGOPRODUTO = vp.CODIGOPRODUTO
+ORDER BY vp.REAL DESC NULLS LAST FETCH FIRST 10 ROWS ONLY
+```
 
-**Quando usar:** "qual o estoque?", "produtos com alto estoque", "ruptura
-de estoque", "dias de cobertura".
-
-**Views:** GD_FATO_ESTOQUEATUAL + GD_DIM_PRODUTO + GD_DIM_ESTOQUEATUAL
-
-**Bind variables:** :userFilial
-
-**SQL (visão geral por produto, top N por valor de estoque):**
-
-    SELECT
-        p.CODIGOPRODUTO,
-        p.PRODUTO,
-        p.FORNECEDOR,
-        p.LINHAPRODUTO AS FAMILIA,
-        e.QUANTIDADEGERENCIAL AS QT_ESTOQUE,
-        e.GIRODIA AS GIRO_DIARIO,
-        ed.NIVELGIRODIA,
-        ed.ESCALADIASESTOQUE AS COBERTURA_FAIXA,
-        CASE WHEN e.GIRODIA > 0
-             THEN ROUND(e.QUANTIDADEGERENCIAL / e.GIRODIA, 1)
-             ELSE NULL END AS DIAS_COBERTURA,
-        e.DIASSEMVENDA,
-        e.CUSTOULTIMAENTRADA,
-        e.QUANTIDADEGERENCIAL * e.CUSTOFINANCEIROUNITARIO AS VALOR_ESTOQUE
-    FROM EBD.GD_FATO_ESTOQUEATUAL e
-    JOIN EBD.GD_DIM_PRODUTO p ON e.CODIGOPRODUTO = p.CODIGOPRODUTO
-    JOIN EBD.GD_DIM_ESTOQUEATUAL ed ON e.CODIGOPRODUTO = ed.CODIGOPRODUTO
-                                   AND e.CODIGOFILIAL = ed.CODIGOFILIAL
-    WHERE e.CODIGOFILIAL = :userFilial
-      AND e.QUANTIDADEGERENCIAL > 0
-    ORDER BY VALOR_ESTOQUE DESC NULLS LAST
-    FETCH FIRST :topN ROWS ONLY
-
-**Variações:**
-- Produtos com ruptura: trocar > 0 por = 0 e remover ORDER BY
-- Excesso de estoque: WHERE ed.ESCALADIASESTOQUE IN ('DE 30 A 60', 'ACIMA DE 60')
-- Sem giro: WHERE ed.NIVELGIRODIA = 'SEM GIRO'
-
-**Latência esperada:** 2-5s
+**Validado:** NISSIN LAMEN GALINHA 85GR #1 R$ 4,8M (4.830 clientes BR).
 
 ---
 
-## Template T106 — Clientes Ativos vs Inativos
+# Parte 3 — Pendências (Templates planejados, não validados ainda)
 
-**Descrição:** segmentação de clientes da filial em ATIVO/INATIVO/EXCLUÍDO
-com faixas de inatividade.
+## Validação pendente
 
-**Quando usar:** "quantos clientes ativos?", "clientes sumidos", "base de
-clientes da filial".
+- [ ] TIPOMETA='R' (meta de RCA individual via `PCMETA WHERE TIPOMETA='R' AND CODIGO=CODUSUR`)
+- [ ] PCPEDC.POSICAO — mapear estados (liberado/preso financeiro/preso comercial/digitação)
 
-**View principal:** GD_DIM_CLIENTE
+## Templates a desenhar
 
-**Bind variables:** :userFilial (opcional — view não tem CODFILIAL direto,
-filtra por RCA)
+| ID | Pergunta | Quem usa |
+|---|---|---|
+| T110 | Pedidos abertos por filial | Diretor, GN |
+| T111 | Top 10 pedidos travados financeiro | Diretor, Financeiro |
+| T112 | Top 10 pedidos travados comercial | Gerente, Supervisor |
+| T113 | Top 10 RCAs com pipeline | Supervisor, Gerente |
+| T114 | Top 10 clientes com pedido aberto | Comercial |
+| T210 | Real + Pedido por filial BR | Diretor |
+| T211 | Real + Pedido por fornecedor BR | Comercial Nacional |
+| T212 | Top 10 pedidos travados nacional | Diretor |
 
-**SQL (segmentação geral):**
-
-    SELECT
-        STATUS,
-        DIASINATIVOS,
-        COUNT(*) AS QTD_CLIENTES
-    FROM EBD.GD_DIM_CLIENTE
-    GROUP BY STATUS, DIASINATIVOS
-    ORDER BY STATUS, DIASINATIVOS
-
-**Atenção:** GD_DIM_CLIENTE NÃO tem coluna CODFILIAL direta. Pra restringir
-a uma filial, joinar com últimas vendas:
-
-**SQL (clientes ativos da filial — via última venda):**
-
-    SELECT
-        c.CODIGOCLIENTE,
-        c.CLIENTE,
-        c.NOMEFANTASIA,
-        c.RAMOATIVIDADE,
-        c.CLASSIFICACAO AS VIP,
-        c.STATUS,
-        c.DIASINATIVOS,
-        c.DTULTCOMP
-    FROM EBD.GD_DIM_CLIENTE c
-    WHERE c.STATUS = 'ATIVO'
-      AND EXISTS (
-          SELECT 1 FROM EBD.GD_FATO_VENDAFATURAMENTO v
-          WHERE v.CODIGOCLIENTE = c.CODIGOCLIENTE
-            AND v.CODIGOFILIAL = :userFilial
-            AND v.DATAFATURAMENTO >= TO_CHAR(SYSDATE - 90, 'YYYYMMDD')
-      )
-
-**Latência esperada:** 5-15s (depende do volume — base tem 203k clientes)
-
----
-
-## Template T107 — Positivação de RCA
-
-**Descrição:** quantos clientes únicos cada vendedor faturou no período
-(positivação).
-
-**Quando usar:** "positivação dos vendedores", "quantos clientes o RCA X
-atendeu", "cobertura da carteira".
-
-**Views:** GD_FATO_VENDAFATURAMENTO + GD_DIM_RCA
-
-**Bind variables:** :userFilial, :dtInicio, :dtFim
-
-**SQL:**
-
-    SELECT
-        r.CODIGORCA,
-        r.RCA AS NOME_RCA,
-        r.SUPERVISOR,
-        r.GERENTE,
-        COUNT(DISTINCT v.CODIGOCLIENTE) AS POSITIVACAO,
-        SUM(v.VALORTOTAL) AS FATURAMENTO,
-        SUM(v.VALORTOTAL) / NULLIF(COUNT(DISTINCT v.CODIGOCLIENTE), 0) AS TICKET_MEDIO
-    FROM EBD.GD_FATO_VENDAFATURAMENTO v
-    JOIN EBD.GD_DIM_RCA r ON v.CODIGORCA = r.CODIGORCA
-    WHERE v.CODIGOFILIAL = :userFilial
-      AND v.DATAFATURAMENTO BETWEEN TO_CHAR(:dtInicio, 'YYYYMMDD')
-                                AND TO_CHAR(:dtFim, 'YYYYMMDD')
-      AND r.SITUACAO = 'ATIVO'
-    GROUP BY r.CODIGORCA, r.RCA, r.SUPERVISOR, r.GERENTE
-    HAVING COUNT(DISTINCT v.CODIGOCLIENTE) > 0
-    ORDER BY POSITIVACAO DESC
-
-**Variações:**
-- Apenas time de um gerente: AND r.CODIGOGERENTE = :codGerente
-- Comparar com mês anterior: query duplicada com UNION ALL e label de período
-
-**Latência esperada:** 2-5s
-
----
-
-## Templates a criar (backlog)
-
-Conforme avançarmos, adicionar templates para:
-
-- [ ] **T108** — Tendência vs Meta do mês corrente (projeção fim do mês)
-- [ ] **T109** — Curva ABC de clientes (top 20% que fazem 80% do faturamento)
-- [ ] **T110** — Faturamento por Linha/Família de Produto
-- [ ] **T111** — Margem por produto (Real - Custo) — depende de validar custo
-- [ ] **T112** — Devoluções no período (% vs faturamento bruto)
-- [ ] **T113** — Pedidos em aberto (POSICAO L/M) para projeção Real+Ped
-- [ ] **T114** — Comparativo mensal (12 meses) por filial
-- [ ] **T115** — Análise de Bonificação (CONDVENDA 5,6)
-- [ ] **T116** — Clientes novos cadastrados no período
-- [ ] **T117** — Faturamento Regional (com IN de CODFILIAIS)
-- [ ] **T118** — Carteira do RCA — clientes que NÃO compraram no período
-- [ ] **T119** — Análise de Mix (produtos distintos por cliente)
-- [ ] **T120** — DRE consolidado da filial (usar GD_FATO_DRE_*)
-
----
-
-## Notas de implementação
-
-### Quando o agente DEVE usar template vs gerar SQL
-
-1. **Sempre** consultar este arquivo primeiro
-2. Se houver template que cobre 80%+ do pedido → adaptar
-3. Se nenhum template cobre → gerar SQL novo, validar via SQL Guard, e
-   **propor adicionar como template** se útil
-4. **Nunca** copiar SQL antigo sem entender — Oracle Winthor tem nuances
-
-### Por que TODOS os templates usam views GD_*
-
-- **Performance:** views já têm joins otimizados
-- **Manutenção:** se a regra de negócio mudar, muda na view (não no agente)
-- **Confiabilidade:** views já aplicam exclusões corretas (CONDVENDA, códigos
-  de cobrança especiais, etc) — agente não precisa replicar
-- **Segurança:** views podem ter controle de acesso por coluna (futuro
-  usuário de produção)
-
-### Validação pendente
-
-Os templates desta versão são **rascunhos sólidos baseados nas definições
-das views**, mas ainda **não foram executados no Oracle real**. Próxima
-sessão: rodar T100 e T103 (mais simples) com filial 01 (MATRIZ) pra validar
-sintaxe e latência. Conforme validados, marcar com "✅ Validado em
-YYYY-MM-DD" no cabeçalho do template.
