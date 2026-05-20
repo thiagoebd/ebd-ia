@@ -692,3 +692,117 @@ Variantes (T111, T112, T113, T114):
 
 **Validado 20/05:** SERVI SUPERMERCADOS top 4 (R$ 196K x 3 + R$ 96K), 79,2% do valor travado é "Bloqueio Manual". Latência: 0,3s (rápido).
 
+
+---
+
+# Parte 5 — Pedidos Single-Filial (T110-T114) — descobertos 20/05/2026
+
+Todos validados em filial 06 (Manaus). Performance sub-segundo, prontos pra
+uso conversacional em produção sem cache. Substituir `:codFilial` por filial
+desejada.
+
+## T110 — Pedidos abertos por POSICAO (single-filial)
+
+"Quanto tenho de pedido pra faturar na minha filial?"
+
+```sql
+SELECT POSICAO,
+       COUNT(*) AS QTD_PEDIDOS,
+       SUM(NVL(VLTOTAL,0)) AS VL_TOTAL,
+       ROUND(AVG(SYSDATE - DATA), 1) AS DIAS_MEDIO
+FROM EBD.PCPEDC
+WHERE CODFILIAL = :codFilial
+  AND DATA BETWEEN TRUNC(SYSDATE,'MM') AND SYSDATE
+  AND POSICAO IN ('L','B','M','P')
+GROUP BY POSICAO
+ORDER BY VL_TOTAL DESC NULLS LAST
+```
+
+**Validado Manaus:** R$ 1,31M abertos. POS='P' com 8,3 dias médio = alerta operacional. Latência: 25ms.
+
+## T111 — Top 10 pedidos travados FINANCEIRO (single-filial)
+
+"Financeiro: o que liberar hoje?" — filtra por `m.TIPO = 1`
+
+```sql
+SELECT ped.NUMPED,
+       SUBSTR(NVL(dc.CLIENTE,'?'),1,30) AS CLIENTE,
+       SUBSTR(NVL(dr.RCA,'?'),1,22)     AS RCA,
+       TO_CHAR(ped.DATA,'DD/MM') AS DT,
+       ROUND(SYSDATE - ped.DATA, 0) AS DIAS,
+       NVL(ped.VLTOTAL,0) AS VL,
+       SUBSTR(NVL(m.DESCRICAO,'(s/motivo)'),1,32) AS MOTIVO,
+       m.ORIGEM
+FROM EBD.PCPEDC ped
+LEFT JOIN EBD.GD_DIM_CLIENTE dc ON dc.CODIGOCLIENTE = ped.CODCLI
+LEFT JOIN EBD.GD_DIM_RCA dr ON dr.CODIGORCA = ped.CODUSUR
+LEFT JOIN EBD.PCMOTBLOQUEIO m ON m.CODMOTIVO = ped.CODMOTBLOQUEIO
+WHERE ped.CODFILIAL = :codFilial
+  AND ped.POSICAO = 'B'
+  AND ped.DATA BETWEEN TRUNC(SYSDATE,'MM') AND SYSDATE
+  AND m.TIPO = 1   -- bloqueio FINANCEIRO/CREDITO
+ORDER BY ped.VLTOTAL DESC NULLS LAST
+FETCH FIRST 10 ROWS ONLY
+```
+
+**Validado Manaus:** "Limite de crédito excedido" domina (4 de 6 pedidos). Latência: 208ms.
+
+## T112 — Top 10 pedidos travados COMERCIAL/OPER (single-filial)
+
+"Comercial/operacional: o que destravar?" — filtra por `m.TIPO = 2`
+
+```sql
+-- Idêntica a T111 com:  AND m.TIPO = 2
+```
+
+**Validado Manaus:** 9 de 9 pedidos = "Bonificação não autorizada". Padrão de treinamento RCA. Latência: 5ms.
+
+## T113 — Top 10 RCAs com pipeline POS='L' (single-filial)
+
+"Quem tem mais pra faturar amanhã?"
+
+```sql
+SELECT ped.CODUSUR,
+       SUBSTR(NVL(dr.RCA,'?'),1,30) AS RCA,
+       SUBSTR(NVL(dr.SUPERVISOR,'-'),1,25) AS SUPERVISOR,
+       COUNT(*) AS QTD_PEDIDOS,
+       COUNT(DISTINCT ped.CODCLI) AS QTD_CLIENTES,
+       SUM(NVL(ped.VLTOTAL,0)) AS VL_PIPELINE,
+       ROUND(AVG(NVL(ped.VLTOTAL,0)),2) AS TICKET_MEDIO
+FROM EBD.PCPEDC ped
+LEFT JOIN EBD.GD_DIM_RCA dr ON dr.CODIGORCA = ped.CODUSUR
+WHERE ped.CODFILIAL = :codFilial
+  AND ped.POSICAO = 'L'
+  AND ped.DATA BETWEEN TRUNC(SYSDATE,'MM') AND SYSDATE
+GROUP BY ped.CODUSUR, dr.RCA, dr.SUPERVISOR
+ORDER BY VL_PIPELINE DESC NULLS LAST
+FETCH FIRST 10 ROWS ONLY
+```
+
+**Validado Manaus:** Marconde Moraes #1 R$ 43,8K em 7 pedidos. Insight: Top RCAs em faturamento NÃO aparecem aqui (eles giram rápido). Latência: 32ms.
+
+## T114 — Top 10 clientes com pedido em aberto (single-filial)
+
+"Quais clientes acompanhar?"
+
+```sql
+SELECT ped.CODCLI,
+       SUBSTR(NVL(dc.CLIENTE,'?'),1,32) AS CLIENTE,
+       SUBSTR(NVL(dc.RAMOATIVIDADE,'-'),1,20) AS RAMO,
+       COUNT(*) AS QTD_PEDIDOS,
+       SUM(CASE WHEN ped.POSICAO='L' THEN NVL(ped.VLTOTAL,0) ELSE 0 END) AS VL_LIBERADO,
+       SUM(CASE WHEN ped.POSICAO='B' THEN NVL(ped.VLTOTAL,0) ELSE 0 END) AS VL_BLOQ,
+       SUM(CASE WHEN ped.POSICAO IN ('M','P') THEN NVL(ped.VLTOTAL,0) ELSE 0 END) AS VL_PROC,
+       SUM(NVL(ped.VLTOTAL,0)) AS VL_TOTAL_ABERTO
+FROM EBD.PCPEDC ped
+LEFT JOIN EBD.GD_DIM_CLIENTE dc ON dc.CODIGOCLIENTE = ped.CODCLI
+WHERE ped.CODFILIAL = :codFilial
+  AND ped.POSICAO IN ('L','B','M','P')
+  AND ped.DATA BETWEEN TRUNC(SYSDATE,'MM') AND SYSDATE
+GROUP BY ped.CODCLI, dc.CLIENTE, dc.RAMOATIVIDADE
+ORDER BY VL_TOTAL_ABERTO DESC NULLS LAST
+FETCH FIRST 10 ROWS ONLY
+```
+
+**Validado Manaus:** Top 10 100% B2B (atacado/super). C L A COMERCIO #1 R$ 28K integralmente bloqueado. Latência: 552ms.
+
