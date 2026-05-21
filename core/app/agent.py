@@ -1,11 +1,11 @@
 """Loop principal do agente EBD.ia.
 
-Recebe input do usuario, chama Claude Opus 4.7, executa tools conforme
-o modelo decidir, devolve resposta final. Suporta multi-turn (tool_use
-em loop ate Claude responder sem mais tool_use).
+Otimizacoes:
+- Modelo: Sonnet 4.6 (5x mais barato que Opus 4.7)
+- Prompt caching no system prompt (-80% custo, ttl 5min default)
+- Historico limitado a ultimas 6 trocas pra reduzir tokens
 """
 import asyncio
-from typing import AsyncIterator
 from anthropic import AsyncAnthropic
 from app.config import settings
 from app.system_prompt import build_system_prompt
@@ -16,14 +16,15 @@ from app.tools.oracle_bridge import (
 )
 
 
-# Inicializa cliente Claude (lazy: 1 vez por processo)
 _client = AsyncAnthropic(api_key=settings.anthropic_api_key)
 _system_prompt = build_system_prompt()
 _tools = [ORACLE_QUERY_TOOL]
 
+# Limite de historico (em pares user/assistant) — evita inflar tokens em chats longos
+MAX_HISTORY_PAIRS = 6  # = 12 mensagens (6 perguntas + 6 respostas)
+
 
 async def _run_tool(tool_name: str, tool_input: dict) -> str:
-    """Despacha tool call do Claude pra implementacao real."""
     if tool_name == "oracle_query":
         sql = tool_input.get("sql", "")
         max_rows = tool_input.get("max_rows", 100)
@@ -32,29 +33,39 @@ async def _run_tool(tool_name: str, tool_input: dict) -> str:
     return f"ERRO: tool '{tool_name}' nao implementada"
 
 
+def _trim_history(messages: list, max_pairs: int = MAX_HISTORY_PAIRS) -> list:
+    """Mantem apenas ultimas N trocas (preserva inicio se quiser system context)."""
+    if len(messages) <= max_pairs * 2:
+        return messages
+    # Pega ultimas N * 2 mensagens
+    return messages[-(max_pairs * 2):]
+
+
 async def run_turn(
     user_message: str,
     conversation_history: list | None = None,
     user_role: str = "admin",
     user_filiais: str = "*",
 ) -> dict:
-    """Roda um turn completo do agente.
-
-    Args:
-        user_message: input do usuario
-        conversation_history: lista de mensagens anteriores (multi-turn)
-        user_role: papel do usuario (vendedor|gerente|supervisor|diretor|admin)
-        user_filiais: filiais permitidas (CSV ou "*")
-
-    Returns:
-        {"text": resposta_final, "tool_calls": [...], "iterations": N, "history": [...]}
-    """
+    """Roda um turn do agente."""
     messages = list(conversation_history or [])
+    messages = _trim_history(messages)
     messages.append({"role": "user", "content": user_message})
 
-    # Contexto do usuario apendado ao system prompt
-    ctx_suffix = f"\n\n## CONTEXTO DA CONVERSA ATUAL\n- Role: {user_role}\n- Filiais permitidas: {user_filiais}\n"
-    system_full = _system_prompt + ctx_suffix
+    ctx_suffix = (
+        f"\n\n## CONTEXTO DA CONVERSA ATUAL\n"
+        f"- Role: {user_role}\n"
+        f"- Filiais permitidas: {user_filiais}\n"
+    )
+
+    # Prompt caching: marca system prompt como cacheavel (vale 5min, depois renova)
+    system_blocks = [
+        {
+            "type": "text",
+            "text": _system_prompt + ctx_suffix,
+            "cache_control": {"type": "ephemeral"},
+        }
+    ]
 
     tool_calls_log = []
     iterations = 0
@@ -65,15 +76,13 @@ async def run_turn(
         response = await _client.messages.create(
             model=settings.claude_model,
             max_tokens=settings.max_tokens,
-            system=system_full,
+            system=system_blocks,
             tools=_tools,
             messages=messages,
         )
 
-        # Acumula resposta do assistente no historico
         messages.append({"role": "assistant", "content": response.content})
 
-        # Se nao tem tool_use, terminou
         if response.stop_reason != "tool_use":
             text_blocks = [b.text for b in response.content if b.type == "text"]
             final_text = "\n".join(text_blocks)
@@ -83,9 +92,14 @@ async def run_turn(
                 "iterations": iterations,
                 "history": messages,
                 "stop_reason": response.stop_reason,
+                "usage": {
+                    "input_tokens": response.usage.input_tokens,
+                    "output_tokens": response.usage.output_tokens,
+                    "cache_creation_input_tokens": getattr(response.usage, "cache_creation_input_tokens", 0),
+                    "cache_read_input_tokens": getattr(response.usage, "cache_read_input_tokens", 0),
+                },
             }
 
-        # Executa cada tool_use que veio
         tool_results = []
         for block in response.content:
             if block.type == "tool_use":
@@ -101,37 +115,31 @@ async def run_turn(
                     "content": result_str,
                 })
 
-        # Devolve resultados de tools pro proximo turn
         messages.append({"role": "user", "content": tool_results})
 
-    # Atingiu max_iterations
     return {
         "text": "[Agent atingiu limite de iteracoes sem resposta final]",
         "tool_calls": tool_calls_log,
         "iterations": iterations,
         "history": messages,
         "stop_reason": "max_iterations",
+        "usage": {},
     }
 
 
-# Smoke test
 if __name__ == "__main__":
     async def main():
         print(f"Modelo: {settings.claude_model}")
-        print(f"System prompt: {len(_system_prompt):,} chars")
-        print(f"Tools: {[t['name'] for t in _tools]}")
+        print(f"System prompt: {len(_system_prompt):,} chars (com prompt caching ativo)")
         print()
-        question = "Quanto faturou a filial Manaus hoje? Use oracle_query."
-        print(f">>> Pergunta: {question}")
-        print()
-
+        question = "Quanto faturou Manaus hoje?"
+        print(f">>> {question}")
         result = await run_turn(question)
-        print(f"<<< Resposta ({result['iterations']} iteracoes, {len(result['tool_calls'])} tool calls):")
-        print(result["text"])
         print()
-        print("Tool calls executadas:")
-        for tc in result["tool_calls"]:
-            sql = tc["input"].get("sql", "")[:200]
-            print(f"  - {tc['name']}: {sql}")
+        print(f"<<< {result['text']}")
+        u = result.get("usage", {})
+        print()
+        print(f"Tokens: input={u.get('input_tokens',0):,} | output={u.get('output_tokens',0):,}")
+        print(f"Cache:  criado={u.get('cache_creation_input_tokens',0):,} | lido={u.get('cache_read_input_tokens',0):,}")
 
     asyncio.run(main())
