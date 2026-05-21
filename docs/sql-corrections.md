@@ -894,3 +894,20 @@ WINDOWS = {
 Alexandre Sebastiao tem 2 codigos diferentes (3119 e 3726) com mesmo nome.
 Cod 3119 com 0 dentro/84 fora (100%) parece fantasma ativo. Investigar.
 
+
+---
+
+## #52 — Como subir o MCP Oracle (entry-point correto)
+
+```bash
+cd ~/projects/ebd-ia/mcps/oracle
+python3 -m app.server &
+```
+
+Estrutura: mcps/oracle/app/server.py (instalado com pip install -e .)
+Pacote chamado "app" (nao "src" nem "ebd_ia_mcp_oracle").
+Roda em 0.0.0.0:8989 com pool 2-10 conexoes Oracle.
+Log estruturado em logs/mcp-oracle/queries.jsonl.
+
+NUNCA usar `python3 -m src.mcp_oracle.server` (modulo nao existe).
+

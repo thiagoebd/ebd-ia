@@ -1138,3 +1138,28 @@ Top alertas: Alexandre Sebastiao cod 3119 = 100% fora (provavel cadastro duplica
 Geiza Oliveira 100% fora, Giannini Menezes 87,8% fora.
 Pedro Raesky (supervisor) tem 4 RCAs no top 20 = problema sistemico de cadastro.
 
+
+---
+
+# Parte 12 — Mix + Cobertura por hierarquia (T141-T153) — 21/05/2026
+
+## Fonte: GD_FATO_VENDAFATURAMENTO mes corrente (formulas 6 e 7)
+
+T141 Mix (SKUs) por GC               - 60s LENTO
+T142 Mix + Cobertura por RCA         - 42s LENTO  
+T143 Mix por Supervisor              - 17s
+T151 Cobertura (CLIs) por GC         - 18s
+T152 Cobertura por RCA               - 20s
+T153 Cobertura por Supervisor        - 17s
+
+Total: 46 templates validados.
+
+ALERTA performance: TODO proximo = Cache Redis + view materializada.
+
+Insights operacionais BR mes corrente:
+- Vagner Andrelino lidera Mix BR (1.507 SKUs)
+- Joao Paulo Vale lidera Cobertura BR (3.375 CLIs)
+- Christiano Neves lidera Mix sup (1.167 SKUs)
+- Clayton Anjos lidera Cobertura sup (1.486 CLIs)
+- Luis Carlos top RCA: 565 SKUs + 35 CLIs + R$553K
+
