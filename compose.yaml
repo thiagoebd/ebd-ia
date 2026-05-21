@@ -112,6 +112,12 @@ services:
       REDIS_PASSWORD: ${REDIS_PASSWORD}
       # Runtime
       TZ: America/Sao_Paulo
+      MCP_ORACLE_TOKEN: ${MCP_ORACLE_TOKEN}
+      MCP_ORACLE_LOG_DIR: /app/logs/mcp-oracle
+    volumes:
+      - ./logs/mcp-oracle:/app/logs/mcp-oracle
+    ports:
+      - "127.0.0.1:8989:8989"
     networks:
       - ebdia_net
     healthcheck:
