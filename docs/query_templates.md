@@ -1086,3 +1086,55 @@ Gabriel Barbosa Werneck Veiga (gerente) tem ruptura HIPER-CONCENTRADA:
 
 Provavelmente: problema de abastecimento do CD Petrópolis → Pirá.
 
+
+---
+
+# Parte 11 — Família Visita Real + Motivos (T160-T163) — 21/05/2026
+
+## ★ FONTE OFICIAL: PCVISITAFV (app de força de vendas com GPS)
+
+Volume 2026: 140-180k visitas/mês. 74,5% adoção do app (922 de 1.238 RCAs ativos).
+Coluna LATITUDE/LONGITUDE preenchida com GPS real.
+
+## ★ Catalogo de motivos (PCMOTNAOCOMPRA - hardcoded no agente):
+COD 1   AGUARDANDO APROVAÇÃO DO ORÇAMENTO   PIPELINE
+COD 2   ATRASO NA ÚLTIMA ENTREGA            PROBLEMA_LOGISTICA
+COD 4   CLIENTE ESTOCADO                    SAUDAVEL
+COD 5   CLIENTE FECHADO                     TIMING
+COD 6   CLIENTE SEM DINHEIRO                PROBLEMA_FINANCEIRO
+COD 7   COMPRA CENTRALIZADA                 CADEIA
+COD 8   COMPRA SUSPENSA                     ALERTA
+COD 9   COMPRADOR AUSENTE                   TIMING
+COD 11  COMPROU DO CONCORRENTE              ALERTA_COMPETITIVO
+COD 13  CLIENTE INADIMPLENTE                PROBLEMA_FINANCEIRO
+COD 15  PROBLEMAS COM TROCA                 PROBLEMA_LOGISTICA
+COD 20  CD - COMPRA CENTRAL                 CADEIA
+COD 22  PEDIDO E-COMMERCE                   ONLINE
+COD 23  AGUARDANDO COTAÇÃO                  PIPELINE
+COD 999 LEGADO/NAO CADASTRADO               OUTRO
+COD 16,17,18,19,21,90 - aparecem em PCVISITAFV mas nao em PCMOTNAOCOMPRA
+
+## T160 — Funil de Cobertura BR ✅
+Latencia 42s (cold). Mostra rota / visitas GPS / dentro+fora rota / faturados.
+Quarta 20/05: 23.611 rota / 7.232 visitados (30,6% cobertura real) / 660 fora rota / 4.348 faturados.
+
+## T161 — Motivos de Não-Venda BR ✅ (parametrizado: semana/mes/ano)
+Latencia 1,2s. Distribuicao CODMOTIVO no periodo.
+Mes 2026: top motivos sao "Estocado" (20%), "Aguardando Orcamento" (18%), "Suspensa" (15%).
+Aprox 1/3 das visitas sao PIPELINE ativa (cod 1+23).
+
+## T161B — Mix de Motivos por Filial ✅
+Latencia 1,4s. Heatmap operacional.
+Achados: Matriz tem 31% Compra Suspensa, Macapá 42%, Pirá tem 25% Atraso Entrega.
+
+## T162 — Cobertura por Filial ✅
+Latencia 1,4s. Mostra rota / vis_dentro / vis_fora por filial.
+Top cobertura: Taquara 80,3%, Caruaru 55,8%, Duque 54,9%.
+Pior: Imperatriz 16,4%, Teresina 18,3%.
+
+## T163 — Top RCAs Fora de Rota ✅ (parametrizado periodo)
+Latencia 12s. Mostra DENTRO/FORA/PCT_FORA com supervisor+gerente.
+Top alertas: Alexandre Sebastiao cod 3119 = 100% fora (provavel cadastro duplicado),
+Geiza Oliveira 100% fora, Giannini Menezes 87,8% fora.
+Pedro Raesky (supervisor) tem 4 RCAs no top 20 = problema sistemico de cadastro.
+

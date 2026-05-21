@@ -860,3 +860,37 @@ PCFALTA contem 10 colunas, incluindo CODUSUR (vendedor) e CODCLI
 quem vendeu / pra quem. JOIN só com GD_DIM_RCA pra puxar
 supervisor/gerente.
 
+
+---
+
+## #48 — PCVISITAFV eh o "GPS-truth" das visitas
+
+PCVISITAFV = app de forca de vendas em producao. 8M+ linhas historico.
+140-180k visitas/mes em 2026. Latitude/Longitude preenchidos.
+74,5% adocao (922 de 1.238 RCAs).
+
+USAR PARA: cobertura REAL, motivo de nao-venda, vendas fora de rota.
+NAO usar PCVISITA (sistema antigo, mesmas linhas mas sem GPS limpo).
+
+## #49 — Catalogo PCMOTNAOCOMPRA tem 14 motivos (hardcode no agente)
+
+PCMOTIVONAOATEND e PCMOTVISITA estao VAZIAS.
+O catalogo correto eh PCMOTNAOCOMPRA (14 linhas).
+Mas existem codigos em PCVISITAFV (16,17,18,19,21,90) que nao estao
+no catalogo - hardcode "LEGADO" pra esses.
+
+## #50 — Janela de periodo parametrizada (semana/mes/ano)
+
+```sql
+WINDOWS = {
+    'semana': "v.DATA >= TRUNC(SYSDATE,'IW')",
+    'mes':    "v.DATA >= TRUNC(SYSDATE,'MM')",
+    'ano':    "v.DATA >= TRUNC(SYSDATE,'YYYY')",
+}
+```
+
+## #51 — Cadastro duplicado de RCAs
+
+Alexandre Sebastiao tem 2 codigos diferentes (3119 e 3726) com mesmo nome.
+Cod 3119 com 0 dentro/84 fora (100%) parece fantasma ativo. Investigar.
+
