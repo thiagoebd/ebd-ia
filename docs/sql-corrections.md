@@ -838,3 +838,25 @@ Aproveitamento por RCA NÃO pode usar CODUSUR = CODIGORCA do par
 da rota. Quando RCA falta, colega cobre. Métrica correta:
 "clientes DA rota do RCA X atendidos hoje (por qualquer um)".
 
+
+---
+
+## #42 — Ruptura BR = PCFALTA sem filtro filial (BI inclui CDs)
+
+A view BI de ruptura nao filtra CODFILIAL — soma CDs no total geral.
+Filiais "fantasmas" 17 (R$ 705K mes) e 23 (R$ 346K mes) sao CDs reais
+com ruptura fisica. Devem entrar.
+
+## #43 — Remapeamento CD → filial mae em ruptura/operacao
+
+CDs 17 (São Pedro da Aldeia) e 23 (Petrópolis) servem fisicamente
+as filiais 10 (São Gonçalo) e 14 (Piraí) respectivamente. Em VENDAS
+o sistema integra automaticamente. Em RUPTURA precisa forcar via CASE.
+
+## #44 — PCFALTA tem CODUSUR + CODCLI direto
+
+PCFALTA contem 10 colunas, incluindo CODUSUR (vendedor) e CODCLI
+(cliente) DIRETO. Nao precisa fazer JOIN com PCPEDC para descobrir
+quem vendeu / pra quem. JOIN só com GD_DIM_RCA pra puxar
+supervisor/gerente.
+

@@ -1022,3 +1022,67 @@ visitas/fat aos clientes da rota DO RCA (mesmo se outro coberto).
 **Cicatriz #40:** RCA pode cobrir rota de colega. Não restringir visitas
 ao mesmo CODUSUR; usar conjunto de clientes da rota do RCA.
 
+
+---
+
+# Parte 9 — Família Ruptura (T130+) — descoberta 21/05/2026
+
+## 9ª Fórmula universal validada
+
+```sql
+-- RUPTURA BR (mes/ano) = SUM(QT*PVENDA) FROM PCFALTA WHERE DATA BETWEEN :ini AND :fim
+-- IMPORTANTE: NÃO filtrar CODFILIAL (BI inclui CDs 17, 23 no total)
+-- Validacao: Mes R$ 8,14M (BI R$ 8,11M, +0,35%) | Ano R$ 77,17M (BI R$ 77,14M, +0,04%)
+```
+
+## Regra critica: remapeamento de CDs (so ruptura/operacao)
+
+```sql
+CASE CODFILIAL
+  WHEN '17' THEN '10'  -- SAO PEDRO ALDEIA -> SAO GONCALO
+  WHEN '23' THEN '14'  -- PETROPOLIS -> PIRAI
+  ELSE CODFILIAL
+END AS CODFILIAL_COM
+```
+
+Em VENDAS o sistema faz automatico. Em RUPTURA precisa forcar.
+
+## T130 v2 — Ruptura por Filial (com remapeamento) ✅
+Latencia 9,7s. Validado contra BI Object3+Object4.
+Top: Duque R$ 1,14M | Pirá R$ 1,10M | Taquara R$ 1,00M | São Gonçalo R$ 930K | Manaus R$ 733K
+
+## T133 — Ruptura por RCA (Top 15 piores) ✅
+Latencia 21,4s. Mostra RCA + Supervisor + Gerente + valor + %FTR.
+Top pior absoluto: Eliane Garcia R$ 468K (22,9%)
+Top pior relativo: Leonardo Calixto 91,9% (R$ 216K / R$ 235K FTR)
+
+## T134 — Ruptura por Supervisor (Top 15) ✅
+Latencia 20,9s. Mostra Supervisor + Gerente + valor + %FTR.
+Top pior absoluto: Francisco Humberto R$ 554K (64,5% FTR!!)
+
+## T136 — Ruptura por Cliente (Top 15) ✅
+Latencia 0,2s. Mostra Cliente + Fantasia + valor.
+Top: SERVI Deposito R$ 395K | HNT/Americanas R$ 142K | Mixter R$ 90K
+
+## PCFALTA esquema completo (10 colunas)
+NUMPED      NOT NULL  - pedido
+DATA        NOT NULL  - data ruptura
+CODPROD     NOT NULL  - produto
+CODUSUR              - vendedor (TEM!)
+CODCLI               - cliente (TEM!)
+QT                   - qtd
+PVENDA               - preco
+CODFILIAL            - filial
+NUMSEQ      NOT NULL  - sequencia no pedido
+DTMXSALTER           - auditoria
+
+## Insight estrategico extraido
+
+Gabriel Barbosa Werneck Veiga (gerente) tem ruptura HIPER-CONCENTRADA:
+- 2 supervisores no top 10 (Francisco Humberto 64,5% + Thiago Henrique 30,7%)
+- 2 RCAs no top 6 (Leonardo Calixto 91,9% + Nubya Martins 63,4%)
+- Toda essa cadeia está em Pirá (filial 14, que agora soma o CD 23 Petrópolis)
+- T131 confirmou Gabriel = 47,95% ruptura/FTR pior gerente BR
+
+Provavelmente: problema de abastecimento do CD Petrópolis → Pirá.
+
