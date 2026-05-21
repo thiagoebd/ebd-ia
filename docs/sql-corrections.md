@@ -911,3 +911,28 @@ Log estruturado em logs/mcp-oracle/queries.jsonl.
 
 NUNCA usar `python3 -m src.mcp_oracle.server` (modulo nao existe).
 
+
+---
+
+## #53 - PCUSUARI eh o vinculo canonico RCA->Filial
+
+Regra negocio: 1 RCA = 1 filial, 1 Supervisor = 1 filial.
+Tabela PCUSUARI tem CODFILIAL direto. GD_DIM_RCA NAO tem filial.
+
+Para derivar filiais por Supervisor/Gerente:
+  JOIN PCUSUARI u ON u.CODUSUR = dr.CODIGORCA
+  GROUP BY dr.CODIGOSUPERVISOR (ou GERENTE)
+  DISTINCT u.CODFILIAL
+
+## #54 - Mix Disponivel: regra final validada
+
+Filtros corretos do "mix disponivel":
+  pf.REVENDA = 'S'
+  AND pf.ATIVO = 'S'
+  AND pf.PROIBIDAVENDA = 'N'    <- nome com 'IDA', nao PROIBVENDA
+  AND pf.FORALINHA = 'N'
+  AND EXISTS (PCEST com QTESTGER > 0)
+
+NAO ADICIONAR filtro de DTULTENT (gera efetividade > 100%).
+PCPRODUT nao tem coluna DTULTENT - so PCEST tem.
+

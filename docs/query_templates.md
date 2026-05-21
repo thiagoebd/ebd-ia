@@ -1163,3 +1163,54 @@ Insights operacionais BR mes corrente:
 - Clayton Anjos lidera Cobertura sup (1.486 CLIs)
 - Luis Carlos top RCA: 565 SKUs + 35 CLIs + R$553K
 
+
+---
+
+# Parte 13 — Familia Efetividade do Mix (T140, T144-T147) — 21/05/2026
+
+## Conceito
+"Efetividade" = SKUs vendidos / SKUs disponiveis no portfolio
+Mostra QUANTO do portfolio disponivel o gestor/RCA esta efetivamente vendendo.
+
+## Filtros validados (mix disponivel)
+PCPRODFILIAL: REVENDA=S + ATIVO=S + PROIBIDAVENDA=N + FORALINHA=N
+AND EXISTS PCEST.QTESTGER > 0
+
+ATENÇÃO: NÃO filtrar DTULTENT - produto parado deve aparecer no denominador.
+(Filtrar gera efetividade > 100% impossivel.)
+
+## Hierarquia (1 RCA = 1 filial)
+
+PCUSUARI.CODFILIAL define a filial do RCA (1 RCA = 1 filial).
+Supervisor/Gerente herdam via GD_DIM_RCA + PCUSUARI dos seus RCAs.
+
+## Templates
+
+T140 Efetividade BR - 3-4s
+T144 Efetividade por Filial - 4,3s
+T145 Efetividade por GC - 25,2s LENTO
+T146 Efetividade por Supervisor - 20,8s LENTO
+T147 Efetividade por RCA - 17,3s LENTO
+
+Total: 51 templates validados.
+
+## Disclaimer OBRIGATORIO ao exibir
+
+"Esta análise considera como mix disponível todos os produtos com
+REVENDA=S, ATIVO=S, PROIBIDAVENDA=N, FORALINHA=N e estoque>0 na filial.
+SKUs sem venda no período aparecem como 'parados' — útil pra identificar
+produtos com problema de venda. Período: mês corrente."
+
+## Insights operacionais brutais (21/05/2026)
+
+GERENTES:
+- Joao Gabriel Mourao: 93,4% TOP performer (1.003 disp / 937 vend)
+- Marcus Carvalho: 34,6% PIOR com rota grande (1.680 SKUs parados sob ele!)
+- Vagner Andrelino: 69,7% (paradoxo - lidera Mix BR absoluto mas eficiencia média)
+- Gabriel Veiga: 25,0% (confirma alerta da ruptura - cadeia inteira mal)
+
+FILIAIS:
+- Caruaru 96,9% / Manaus 96,8% TOP eficiencia
+- Duque 65,2% / Santarem 63,7% BOTTOM (785 SKUs parados em Duque)
+- Pirá (com acento!) 68,2% confirma alerta operacional
+
