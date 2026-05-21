@@ -936,3 +936,49 @@ Filtros corretos do "mix disponivel":
 NAO ADICIONAR filtro de DTULTENT (gera efetividade > 100%).
 PCPRODUT nao tem coluna DTULTENT - so PCEST tem.
 
+
+
+<!-- AUTO-APPEND PROP-6687F4E3 aprovado por thiago -->
+
+
+### 2026-05-21 — GD_DIM_CLIENTE: aliases reais confirmados
+
+Tentativas com `SITUACAO` e `FANTASIA` quebraram com ORA-00904.
+Executado `SELECT *` pra confirmar schema real.
+
+**Colunas confirmadas (nomes exatos):**
+
+| Campo assumido (errado) | Campo real (correto) |
+|---|---|
+| `SITUACAO` | `STATUS` |
+| `FANTASIA` | `NOMEFANTASIA` |
+| — | `NOMEFANTASIACLIENTEPRINCIPAL` |
+| — | `CLIENTEPRINCIPAL` |
+| — | `DIASINATIVOS` (texto, ex: "DE 31 A 45 DIAS") |
+
+**Schema completo confirmado:**
+```
+CODIGOCLIENTE, CLIENTE, CPJCNPJ, TIPOCLIENTE, CODIGOIBGE,
+BAIRRO, CEP, ENDERECO, NOMEFANTASIA, CLASSE, CLASSIFICACAO,
+EMAILCLIENTE, CODIGORAMOATIVIDADE, RAMOATIVIDADE, GRUPO,
+PRACA, CODIGOROTA, ROTA, CODIGOREDE, REDE, REGIAO, UFREGIAO,
+CIDADE, UF, NOMEFANTASIACLIENTEPRINCIPAL, CLIENTEPRINCIPAL,
+STATUS, DIASINATIVOS, DTCADASTRO, DTULTCOMP, LATITUDE, LONGITUDE
+```
+
+**Exemplo de uso correto:**
+```sql
+SELECT dc.CODIGOCLIENTE, dc.CLIENTE, dc.NOMEFANTASIA,
+       dc.CIDADE, dc.UF, dc.RAMOATIVIDADE,
+       dc.STATUS, dc.DIASINATIVOS
+FROM EBD.GD_DIM_CLIENTE dc
+WHERE dc.CODIGOCLIENTE = :codCli
+```
+
+**Observações:**
+- `STATUS` = 'ATIVO' | 'INATIVO' | 'EXCLUÍDO' (conforme knowledge.md seção 11.1)
+- `DIASINATIVOS` é string descritiva: 'ATÉ 30 DIAS', 'DE 31 A 45 DIAS', etc.
+- `CODIGOCLIENTE` = número (INTEGER), não string
+- `TIPOCLIENTE` = 'F' (Físico) | 'J' (Jurídico)
+- `LATITUDE`/`LONGITUDE` podem ser NULL (nem todos os clientes têm geolocalização)
+
