@@ -25,7 +25,7 @@ class Settings(BaseSettings):
     repo_path: Path = Field(..., alias="EBD_IA_REPO_PATH")
 
     # Limites
-    max_tokens: int = 4096
+    max_tokens: int = 4000
     max_iterations: int = 10  # cap de tool-use loop
 
 

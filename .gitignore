@@ -72,3 +72,4 @@ compose.yaml.bak
 # Logs do MCP
 logs/
 *.jsonl
+docs/sql-corrections.md.bak

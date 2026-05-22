@@ -26,7 +26,7 @@ _client = AsyncAnthropic(api_key=settings.anthropic_api_key)
 _system_prompt = build_system_prompt()
 _tools = [ORACLE_QUERY_TOOL, KNOWLEDGE_APPEND_TOOL, LIST_PROPOSALS_TOOL]
 
-MAX_HISTORY_PAIRS = 6
+MAX_HISTORY_PAIRS = 3
 
 
 async def _run_tool(tool_name: str, tool_input: dict, user_id: str, user_role: str) -> str:
@@ -50,10 +50,66 @@ async def _run_tool(tool_name: str, tool_input: dict, user_id: str, user_role: s
 
 
 def _trim_history(messages: list, max_pairs: int = MAX_HISTORY_PAIRS) -> list:
-    if len(messages) <= max_pairs * 2:
-        return messages
-    return messages[-(max_pairs * 2):]
+    """Trim history preservando integridade tool_use/tool_result.
+    
+    Regras:
+    1. Cap em max_pairs * 2 mensagens
+    2. Primeira mensagem SEMPRE deve ser 'user' SEM tool_result órfão
+    3. Última mensagem DEVE ter todos os tool_use respondidos
+       (se tem tool_use no fim sem tool_result, descarta esse par)
+    """
+    if not messages or len(messages) <= max_pairs * 2:
+        # Mesmo assim verifica integridade do fim
+        return _drop_orphan_tool_use_at_end(messages)
+    
+    candidate = messages[-(max_pairs * 2):]
+    
+    # Avança o início até achar user "limpo" (sem tool_result órfão)
+    while candidate:
+        first = candidate[0]
+        if first.get("role") != "user":
+            candidate = candidate[1:]
+            continue
+        content = first.get("content")
+        if isinstance(content, str):
+            break
+        if isinstance(content, list):
+            has_tool_result = any(
+                isinstance(b, dict) and b.get("type") == "tool_result"
+                for b in content
+            )
+            if has_tool_result:
+                candidate = candidate[1:]
+                continue
+            break
+        candidate = candidate[1:]
+    
+    # Remove tool_use órfão no FIM (se assistant terminou com tool_use mas 
+    # próximo turn não retornou tool_result — pode acontecer em truncamento)
+    return _drop_orphan_tool_use_at_end(candidate)
 
+
+def _drop_orphan_tool_use_at_end(messages: list) -> list:
+    """Se a última mensagem assistant tem tool_use sem tool_result na próxima,
+    remove o par inteiro pra não corromper o histórico."""
+    if len(messages) < 2:
+        return messages
+    
+    # Última mensagem deve ser assistant pra checar
+    while messages and messages[-1].get("role") == "assistant":
+        content = messages[-1].get("content")
+        if isinstance(content, list):
+            has_tool_use = any(
+                isinstance(b, dict) and (b.get("type") == "tool_use" or hasattr(b, 'type') and b.type == "tool_use")
+                for b in content
+            )
+            if has_tool_use:
+                # Última msg é assistant com tool_use sem tool_result depois → drop
+                messages = messages[:-1]
+                continue
+        break
+    
+    return messages
 
 async def run_turn(
     user_message: str,
@@ -61,6 +117,7 @@ async def run_turn(
     user_id: str = "thiago",
     user_role: str = "admin",
     user_filiais: str = "*",
+    channel: str = "cli",
 ) -> dict:
     messages = list(conversation_history or [])
     messages = _trim_history(messages)
@@ -71,6 +128,7 @@ async def run_turn(
         f"- User ID: {user_id}\n"
         f"- Role: {user_role}\n"
         f"- Filiais permitidas: {user_filiais}\n"
+        f"- CANAL: {channel}  ← APLIQUE AS REGRAS DE FORMATAÇÃO DO CANAL\n"
     )
     if user_role == "admin":
         ctx_suffix += (
@@ -87,7 +145,7 @@ async def run_turn(
     system_blocks = [{
         "type": "text",
         "text": _system_prompt + ctx_suffix,
-        "cache_control": {"type": "ephemeral"},
+        "cache_control": {"type": "ephemeral", "ttl": "1h"},  # 1h em vez de 5min default
     }]
 
     tool_calls_log = []
