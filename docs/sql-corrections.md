@@ -936,3 +936,93 @@ Filtros corretos do "mix disponivel":
 NAO ADICIONAR filtro de DTULTENT (gera efetividade > 100%).
 PCPRODUT nao tem coluna DTULTENT - so PCEST tem.
 
+
+
+<!-- AUTO-APPEND PROP-6687F4E3 aprovado por thiago -->
+
+
+### 2026-05-21 — GD_DIM_CLIENTE: aliases reais confirmados
+
+Tentativas com `SITUACAO` e `FANTASIA` quebraram com ORA-00904.
+Executado `SELECT *` pra confirmar schema real.
+
+**Colunas confirmadas (nomes exatos):**
+
+| Campo assumido (errado) | Campo real (correto) |
+|---|---|
+| `SITUACAO` | `STATUS` |
+| `FANTASIA` | `NOMEFANTASIA` |
+| — | `NOMEFANTASIACLIENTEPRINCIPAL` |
+| — | `CLIENTEPRINCIPAL` |
+| — | `DIASINATIVOS` (texto, ex: "DE 31 A 45 DIAS") |
+
+**Schema completo confirmado:**
+```
+CODIGOCLIENTE, CLIENTE, CPJCNPJ, TIPOCLIENTE, CODIGOIBGE,
+BAIRRO, CEP, ENDERECO, NOMEFANTASIA, CLASSE, CLASSIFICACAO,
+EMAILCLIENTE, CODIGORAMOATIVIDADE, RAMOATIVIDADE, GRUPO,
+PRACA, CODIGOROTA, ROTA, CODIGOREDE, REDE, REGIAO, UFREGIAO,
+CIDADE, UF, NOMEFANTASIACLIENTEPRINCIPAL, CLIENTEPRINCIPAL,
+STATUS, DIASINATIVOS, DTCADASTRO, DTULTCOMP, LATITUDE, LONGITUDE
+```
+
+**Exemplo de uso correto:**
+```sql
+SELECT dc.CODIGOCLIENTE, dc.CLIENTE, dc.NOMEFANTASIA,
+       dc.CIDADE, dc.UF, dc.RAMOATIVIDADE,
+       dc.STATUS, dc.DIASINATIVOS
+FROM EBD.GD_DIM_CLIENTE dc
+WHERE dc.CODIGOCLIENTE = :codCli
+```
+
+**Observações:**
+- `STATUS` = 'ATIVO' | 'INATIVO' | 'EXCLUÍDO' (conforme knowledge.md seção 11.1)
+- `DIASINATIVOS` é string descritiva: 'ATÉ 30 DIAS', 'DE 31 A 45 DIAS', etc.
+- `CODIGOCLIENTE` = número (INTEGER), não string
+- `TIPOCLIENTE` = 'F' (Físico) | 'J' (Jurídico)
+- `LATITUDE`/`LONGITUDE` podem ser NULL (nem todos os clientes têm geolocalização)
+
+
+
+<!-- AUTO-APPEND PROP-505AB8E9 aprovado por thiago -->
+
+
+### 2026-05-21 — TRUNC() em DATAFATURAMENTO causa ORA-01722 — usar SUBSTR pra agrupar por mês
+
+Tentativa de usar `TRUNC(vf.DATAFATURAMENTO, 'MM')` quebrou com
+`ORA-01722: invalid number` porque `DATAFATURAMENTO` é **string VARCHAR2**
+no formato `YYYYMMDD`, não um tipo DATE.
+
+**Errado:**
+```sql
+SELECT TRUNC(vf.DATAFATURAMENTO, 'MM') AS MES  -- ORA-01722
+FROM EBD.GD_FATO_VENDAFATURAMENTO vf
+```
+
+**Certo — agrupar por mês (YYYYMM):**
+```sql
+SELECT SUBSTR(vf.DATAFATURAMENTO, 1, 6) AS MES_ANO  -- ex: '202605'
+FROM EBD.GD_FATO_VENDAFATURAMENTO vf
+GROUP BY SUBSTR(vf.DATAFATURAMENTO, 1, 6)
+ORDER BY MES_ANO DESC
+```
+
+**Certo — agrupar por ano (YYYY):**
+```sql
+SELECT SUBSTR(vf.DATAFATURAMENTO, 1, 4) AS ANO  -- ex: '2026'
+FROM EBD.GD_FATO_VENDAFATURAMENTO vf
+GROUP BY SUBSTR(vf.DATAFATURAMENTO, 1, 4)
+```
+
+**Certo — converter pra DATE quando precisar de aritmética:**
+```sql
+TO_DATE(vf.DATAFATURAMENTO, 'YYYYMMDD') AS DT_DATE
+```
+
+**Regra geral:** qualquer função que espera DATE (TRUNC, ADD_MONTHS, etc.)
+**não pode** ser aplicada diretamente nas colunas das views GD_*. Sempre
+converter com `TO_DATE(col, 'YYYYMMDD')` antes, ou usar `SUBSTR` pra
+agrupamentos simples por mês/ano.
+
+Isso reforça a cicatriz de 19/05/2026 "Datas nas views GD_* são STRINGS YYYYMMDD".
+
