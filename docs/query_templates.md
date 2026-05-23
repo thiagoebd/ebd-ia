@@ -1214,3 +1214,47 @@ FILIAIS:
 - Duque 65,2% / Santarem 63,7% BOTTOM (785 SKUs parados em Duque)
 - Pirá (com acento!) 68,2% confirma alerta operacional
 
+
+
+<!-- AUTO-APPEND PROP-C221ABB8 aprovado por Thiago -->
+
+
+## T-CARTEIRA-01 — Carteira em Pedido por Filial (VLATEND)
+
+**Validado em:** 21/05/2026
+**Validação:** bateu na vírgula contra BI EBD (divergências residuais = delay operacional normal)
+**Uso:** visão gerencial/diretoria de pedidos liberados ainda não faturados
+
+```sql
+SELECT
+    p.CODFILIAL,
+    SUBSTR(NVL(pf.FANTASIA, '?'), 1, 30) AS FILIAL,
+    COUNT(DISTINCT p.NUMPED)             AS QTD_PEDIDOS,
+    SUM(p.VLATEND)                       AS CARTEIRA
+FROM EBD.PCPEDC p
+JOIN EBD.PCFILIAL pf ON pf.CODIGO = p.CODFILIAL
+WHERE p.POSICAO IN ('L', 'M')
+  AND p.DTCANCEL IS NULL
+  AND p.CONDVENDA NOT IN (4, 5, 6, 8, 10, 11, 12, 13, 20, 98, 99)
+GROUP BY p.CODFILIAL, pf.FANTASIA
+ORDER BY CARTEIRA DESC
+```
+
+### Regras aplicadas
+| Regra | Detalhe |
+|---|---|
+| `POSICAO IN ('L','M')` | Liberado + Montado — pedidos prontos pra faturar |
+| `DTCANCEL IS NULL` | Exclui cancelados |
+| `CONDVENDA NOT IN (...)` | Exclui bonificações, transferências, consignações, manifestos |
+| `VLATEND` | Valor atendido do pedido (não VLPEDIDO que pode incluir itens sem estoque) |
+| `PCFILIAL.CODIGO` | Atenção: PCFILIAL usa CODIGO, não CODFILIAL |
+
+### Variações comuns
+- **1 filial específica:** adicionar `AND p.CODFILIAL = :userFilial`
+- **Regional:** `AND p.CODFILIAL IN ('05','14')` (ex: RJ2)
+- **1 RCA:** adicionar `AND p.CODUSUR = :codUsur`
+- **1 supervisor:** JOIN com PCUSUARI + filtro CODSUPERVISOR
+
+### Resultado referência (21/05/2026 ~momento da validação)
+Total BR: R$ 24.021.297 | 21 filiais | maior: EBD MATRIZ R$ 4.728.460
+
