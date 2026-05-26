@@ -519,3 +519,144 @@ Regra: em análises de ruptura física, os CDs 17, 19 e 23 entram agrupados com 
 | 52 | EBDN PETROLINA | NE3 |
 | 53 | EBDN CARUARU | NE3 |
 
+
+
+<!-- AUTO-APPEND PROP-2E6A05A5 aprovado por Thiago -->
+
+
+## Regra de negócio: identificação de pedidos E-commerce B2B
+
+> Confirmado por Thiago (admin) em 26/05/2026.
+
+### Filtros obrigatórios para isolar pedidos do canal B2B (portal loja EBD)
+
+```sql
+WHERE p.ORIGEMPED = 'W'          -- origem web/portal
+  AND p.CODEMITENTE = 7777       -- emitente virtual do portal B2B
+  AND c.CODATV1 != <cod_funcionario>  -- excluir clientes do tipo "funcionário"
+```
+
+### Explicação dos campos
+
+| Campo | Valor | Significado |
+|---|---|---|
+| `PCPEDC.ORIGEMPED` | `'W'` | Pedido veio do canal web/portal |
+| `PCPEDC.CODEMITENTE` | `7777` | Código virtual que identifica o portal B2B como emitente — presente em TODOS os pedidos B2B, independente do CODUSUR |
+| `PCCLIENT.CODATV1` | ≠ ramo "funcionário" | Cliente deve ser um estabelecimento comercial real, não um funcionário EBD |
+
+### Dois perfis de CODUSUR no canal W
+
+1. **Vendedor exclusivo B2B** — CODUSUR com nome `'ECOMMERCE B2B LOJAEBD XX'` (ex: 2611 Manaus, 2608 Caruaru, etc). Pedido digitado/gerado pela equipe do portal.
+2. **RCA de campo** — CODUSUR normal de vendedor externo. Cliente comprou sozinho pelo portal, mas o pedido caiu na carteira do RCA responsável. Identificado pelo `CODEMITENTE = 7777`.
+
+**O filtro correto para "tudo que veio do portal B2B" é `CODEMITENTE = 7777`**, não filtrar por CODUSUR com nome B2B (isso pega só o perfil 1).
+
+### Exclusão de clientes funcionário
+
+Clientes do ramo de atividade "funcionário" (interno EBD) NÃO devem entrar em métricas de e-commerce B2B. Filtrar via:
+```sql
+JOIN EBD.PCATIVI ati ON ati.CODATIV = c.CODATV1
+WHERE UPPER(ati.RAMO) NOT LIKE '%FUNCIONARIO%'
+  AND UPPER(ati.RAMO) NOT LIKE '%FUNCIONÁRIO%'
+```
+Ou via GD_DIM_CLIENTE:
+```sql
+WHERE UPPER(dc.RAMOATIVIDADE) NOT LIKE '%FUNCIONARIO%'
+  AND UPPER(dc.RAMOATIVIDADE) NOT LIKE '%FUNCIONÁRIO%'
+```
+
+### Template base para análise B2B
+
+```sql
+SELECT p.NUMPED, p.DATA, p.CODFILIAL, p.CODCLI, c.CLIENTE,
+       p.CODUSUR, p.POSICAO, p.CONDVENDA,
+       p.VLTOTAL, p.VLATEND, p.NUMPEDRCA, p.OBS1
+FROM EBD.PCPEDC p
+JOIN EBD.PCCLIENT c ON c.CODCLI = p.CODCLI
+JOIN EBD.PCATIVI ati ON ati.CODATIV = c.CODATV1
+WHERE p.ORIGEMPED = 'W'
+  AND p.CODEMITENTE = 7777
+  AND UPPER(ati.RAMO) NOT LIKE '%FUNCIONARIO%'
+  AND UPPER(ati.RAMO) NOT LIKE '%FUNCIONÁRIO%'
+  AND p.CODFILIAL = :userFilial
+ORDER BY p.DATA DESC
+```
+
+
+
+<!-- AUTO-APPEND PROP-E2EBADEA aprovado por Thiago -->
+
+
+## Regra de negócio: identificação de pedidos E-commerce B2E (Business to Employee)
+
+> Confirmado por Thiago (admin) em 26/05/2026.
+> B2E = canal de venda para funcionários EBD via portal loja.
+
+### Filtros obrigatórios para isolar pedidos B2E
+
+```sql
+WHERE p.ORIGEMPED = 'W'    -- origem web/portal
+  AND p.CODEMITENTE = 7777 -- emitente virtual do portal
+  AND c.CODATV1 = 31       -- ramo FUNCIONARIOS (único código confirmado)
+```
+
+### Código de ramo confirmado
+
+| CODATIV | RAMO | Fonte |
+|---|---|---|
+| 31 | FUNCIONARIOS | EBD.PCATIVI — único código de funcionário no cadastro |
+
+> ⚠️ Não existem outros códigos de ramo para funcionário. CODATIV=31 é o único.
+> Confirmado via `SELECT CODATIV, RAMO FROM EBD.PCATIVI WHERE UPPER(RAMO) LIKE '%FUNC%'`.
+
+### Diferença B2B vs B2E (mesmo canal W)
+
+| Canal | ORIGEMPED | CODEMITENTE | CODATV1 | Público |
+|---|---|---|---|---|
+| B2B | W | 7777 | ≠ 31 (excluir funcionário) | Clientes comerciais |
+| B2E | W | 7777 | = 31 | Funcionários EBD |
+
+Ambos usam o mesmo portal e o mesmo `CODEMITENTE=7777`. O que diferencia é **exclusivamente o ramo de atividade do cliente**.
+
+### Template base para análise B2E
+
+```sql
+SELECT
+  pf.CODIGO AS CODFILIAL,
+  SUBSTR(NVL(pf.FANTASIA, '?'), 1, 25) AS FILIAL,
+  COUNT(DISTINCT p.NUMPED) AS PEDIDOS,
+  COUNT(DISTINCT p.CODCLI) AS FUNCIONARIOS,
+  SUM(CASE WHEN p.POSICAO = 'F' THEN p.VLATEND ELSE 0 END) AS FATURADO_NF,
+  SUM(CASE WHEN p.POSICAO IN ('L','M') THEN p.VLATEND ELSE 0 END) AS EM_CARTEIRA,
+  SUM(CASE WHEN p.POSICAO = 'B' THEN p.VLATEND ELSE 0 END) AS BLOQUEADO
+FROM EBD.PCPEDC p
+JOIN EBD.PCCLIENT c ON c.CODCLI = p.CODCLI
+JOIN EBD.PCFILIAL pf ON pf.CODIGO = p.CODFILIAL
+WHERE p.ORIGEMPED = 'W'
+  AND p.CODEMITENTE = 7777
+  AND c.CODATV1 = 31
+  AND p.DATA >= TRUNC(SYSDATE, 'MM')
+  AND p.DTCANCEL IS NULL
+GROUP BY pf.CODIGO, pf.FANTASIA
+ORDER BY FATURADO_NF DESC
+```
+
+### Números de referência — maio/2026 (até 26/05)
+
+| Métrica | Valor |
+|---|---|
+| NF emitida BR | R$ 79.030 |
+| Em carteira | R$ 4.131 |
+| Bloqueado | R$ 1.264 |
+| Pedidos | 632 |
+| Funcionários únicos | ~434 |
+| Filiais ativas no canal | 13 de 21 |
+
+Top filiais: SP (R$ 17.628) › Fortaleza (R$ 11.786) › SBC (R$ 10.747)
+
+### Vocabulário aceito pelo agente
+
+Termos que devem acionar esse filtro:
+- "B2E", "B2E canal", "venda funcionário", "venda para funcionários",
+  "portal funcionário", "benefício funcionário", "ecommerce funcionário"
+

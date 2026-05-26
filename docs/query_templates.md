@@ -1214,3 +1214,176 @@ FILIAIS:
 - Duque 65,2% / Santarem 63,7% BOTTOM (785 SKUs parados em Duque)
 - Pirá (com acento!) 68,2% confirma alerta operacional
 
+
+
+<!-- AUTO-APPEND PROP-C221ABB8 aprovado por Thiago -->
+
+
+## T-CARTEIRA-01 — Carteira em Pedido por Filial (VLATEND)
+
+**Validado em:** 21/05/2026
+**Validação:** bateu na vírgula contra BI EBD (divergências residuais = delay operacional normal)
+**Uso:** visão gerencial/diretoria de pedidos liberados ainda não faturados
+
+```sql
+SELECT
+    p.CODFILIAL,
+    SUBSTR(NVL(pf.FANTASIA, '?'), 1, 30) AS FILIAL,
+    COUNT(DISTINCT p.NUMPED)             AS QTD_PEDIDOS,
+    SUM(p.VLATEND)                       AS CARTEIRA
+FROM EBD.PCPEDC p
+JOIN EBD.PCFILIAL pf ON pf.CODIGO = p.CODFILIAL
+WHERE p.POSICAO IN ('L', 'M')
+  AND p.DTCANCEL IS NULL
+  AND p.CONDVENDA NOT IN (4, 5, 6, 8, 10, 11, 12, 13, 20, 98, 99)
+GROUP BY p.CODFILIAL, pf.FANTASIA
+ORDER BY CARTEIRA DESC
+```
+
+### Regras aplicadas
+| Regra | Detalhe |
+|---|---|
+| `POSICAO IN ('L','M')` | Liberado + Montado — pedidos prontos pra faturar |
+| `DTCANCEL IS NULL` | Exclui cancelados |
+| `CONDVENDA NOT IN (...)` | Exclui bonificações, transferências, consignações, manifestos |
+| `VLATEND` | Valor atendido do pedido (não VLPEDIDO que pode incluir itens sem estoque) |
+| `PCFILIAL.CODIGO` | Atenção: PCFILIAL usa CODIGO, não CODFILIAL |
+
+### Variações comuns
+- **1 filial específica:** adicionar `AND p.CODFILIAL = :userFilial`
+- **Regional:** `AND p.CODFILIAL IN ('05','14')` (ex: RJ2)
+- **1 RCA:** adicionar `AND p.CODUSUR = :codUsur`
+- **1 supervisor:** JOIN com PCUSUARI + filtro CODSUPERVISOR
+
+### Resultado referência (21/05/2026 ~momento da validação)
+Total BR: R$ 24.021.297 | 21 filiais | maior: EBD MATRIZ R$ 4.728.460
+
+
+
+<!-- AUTO-APPEND PROP-C2892673 aprovado por Thiago -->
+
+## T201 — Pedidos Pendentes (Carteira) — Query oficial BI EBD
+
+> Fonte: query oficial do BI EBD, fornecida pelo time em 21/05/2026.
+> Retorna itens de pedidos ainda não faturados (POSICAO = 'L' ou 'M').
+
+### Filtros-chave obrigatórios
+- `PCPEDC.POSICAO IN ('L', 'M')` — Liberado / Montado
+- `PCPEDC.DTCANCEL IS NULL` — exclui cancelados
+- `PCPEDC.CONDVENDA IN (1,2,3,7,9,14,15,17,18,19,98)` — tipos de venda válidos
+- `PCUSUARI.CODSUPERVISOR NOT IN ('9999')` — exclui RCAs fantasma/vago
+
+### Cálculo de VALORUNITARIO e VALORTOTAL
+CONDVENDA 5, 6, 11, 12 → valor zerado (bonificação/brinde/troca)
+Demais → PVENDA + VLFRETE + VLOUTRASDESP + VLFRETE_RATEIO + VLOUTROS
+
+### NOVADATAVENDA
+Pedidos de meses anteriores têm data "trazida" para hoje:
+```sql
+TRUNC(CASE 
+  WHEN TO_CHAR(PCPEDC.DATA, 'YYYY-MM') < TO_CHAR(TRUNC(SYSDATE), 'YYYY-MM') 
+  THEN TRUNC(SYSDATE) 
+  ELSE PCPEDC.DATA 
+END) AS NOVADATAVENDA
+```
+
+### Query completa (nível item)
+
+```sql
+SELECT PCPEDI.CODUSUR        AS CODIGORCA,
+       PCPEDI.CODCLI         AS CODIGOCLIENTE,
+       PCPEDC.CODFILIAL      AS CODIGOFILIAL,
+       PCPEDI.CODPROD        AS CODIGOPRODUTO,
+       PCPEDC.CODPLPAG       AS CODIGOPLANOPAGAMENTO,
+       PCPEDC.CODCOB         AS CODIGOCOBRANCA,
+       PCPEDI.BONIFIC        AS CODIGOTIPOITEMVENDA,
+       PCPEDC.CODEMITENTE    AS CODIGOEMITENTE,
+       PCPEDI.NUMPED         AS NUMEROPEDIDO,
+       PCPEDC.NUMCAR         AS NUMEROCARREGAMENTO,
+       TRUNC(PCPEDC.DATA)    AS DATAVENDA,
+       TRUNC(CASE
+               WHEN TO_CHAR(PCPEDC.DATA, 'YYYY-MM') < TO_CHAR(TRUNC(SYSDATE), 'YYYY-MM')
+               THEN TRUNC(SYSDATE)
+               ELSE PCPEDC.DATA
+             END)            AS NOVADATAVENDA,
+       PCPEDI.QT             AS QUANTIDADE,
+       CAST(
+         DECODE(PCPEDC.CONDVENDA,
+                5, 0, 6, 0, 11, 0, 12, 0,
+                NVL(NVL(PCPEDI.PVENDA,0)
+                  + NVL(PCPEDI.VLFRETE,0)
+                  + NVL(PCPEDI.VLOUTRASDESP,0)
+                  + NVL(PCPEDI.VLFRETE_RATEIO,0)
+                  + NVL(PCPEDI.VLOUTROS,0), 0))
+       AS NUMERIC(18,6))     AS VALORUNITARIO,
+       (PCPEDI.QT *
+        CAST(
+          DECODE(PCPEDC.CONDVENDA,
+                 5, 0, 6, 0, 11, 0, 12, 0,
+                 NVL(NVL(PCPEDI.PVENDA,0)
+                   + NVL(PCPEDI.VLFRETE,0)
+                   + NVL(PCPEDI.VLOUTRASDESP,0)
+                   + NVL(PCPEDI.VLFRETE_RATEIO,0)
+                   + NVL(PCPEDI.VLOUTROS,0), 0))
+        AS NUMERIC(18,6)))   AS VALORTOTAL
+  FROM EBD.PCPEDI, EBD.PCPEDC, EBD.PCPRODUT, EBD.PCFORNEC,
+       EBD.PCDEPTO, EBD.PCCLIENT, EBD.PCUSUARI, EBD.PCATIVI,
+       EBD.PCPRACA, EBD.PCCIDADE, EBD.PCSUPERV, EBD.PCDISTRIB,
+       EBD.PCREGIAO, EBD.PCGERENTE,
+       EBD.PCEMPR COMPRADOR, EBD.PCEMPR EMITENTE,
+       EBD.PCPLPAG
+ WHERE PCPEDI.NUMPED          = PCPEDC.NUMPED
+   AND PCUSUARI.CODSUPERVISOR NOT IN ('9999')
+   AND PCCLIENT.CODCIDADE     = PCCIDADE.CODCIDADE(+)
+   AND PCPEDC.CODCLI          = PCCLIENT.CODCLI
+   AND PCSUPERV.CODSUPERVISOR = PCUSUARI.CODSUPERVISOR
+   AND PCCLIENT.CODATV1       = PCATIVI.CODATIV(+)
+   AND PCPEDC.DTCANCEL        IS NULL
+   AND PCPEDI.CODPROD         = PCPRODUT.CODPROD
+   AND PCPRODUT.CODEPTO       = PCDEPTO.CODEPTO
+   AND PCPRODUT.CODFORNEC     = PCFORNEC.CODFORNEC
+   AND PCPEDC.CODUSUR         = PCUSUARI.CODUSUR
+   AND PCPEDC.CODPRACA        = PCPRACA.CODPRACA
+   AND PCPEDC.CODPLPAG        = PCPLPAG.CODPLPAG(+)
+   AND PCPEDC.NUMREGIAO       = PCREGIAO.NUMREGIAO(+)
+   AND PCPEDC.CODEMITENTE     = EMITENTE.MATRICULA(+)
+   AND PCFORNEC.CODCOMPRADOR  = COMPRADOR.MATRICULA(+)
+   AND PCPRODUT.CODDISTRIB    = PCDISTRIB.CODDISTRIB(+)
+   AND PCSUPERV.CODGERENTE    = PCGERENTE.CODGERENTE(+)
+   AND PCPEDC.CONDVENDA       IN (1,2,3,7,9,14,15,17,18,19,98)
+   AND PCPEDC.POSICAO         IN ('L','M')
+   AND PCPEDC.CODFILIAL       = :userFilial   -- ← OBRIGATÓRIO
+```
+
+### Variante agregada por filial (para painel executivo)
+```sql
+SELECT PCPEDC.CODFILIAL,
+       COUNT(DISTINCT PCPEDC.NUMPED)  AS QTD_PEDIDOS,
+       COUNT(DISTINCT PCPEDC.CODCLI)  AS QTD_CLIENTES,
+       SUM(PCPEDI.QT *
+           CAST(DECODE(PCPEDC.CONDVENDA,
+                       5,0,6,0,11,0,12,0,
+                       NVL(NVL(PCPEDI.PVENDA,0)
+                         + NVL(PCPEDI.VLFRETE,0)
+                         + NVL(PCPEDI.VLOUTRASDESP,0)
+                         + NVL(PCPEDI.VLFRETE_RATEIO,0)
+                         + NVL(PCPEDI.VLOUTROS,0),0))
+                AS NUMERIC(18,6)))    AS VALOR_CARTEIRA
+  FROM EBD.PCPEDI, EBD.PCPEDC, EBD.PCUSUARI
+ WHERE PCPEDI.NUMPED          = PCPEDC.NUMPED
+   AND PCPEDC.CODUSUR         = PCUSUARI.CODUSUR
+   AND PCUSUARI.CODSUPERVISOR NOT IN ('9999')
+   AND PCPEDC.DTCANCEL        IS NULL
+   AND PCPEDC.CONDVENDA       IN (1,2,3,7,9,14,15,17,18,19,98)
+   AND PCPEDC.POSICAO         IN ('L','M')
+   AND PCPEDC.CODFILIAL       = :userFilial
+ GROUP BY PCPEDC.CODFILIAL
+```
+
+### Observações
+- `POSICAO = 'L'` = Liberado (pronto pra faturar)
+- `POSICAO = 'M'` = Montado (em separação/carregamento)
+- `CONDVENDA IN (1,2,3,7,9,14,15,17,18,19,98)` = vendas reais (exclui bonif, transferência, consignação)
+- Esta query equivale ao "Em Pedido" / "Carteira" do BI EBD
+- SEMPRE adicionar `AND PCPEDC.CODFILIAL = :userFilial` (obrigatório por regra #9)
+
