@@ -1,3 +1,68 @@
+---
+
+# 🛒 REGRA CRÍTICA: "Loja EBD" = E-COMMERCE (B2B + B2E)
+
+## Vocabulário canônico
+
+Quando o usuário fala "loja", "loja EBD", "loja online", "ecommerce" ou "e-commerce":
+- Está se referindo ao **CANAL ECOMMERCE** identificado por:
+  `ORIGEMPED = 'W' AND CODEMITENTE = 7777`
+- NÃO é marketplace, NÃO é venda RCA tradicional
+
+## 2 SEGMENTAÇÕES por TIPO DE CLIENTE (não por canal)
+
+| Segmento | Identificação | Quem é |
+|----------|---------------|--------|
+| **B2B** | `CODATV1 ≠ 31` | Clientes externos (varejistas, mercados, padarias etc) |
+| **B2E** | `CODATV1 = 31` | Funcionários EBD comprando pra consumo próprio |
+| **Loja total** | sem filtro CODATV1 | B2B + B2E juntos |
+
+## ⚠️ RCA é ortogonal ao canal
+
+**IMPORTANTE:** Pedido vindo da LOJA (`ORIGEMPED='W'`) PODE ter RCA atrelado.
+
+Razão: cliente atendido por RCA tradicional pode ALSO comprar via loja online.
+- `CODUSUR` em PCPEDC = RCA do relacionamento (dono da carteira)
+- `ORIGEMPED` = por onde a venda entrou no sistema
+- Os dois coexistem na mesma nota fiscal
+
+NÃO presumir que "venda da loja" exclui RCA. Os dois cortes coexistem.
+
+## 🤖 COMPORTAMENTO OBRIGATÓRIO DO AGENT
+
+### Quando user pergunta "loja" SEM especificar B2B/B2E:
+**SEMPRE perguntar antes de rodar query:**
+Quer ver:
+
+B2B (clientes externos)
+B2E (funcionários)
+Os dois juntos (loja total)
+
+
+### Quando user já especifica:
+Não pergunte, rode direto com o filtro correto:
+- "loja B2B" → `ORIGEMPED='W' + CODEMITENTE=7777 + CODATV1 ≠ 31`
+- "loja B2E" → `ORIGEMPED='W' + CODEMITENTE=7777 + CODATV1 = 31`
+- "loja total" / "loja completa" / "loja BR" → `ORIGEMPED='W' + CODEMITENTE=7777` (sem filtro CODATV1)
+
+### Quando user pergunta "loja por RCA":
+- Mostre RCAs com vendas via loja
+- Lembre que RCA tradicional pode aparecer aqui (não é erro)
+
+## Exemplos de interpretação correta
+
+| Pergunta do user | Comportamento |
+|-------------------|---------------|
+| "faturamento da loja hoje" | Perguntar B2B/B2E/total antes |
+| "faturamento da loja B2B esta semana" | Rodar direto com `CODATV1 ≠ 31` |
+| "vendas B2E ontem" | Rodar direto com `CODATV1 = 31` |
+| "loja total no mês" | Rodar sem filtro CODATV1 |
+| "quem são os top RCAs da loja" | Rodar agrupando por CODUSUR (não excluir RCA tradicional) |
+| "comparar loja vs venda tradicional" | Loja = `ORIGEMPED='W'+CODEMITENTE=7777`. Tradicional = sem esse filtro |
+
+---
+
+
 # Knowledge Base — EBD.ia
 
 > **Como funciona este arquivo:** carregado em wake-up de cada sessão do agente.
