@@ -519,3 +519,66 @@ Regra: em análises de ruptura física, os CDs 17, 19 e 23 entram agrupados com 
 | 52 | EBDN PETROLINA | NE3 |
 | 53 | EBDN CARUARU | NE3 |
 
+
+
+<!-- AUTO-APPEND PROP-2E6A05A5 aprovado por Thiago -->
+
+
+## Regra de negócio: identificação de pedidos E-commerce B2B
+
+> Confirmado por Thiago (admin) em 26/05/2026.
+
+### Filtros obrigatórios para isolar pedidos do canal B2B (portal loja EBD)
+
+```sql
+WHERE p.ORIGEMPED = 'W'          -- origem web/portal
+  AND p.CODEMITENTE = 7777       -- emitente virtual do portal B2B
+  AND c.CODATV1 != <cod_funcionario>  -- excluir clientes do tipo "funcionário"
+```
+
+### Explicação dos campos
+
+| Campo | Valor | Significado |
+|---|---|---|
+| `PCPEDC.ORIGEMPED` | `'W'` | Pedido veio do canal web/portal |
+| `PCPEDC.CODEMITENTE` | `7777` | Código virtual que identifica o portal B2B como emitente — presente em TODOS os pedidos B2B, independente do CODUSUR |
+| `PCCLIENT.CODATV1` | ≠ ramo "funcionário" | Cliente deve ser um estabelecimento comercial real, não um funcionário EBD |
+
+### Dois perfis de CODUSUR no canal W
+
+1. **Vendedor exclusivo B2B** — CODUSUR com nome `'ECOMMERCE B2B LOJAEBD XX'` (ex: 2611 Manaus, 2608 Caruaru, etc). Pedido digitado/gerado pela equipe do portal.
+2. **RCA de campo** — CODUSUR normal de vendedor externo. Cliente comprou sozinho pelo portal, mas o pedido caiu na carteira do RCA responsável. Identificado pelo `CODEMITENTE = 7777`.
+
+**O filtro correto para "tudo que veio do portal B2B" é `CODEMITENTE = 7777`**, não filtrar por CODUSUR com nome B2B (isso pega só o perfil 1).
+
+### Exclusão de clientes funcionário
+
+Clientes do ramo de atividade "funcionário" (interno EBD) NÃO devem entrar em métricas de e-commerce B2B. Filtrar via:
+```sql
+JOIN EBD.PCATIVI ati ON ati.CODATIV = c.CODATV1
+WHERE UPPER(ati.RAMO) NOT LIKE '%FUNCIONARIO%'
+  AND UPPER(ati.RAMO) NOT LIKE '%FUNCIONÁRIO%'
+```
+Ou via GD_DIM_CLIENTE:
+```sql
+WHERE UPPER(dc.RAMOATIVIDADE) NOT LIKE '%FUNCIONARIO%'
+  AND UPPER(dc.RAMOATIVIDADE) NOT LIKE '%FUNCIONÁRIO%'
+```
+
+### Template base para análise B2B
+
+```sql
+SELECT p.NUMPED, p.DATA, p.CODFILIAL, p.CODCLI, c.CLIENTE,
+       p.CODUSUR, p.POSICAO, p.CONDVENDA,
+       p.VLTOTAL, p.VLATEND, p.NUMPEDRCA, p.OBS1
+FROM EBD.PCPEDC p
+JOIN EBD.PCCLIENT c ON c.CODCLI = p.CODCLI
+JOIN EBD.PCATIVI ati ON ati.CODATIV = c.CODATV1
+WHERE p.ORIGEMPED = 'W'
+  AND p.CODEMITENTE = 7777
+  AND UPPER(ati.RAMO) NOT LIKE '%FUNCIONARIO%'
+  AND UPPER(ati.RAMO) NOT LIKE '%FUNCIONÁRIO%'
+  AND p.CODFILIAL = :userFilial
+ORDER BY p.DATA DESC
+```
+
