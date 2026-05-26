@@ -428,3 +428,94 @@ aplica permissões).
 | 2026-05-19 | v1 | Esqueleto inicial baseado em relatórios Excel do BI atual |
 | 2026-05-19 | v2 | Reescrita massiva com descobertas do `winthor_discovery.md`: seções 10, 11, 12 adicionadas; correção `PCFILIAL.CODIGO`; hierarquia agora com Coordenador; vocabulário expandido; pendências reduzidas de 11 para 7 |
 
+
+---
+
+## 🎯 Regra de desambiguação: "SP" vs "Regional SP"
+
+**CRÍTICO** — interpretação obrigatória de termos geográficos:
+
+- **"SP" / "filial SP" / "loja SP"** = filial 02 (EBD SP, unidade São Paulo capital) **APENAS**
+- **"Regional SP" / "região SP" / "SP1"** = SP1 (filiais 02 + 16: SP + Itapevi)
+- **"SP2"** = filiais 15 + 18 (Guarulhos + SBC)
+- **"Regional SP completa"** = SP1 + SP2 (filiais 02, 15, 16, 18)
+
+Mesma regra vale pra todos os estados:
+- "RJ" sozinho = pedir clarificação (RJ tem 4 filiais: 05, 10, 13, 14)
+- "Regional RJ" / "RJ1" = filiais 10, 13
+- "RJ2" = filiais 05, 14
+
+**Default quando ambíguo:** assumir UNIDADE (filial única), NÃO regional.
+Se o usuário quiser visão regional, ele sempre vai dizer "regional X".
+
+
+<!-- AUTO-APPEND PROP-A253228A aprovado por Thiago -->
+
+## Atualização mapa de filiais — 26/05/2026
+
+### Correções confirmadas pelo usuário admin
+
+#### Filial 22 — EBD MARABA é ATIVA, regional NO2
+
+| Código | Filial | Regional |
+|---|---|---|
+| 22 | EBD MARABA | NO2 |
+
+Regional NO2 atualizada: filiais 01 (EBD MATRIZ) + 07 (EBD MACAPA) + 22 (EBD MARABA)
+
+#### Depósitos — vinculados à filial mãe (NÃO são filiais comerciais)
+
+| Código | Nome | Filial Mãe | Regional Mãe |
+|---|---|---|---|
+| 17 | CD SÃO PEDRO DA ALDEIA | 10 — EBD SÃO GONÇALO | RJ1 |
+| 19 | CD SAO LUIS | 04 — EBD SAO LUIS | NE1 |
+| 23 | CD PETRÓPOLIS | 14 — EBD PIRAÍ | RJ2 |
+
+Regra: em análises de ruptura física, os CDs 17, 19 e 23 entram agrupados com sua filial mãe. Em faturamento comercial, não entram.
+
+#### EBDN — filiais ativas com faturamento em maio/2026
+
+- 52 EBDN PETROLINA (NE3): R$ 3.744.205,51
+- 53 EBDN CARUARU (NE3): R$ 15.597.133,98
+- 49, 50, 51: sem faturamento em maio/2026 — fora do mapa ativo
+
+#### Mapa regional atualizado — 9 regionais, 21 filiais ativas
+
+| Regional | Códigos | Filiais |
+|---|---|---|
+| NE1 | 04, 12 | EBD SAO LUIS, EBD IMPERATRIZ |
+| NE2 | 03, 09, 21 | EBD FORTALEZA, EBD JUAZEIRO, EBD TERESINA |
+| NE3 | 52, 53 | EBDN PETROLINA, EBDN CARUARU |
+| NO1 | 06, 08, 11 | EBD MANAUS, EBD BOA VISTA, EBD SANTAREM |
+| NO2 | 01, 07, 22 | EBD MATRIZ, EBD MACAPA, EBD MARABA |
+| RJ1 | 10, 13 | EBD SÃO GONÇALO, EBD TAQUARA |
+| RJ2 | 05, 14 | EBD DUQUE, EBD PIRAÍ |
+| SP1 | 02, 16 | EBD SP, EBD ITAPEVI |
+| SP2 | 15, 18 | EBD GUARULHOS, EBD SBC |
+
+#### Mapa completo de filiais — 21 filiais ativas
+
+| Código | Filial | Regional |
+|---|---|---|
+| 01 | EBD MATRIZ | NO2 |
+| 02 | EBD SP | SP1 |
+| 03 | EBD FORTALEZA | NE2 |
+| 04 | EBD SAO LUIS | NE1 |
+| 05 | EBD DUQUE | RJ2 |
+| 06 | EBD MANAUS | NO1 |
+| 07 | EBD MACAPA | NO2 |
+| 08 | EBD BOA VISTA | NO1 |
+| 09 | EBD JUAZEIRO | NE2 |
+| 10 | EBD SÃO GONÇALO | RJ1 |
+| 11 | EBD SANTAREM | NO1 |
+| 12 | EBD IMPERATRIZ | NE1 |
+| 13 | EBD TAQUARA | RJ1 |
+| 14 | EBD PIRAÍ | RJ2 |
+| 15 | EBD GUARULHOS | SP2 |
+| 16 | EBD ITAPEVI | SP1 |
+| 18 | EBD SBC | SP2 |
+| 21 | EBD TERESINA | NE2 |
+| 22 | EBD MARABA | NO2 |
+| 52 | EBDN PETROLINA | NE3 |
+| 53 | EBDN CARUARU | NE3 |
+
