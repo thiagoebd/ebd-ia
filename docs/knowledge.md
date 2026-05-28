@@ -725,3 +725,50 @@ Termos que devem acionar esse filtro:
 - "B2E", "B2E canal", "venda funcionário", "venda para funcionários",
   "portal funcionário", "benefício funcionário", "ecommerce funcionário"
 
+
+
+<!-- AUTO-APPEND PROP-78E75851 aprovado por Thiago -->
+
+## Regra padrão: "faturamento" = Líquido
+
+> Confirmado por Thiago (admin) em 28/05/2026.
+
+Quando qualquer usuário perguntar "faturamento" (sem adjetivo), o agente DEVE
+retornar o **Faturamento Líquido**, não o Bruto.
+
+### Definição oficial
+
+```
+Faturamento Líquido = Faturamento Bruto
+                    - Devoluções (vinculadas + avulsas)
+                    - Cancelamentos
+                    - Bonificações (CONDVENDA 5/6)
+```
+
+### Regra de resposta
+
+| O usuário diz | O agente entrega |
+|---|---|
+| "faturamento" | Líquido (padrão) |
+| "faturamento bruto" | Bruto (explícito) |
+| "faturamento líquido" | Líquido (explícito) |
+| "vendas" | Líquido (mesmo padrão) |
+
+### Implementação SQL
+
+Usar a combinação:
+- `VIEW_VENDAS_RESUMO_FATURAMENTO` com `CONDVENDA = 1` → Bruto base
+- Subtrair `VIEW_DEVOL_RESUMO_FATURAMENTO` (`CONDVENDA = 1`) → devoluções vinculadas
+- Subtrair `VIEW_DEVOL_RESUMO_FATURAVULSA` (sem filtro CONDVENDA) → devoluções avulsas
+
+Bonificações e cancelamentos já são excluídos pelo filtro `CONDVENDA = 1` na view principal.
+
+> ⚠️ A view `GD_FATO_VENDAFATURAMENTO` retorna o **Bruto** (inclui bonificações
+> dependendo do período). Para Líquido oficial, usar `VIEW_VENDAS_RESUMO_FATURAMENTO`
+> com as deduções de devolução conforme fórmula acima (cicatriz 2026-05-20).
+
+### Comunicação ao usuário
+
+Sempre que exibir faturamento, deixar claro no rodapé:
+> *Fonte: Faturamento Líquido (bruto - devoluções - bonificações)*
+
