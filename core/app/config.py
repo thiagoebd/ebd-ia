@@ -26,7 +26,7 @@ class Settings(BaseSettings):
 
     # Limites
     max_tokens: int = 4000
-    max_iterations: int = 10  # cap de tool-use loop
+    max_iterations: int = 15  # cap de tool-use loop
 
 
 settings = Settings()
