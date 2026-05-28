@@ -77,3 +77,4 @@ docs/sql-corrections.md.bak
 docs/sql-corrections.md.bak
 *.bak.*
 data/*.db
+gateway/.env
