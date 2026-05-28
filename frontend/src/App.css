@@ -1,0 +1,87 @@
+:root {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  line-height: 1.6;
+}
+
+body {
+  margin: 0;
+  background: #faf9f5;
+  color: #1a1a1a;
+}
+
+.container {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 2rem;
+}
+
+header {
+  text-align: center;
+  margin-bottom: 2rem;
+}
+
+header h1 {
+  font-family: Georgia, serif;
+  font-size: 3rem;
+  margin: 0;
+  color: #d97757;
+}
+
+.subtitle {
+  color: #6b6b6b;
+  font-size: 0.95rem;
+}
+
+.card {
+  background: white;
+  border: 1px solid #e8e6df;
+  border-radius: 12px;
+  padding: 1.5rem;
+  margin-bottom: 1rem;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+}
+
+.card.success { border-color: #c5d9b9; background: #f4f8ef; }
+.card.error { border-color: #e8c1c1; background: #fbf2f2; }
+
+.card h2, .card h3 { margin-top: 0; }
+
+button {
+  background: #d97757;
+  color: white;
+  border: none;
+  padding: 0.6rem 1.2rem;
+  border-radius: 8px;
+  font-size: 0.95rem;
+  cursor: pointer;
+  font-weight: 500;
+  margin-right: 0.5rem;
+}
+
+button:hover:not(:disabled) { background: #c66643; }
+button:disabled { opacity: 0.5; cursor: not-allowed; }
+button.secondary { background: #6b6b6b; }
+button.secondary:hover { background: #555; }
+
+pre {
+  background: #1a1a1a;
+  color: #c5d9b9;
+  padding: 1rem;
+  border-radius: 8px;
+  overflow-x: auto;
+  font-size: 0.85rem;
+}
+
+code {
+  background: #f0eee6;
+  padding: 0.1rem 0.4rem;
+  border-radius: 4px;
+  font-size: 0.85rem;
+}
+
+footer {
+  margin-top: 3rem;
+  text-align: center;
+  color: #999;
+  font-size: 0.8rem;
+}
