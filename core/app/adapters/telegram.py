@@ -18,6 +18,7 @@ from typing import Any
 from app.agent import run_turn
 from app.config import settings
 from app.tools.knowledge_append import approve_proposal, discard_proposal
+from app.storage.chat_history import load_history, save_history, reset_history
 
 # ACL hardcoded (futuro: vir de FILIAL_ACL_CHATBOT no Oracle)
 _admin_ids_str = os.environ.get("ADMIN_CHAT_IDS", "")
@@ -100,6 +101,7 @@ async def handle_message(chat_id: int, user_first_name: str, text: str) -> list[
             ]
 
     if text == "/reset":
+        reset_history(chat_id)
         _history[chat_id] = []
         _session_stats[chat_id] = {"cost_usd": 0.0, "turns": 0}
         return ["✅ Histórico limpo."]
@@ -131,7 +133,8 @@ async def handle_message(chat_id: int, user_first_name: str, text: str) -> list[
         return [f"{emoji} {r['msg']}"]
 
     # Mensagem normal — chama o agent
-    historico = _history.get(chat_id, [])
+    historico = _history.get(chat_id) or load_history(chat_id)
+    logger.info(f"🔍 [{chat_id}] hist_len={len(historico)} msgs, mem={chat_id in _history}")
     result = await run_turn(
         text,
         conversation_history=historico,
@@ -141,6 +144,10 @@ async def handle_message(chat_id: int, user_first_name: str, text: str) -> list[
         channel="telegram",
     )
     _history[chat_id] = result["history"]
+    try:
+        save_history(chat_id, result["history"])
+    except Exception as e:
+        logger.warning(f"Falha salvando historico chat_id={chat_id}: {e}")
 
     u = result.get("usage", {})
     cost = _calc_cost_usd(u)

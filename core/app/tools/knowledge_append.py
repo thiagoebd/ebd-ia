@@ -216,24 +216,53 @@ def approve_proposal(pid: str, user_name: str = "Thiago") -> dict:
     push_ok = ok
     push_msg = msg
 
-    # 5) Volta pra main pra nao deixar usuario travado em branch errada
-    _run_git(["checkout", "main"], repo)
+    # 5) Volta pra main e faz MERGE automatico da branch aprovada
+    ok, msg = _run_git(["checkout", "main"], repo)
+    if not ok:
+        return {"ok": False, "msg": f"Commit OK mas falha ao voltar pra main: {msg}"}
+
+    # 5a) Merge da agent-proposals na main (fast-forward, branches sincronizadas)
+    merge_ok, merge_msg = _run_git(
+        ["merge", BRANCH_PROPOSTAS, "--no-edit"], repo
+    )
+
+    # 5b) Push da main (so se merge deu certo)
+    main_push_ok = False
+    main_push_msg = ""
+    if merge_ok:
+        main_push_ok, main_push_msg = _run_git(["push", "origin", "main"], repo)
+
+    # 5c) Reload do system prompt em memoria (knowledge nova 'pega' sem restart)
+    reload_ok = False
+    reload_info = ""
+    if merge_ok:
+        try:
+            from app.agent import reload_system_prompt
+            novo_tamanho = reload_system_prompt()
+            reload_ok = True
+            reload_info = f"prompt recarregado ({novo_tamanho:,} chars)"
+        except Exception as e:
+            reload_info = f"reload falhou: {e}"
 
     mark_approved(pid)
 
-    pr_url = (
-        f"https://github.com/thiagoebd/ebd-ia/compare/main...{BRANCH_PROPOSTAS}"
-        f"?expand=1"
-    )
+    # Monta mensagem de status honesta (cada etapa reportada)
+    linhas = [f"OK - {pid} aprovado e gravado."]
+    linhas.append(f"Branch '{BRANCH_PROPOSTAS}': {'commit+push OK' if push_ok else 'push falhou: ' + push_msg}")
+    if merge_ok:
+        linhas.append(f"Main: merge OK + {'push OK' if main_push_ok else 'push FALHOU: ' + main_push_msg}")
+    else:
+        linhas.append(f"Main: merge FALHOU ({merge_msg}) - knowledge NAO esta ativa ainda")
+    if reload_ok:
+        linhas.append(f"Bot: {reload_info} - JA esta usando o conhecimento novo")
+    elif merge_ok:
+        linhas.append(f"Bot: {reload_info} - pode precisar restart manual")
 
     return {
         "ok": True,
-        "msg": (
-            f"OK - {pid} commitado na branch '{BRANCH_PROPOSTAS}'.\n"
-            f"{'Push: OK' if push_ok else 'Push falhou: ' + push_msg}\n"
-            f"Abra PR em: {pr_url}"
-        ),
-        "pr_url": pr_url,
+        "msg": "\n".join(linhas),
+        "merge_ok": merge_ok,
+        "reload_ok": reload_ok,
     }
 
 

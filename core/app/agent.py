@@ -26,7 +26,16 @@ _client = AsyncAnthropic(api_key=settings.anthropic_api_key)
 _system_prompt = build_system_prompt()
 _tools = [ORACLE_QUERY_TOOL, KNOWLEDGE_APPEND_TOOL, LIST_PROPOSALS_TOOL]
 
-MAX_HISTORY_PAIRS = 3
+
+def reload_system_prompt() -> int:
+    """Reconstrói o system prompt em memória (relê os .md do disco).
+    Chamado após /aprovar fazer merge na main, pra knowledge nova 'pegar'
+    sem precisar reiniciar o processo. Retorna tamanho em chars."""
+    global _system_prompt
+    _system_prompt = build_system_prompt()
+    return len(_system_prompt)
+
+MAX_HISTORY_PAIRS = 10
 
 
 async def _run_tool(tool_name: str, tool_input: dict, user_id: str, user_role: str) -> str:

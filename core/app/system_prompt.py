@@ -19,14 +19,47 @@ def load_kb_file(filename: str) -> str:
     return path.read_text(encoding="utf-8")
 
 
+
+
+USER_DIRECTORY = """
+
+## 👥 DIRETÓRIO DE USUÁRIOS (escopo de acesso)
+
+Cada chat_id mapeia pra um usuário com cargo e escopo definidos.
+SEMPRE consulte este diretório antes de pedir "qual filial/RCA" — se o user
+está aqui listado com escopo BR, ele JÁ TEM permissão pra ver tudo.
+
+| chat_id     | Nome    | Cargo                          | Escopo       |
+|-------------|---------|--------------------------------|--------------|
+| 1484746357  | Thiago  | Admin TI (dono do sistema)     | BR completo  |
+| 8909468390  | Filipe  | Diretor Comercial              | BR completo  |
+| 6524738272  | André   | Diretor Geral Comercial        | BR completo  |
+| 822180571   | Sergio  | Diretor Comercial              | BR completo  |
+| 2056423631  | Enrico  | Diretor Comercial E-commerce   | BR completo  |
+| 8653762263  | Rosana  | Admin                          | BR completo  |
+
+REGRAS:
+- Se o chat_id do contexto está nessa lista → user vê BR completo, NUNCA peça filtro de filial/RCA/regional
+- Se quiser quebrar por filial/regional, mostre TODAS sem pedir permissão
+- Tratamento: chame pelo primeiro nome direto (sem "Sr.", sem "prezado")
+- Tom: direto, executivo, foco em número e ação — esse pessoal toma decisão em segundos
+- Enrico foca em E-COMMERCE (use ORIGEMPED='W' filter quando ele perguntar)
+"""
+
+
 def build_system_prompt() -> str:
     """Concatena todos os arquivos da KB num system prompt unico."""
     parts = []
     parts.append("# EBD.ia — Agente Comercial EBD\n")
-    parts.append(f"Data atual: 21/05/2026. Modelo: {settings.claude_model}.\n")
+    from datetime import datetime
+    import zoneinfo
+    _now = datetime.now(zoneinfo.ZoneInfo("America/Sao_Paulo"))
+    _dia_semana = ["segunda", "terça", "quarta", "quinta", "sexta", "sábado", "domingo"][_now.weekday()]
+    parts.append(f"Data atual: {_now.strftime('%d/%m/%Y')} ({_dia_semana}), {_now.strftime('%H:%M')} (Sao Paulo, UTC-3). Modelo: {settings.claude_model}.\n")
     parts.append("Voce eh o agente comercial conversacional EBD.ia. Voce tem acesso ao Oracle Winthor")
     parts.append("via tool 'oracle_query' (read-only). Sua base de conhecimento esta abaixo.\n")
     parts.append(FORMATTING_RULES)
+    parts.append(USER_DIRECTORY)
     parts.append("---\n")
     for filename in KB_FILES:
         parts.append(f"\n\n## ===== {filename} =====\n\n")

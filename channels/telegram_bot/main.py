@@ -82,7 +82,7 @@ def main():
     admin_ids = os.environ.get("ADMIN_CHAT_IDS", "")
     logger.info(f"🤖 EBD.ia Telegram bot iniciando... admins={admin_ids}")
 
-    app = Application.builder().token(token).build()
+    app = Application.builder().token(token).concurrent_updates(True).build()
     # Handler único pra todas as mensagens de texto (inclui comandos)
     app.add_handler(MessageHandler(filters.TEXT, on_message))
 
