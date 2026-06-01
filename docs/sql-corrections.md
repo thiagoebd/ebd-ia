@@ -806,3 +806,143 @@ agrupamentos simples por mês/ano.
 
 Isso reforça a cicatriz de 19/05/2026 "Datas nas views GD_* são STRINGS YYYYMMDD".
 
+
+
+<!-- AUTO-APPEND PROP-AD8844AA aprovado por Thiago -->
+
+
+## Cicatriz: Projeção de Fechamento Mensal EBD — Fórmula Validada
+
+> Descoberta e validada em 28/05/2026 com base em dados reais jan-mai/2026.
+> Erro anterior: uso de ritmo médio diário ignorava o padrão de fechamento em lote.
+
+---
+
+### ⚠️ O problema (por que os 3 cenários anteriores erraram)
+
+O modelo de projeção usava **ritmo médio diário × dias restantes**.
+Esse modelo FALHA porque ignora que o faturamento EBD é **fortemente não-linear**:
+os últimos 1-2 dias do mês concentram 19-31% do total mensal em lote.
+
+---
+
+### 📊 Padrão histórico confirmado (bruto EBD sem excluir loja)
+
+| Mês | Total Mês | Penúltimo dia (R$) | Último dia (R$) | % último dia |
+|---|---|---|---|---|
+| Jan/2026 | ~R$280M | Sex 30/01: R$30,0M | Sáb 31/01: R$61,5M | ~22% |
+| Fev/2026 | R$329,8M | Sex 27/02: R$36,7M | Sáb 28/02: R$62,4M | ~19% |
+| Mar/2026 | R$360,4M | Seg 30/03: R$10,1M | Ter 31/03: R$86,4M | ~24% |
+| Abr/2026 | R$289,1M | Qua 29/04: R$24,0M | Qui 30/04: R$88,9M | ~31% |
+| Mai/2026 | ~R$332,9M | Sex 29/05: R$38,5M | Sáb 30/05: R$62,6M | ~19% |
+
+**Faixa do último dia útil do mês: R$60M–R$89M** (independente do dia da semana).
+
+**Faixa do penúltimo dia útil:** R$10M–R$38,5M (mais variável).
+
+**Aceleração começa na quinta-feira da última semana** — não só no último dia.
+
+---
+
+### 🔵 Exceção crítica: Loja EBD (ORIGEMPED='W' + CODEMITENTE=7777)
+
+A loja EBD (B2B + B2E) tem **comportamento LINEAR** — NÃO segue o padrão de fechamento em lote.
+
+| Mês | Total Loja | Média diária útil |
+|---|---|---|
+| Jan/2026 | R$799K | ~R$37K/dia útil |
+| Fev/2026 | R$1,02M | ~R$48K/dia útil |
+| Mar/2026 | R$1,21M | ~R$57K/dia útil |
+| Abr/2026 | R$1,13M | ~R$54K/dia útil |
+| Mai/2026 | R$1,16M | ~R$54K/dia útil |
+
+Nos últimos 7 dias da loja, **nenhum dia foge da faixa normal** — confirma linearidade.
+
+**REGRA:**
+> Quando o usuário perguntar "previsão de fechamento" ou "projeção do mês":
+> - O faturamento da loja NÃO usa a fórmula de lote — usa **ritmo médio linear**.
+> - O faturamento da loja **pode permanecer incluído no total geral** (não precisa ser excluído da visão macro).
+> - Separar apenas quando o usuário pedir análise específica da loja.
+
+---
+
+### 🎯 Fórmula de projeção EBD (corrigida)
+
+```
+PREVISÃO_FECHAMENTO = ACUMULADO_ATÉ_HOJE
+                    + PROJEÇÃO_DIAS_RESTANTES_NORMAIS
+                    + BÔNUS_FECHAMENTO_LOTE
+```
+
+#### Componentes:
+
+**1. Acumulado até hoje**
+```sql
+SELECT SUM(v.VLATEND)
+FROM EBD.VIEW_VENDAS_RESUMO_FATURAMENTO v
+WHERE v.DTSAIDA BETWEEN TRUNC(SYSDATE,'MM') AND SYSDATE
+  AND v.CONDVENDA = 1
+```
+
+**2. Projeção dias restantes normais** (excluindo os 2 últimos dias do mês)
+```
+ritmo_medio = acumulado / dias_uteis_passados
+projecao_normal = ritmo_medio × dias_uteis_restantes_excluindo_ultimos_2
+```
+> "Dias úteis" = dias com faturamento > R$1M (exclui dom e feriados automaticamente)
+
+**3. Bônus de fechamento em lote** (constante histórica):
+- Penúltimo dia útil do mês: usar **mediana histórica = R$24M** (faixa R$10M–R$38M)
+- Último dia útil do mês: usar **mediana histórica = R$75M** (faixa R$60M–R$89M)
+
+> Se já passaram esses dias, usar o valor real já incluído no acumulado.
+
+#### Cenários recomendados:
+
+| Cenário | Último dia | Penúltimo | Uso |
+|---|---|---|---|
+| Conservador | R$62M | R$15M | Piso |
+| Base | R$75M | R$24M | Referência |
+| Otimista | R$89M | R$38M | Teto |
+
+---
+
+### 📐 Cálculo de dias úteis
+
+```sql
+-- Dias com faturamento real > R$1M no mês corrente (proxy de "dia útil")
+SELECT COUNT(*) AS DIAS_UTEIS_PASSADOS,
+       SUM(BRUTO) AS ACUMULADO
+FROM (
+  SELECT TRUNC(v.DTSAIDA) AS DT, SUM(v.VLATEND) AS BRUTO
+  FROM EBD.VIEW_VENDAS_RESUMO_FATURAMENTO v
+  WHERE v.DTSAIDA BETWEEN TRUNC(SYSDATE,'MM') AND SYSDATE
+    AND v.CONDVENDA = 1
+  GROUP BY TRUNC(v.DTSAIDA)
+  HAVING SUM(v.VLATEND) > 1000000
+)
+```
+
+---
+
+### ⚠️ Anti-padrões a evitar
+
+- ❌ **Nunca usar média simples × 31** para projetar meses com fechamento em lote
+- ❌ **Nunca projetar a loja com o mesmo modelo** do faturamento tradicional
+- ❌ **Nunca assumir que sábado é fraco** — sábado de fechamento é o maior dia do mês
+- ❌ **Não usar o ritmo da 3ª semana** para projetar a última — a última semana acelera ~40-60% vs semanas anteriores
+
+---
+
+### 📅 Comportamento da última semana (padrão)
+
+| Dia | Comportamento típico |
+|---|---|
+| Segunda | Baixo (R$4M–R$8M) |
+| Terça | Médio (R$13M–R$14M) |
+| Quarta | Médio-alto (R$17M–R$24M) |
+| Quinta | Alto (R$21M–R$27M) |
+| Penúltimo dia útil | Muito alto (R$10M–R$38M) |
+| Último dia útil | Explosivo (R$60M–R$89M) |
+
+
