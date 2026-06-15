@@ -12,19 +12,19 @@ import "./App.css";
 const API_BASE = import.meta.env.VITE_API_BASE_URL;
 
 type Msg = { role: "user" | "assistant"; text: string; status?: string; tools?: string[] };
-type Thread = { id: number; title: string; msgs: Msg[] };
+type Thread = { id: string; title: string; msgs: Msg[]; loaded: boolean };
 
 function App() {
   const { instance, accounts } = useMsal();
   const [threads, setThreads] = useState<Thread[]>([]);
-  const [activeId, setActiveId] = useState<number | null>(null);
+  const [activeId, setActiveId] = useState<string | null>(null);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
-  const historyRef = useRef<any[]>([]);
   const abortRef = useRef<AbortController | null>(null);
   const taRef = useRef<HTMLTextAreaElement>(null);
+  const streamTidRef = useRef<string>("");
 
   const active = threads.find((t) => t.id === activeId) || null;
   const messages = active?.msgs || [];
@@ -35,9 +35,51 @@ function App() {
     scrollRef.current?.scrollTo(0, scrollRef.current.scrollHeight);
   }, [messages]);
 
+  async function token() {
+    const tok = await instance.acquireTokenSilent({ ...apiRequest, account: accounts[0] });
+    return tok.accessToken;
+  }
+
+  // carrega a lista de conversas do banco ao logar
+  useEffect(() => {
+    if (accounts.length === 0) return;
+    (async () => {
+      try {
+        const t = await token();
+        const resp = await fetch(`${API_BASE}/api/conversations`, {
+          headers: { Authorization: `Bearer ${t}` },
+        });
+        if (!resp.ok) return;
+        const data = await resp.json();
+        setThreads(data.map((c: any) => ({ id: c.id, title: c.title, msgs: [], loaded: false })));
+      } catch { /* silencioso */ }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [accounts.length]);
+
+  async function openThread(id: string) {
+    setActiveId(id);
+    setInput("");
+    const t = threads.find((x) => x.id === id);
+    if (t && t.loaded) return;
+    try {
+      const tok = await token();
+      const resp = await fetch(`${API_BASE}/api/conversations/${id}`, {
+        headers: { Authorization: `Bearer ${tok}` },
+      });
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const data = await resp.json();
+      const msgs: Msg[] = (data.messages || []).map((m: any) => ({
+        role: m.role, text: m.text, tools: m.tools || [],
+      }));
+      setThreads((ts) => ts.map((x) => (x.id === id ? { ...x, msgs, loaded: true, title: data.title } : x)));
+    } catch (e: any) {
+      setError(e.message);
+    }
+  }
+
   function newChat() {
     setActiveId(null);
-    historyRef.current = [];
     setInput("");
   }
 
@@ -56,18 +98,18 @@ function App() {
     if (taRef.current) taRef.current.style.height = "auto";
     setBusy(true);
 
-    // cria thread se for a primeira mensagem
-    let tid = activeId;
-    if (tid === null) {
-      tid = Date.now();
+    const isNew = activeId === null;
+    let tid = isNew ? `tmp-${Date.now()}` : activeId!;
+    streamTidRef.current = tid;
+
+    if (isNew) {
       const title = question.length > 42 ? question.slice(0, 42) + "…" : question;
-      setThreads((ts) => [{ id: tid!, title, msgs: [] }, ...ts]);
+      setThreads((ts) => [{ id: tid, title, msgs: [], loaded: true }, ...ts]);
       setActiveId(tid);
-      historyRef.current = [];
     }
 
     const pushMsgs = (updater: (m: Msg[]) => Msg[]) =>
-      setThreads((ts) => ts.map((t) => (t.id === tid ? { ...t, msgs: updater(t.msgs) } : t)));
+      setThreads((ts) => ts.map((t) => (t.id === streamTidRef.current ? { ...t, msgs: updater(t.msgs) } : t)));
 
     pushMsgs((m) => [
       ...m,
@@ -76,13 +118,13 @@ function App() {
     ]);
 
     try {
-      const tok = await instance.acquireTokenSilent({ ...apiRequest, account: accounts[0] });
+      const tok = await token();
       const controller = new AbortController();
       abortRef.current = controller;
       const resp = await fetch(`${API_BASE}/api/chat`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${tok.accessToken}` },
-        body: JSON.stringify({ message: question, history: historyRef.current }),
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${tok}` },
+        body: JSON.stringify({ message: question, conversation_id: isNew ? null : activeId }),
         signal: controller.signal,
       });
       if (!resp.ok || !resp.body) {
@@ -106,6 +148,18 @@ function App() {
           if (!json) continue;
           let ev: any;
           try { ev = JSON.parse(json); } catch { continue; }
+
+          if (ev.type === "conversation") {
+            const realId = ev.id as string;
+            if (realId !== streamTidRef.current) {
+              const oldId = streamTidRef.current;
+              setThreads((ts) => ts.map((t) => (t.id === oldId ? { ...t, id: realId, title: ev.title || t.title } : t)));
+              setActiveId(realId);
+              streamTidRef.current = realId;
+            }
+            continue;
+          }
+
           pushMsgs((m) => {
             const copy = [...m];
             const last = copy[copy.length - 1];
@@ -113,7 +167,7 @@ function App() {
             if (ev.type === "status") last.status = ev.text;
             else if (ev.type === "tool") last.tools = [...(last.tools || []), ev.name];
             else if (ev.type === "token") { last.status = undefined; last.text += ev.text; }
-            else if (ev.type === "done") { last.status = undefined; historyRef.current = ev.history || historyRef.current; }
+            else if (ev.type === "done") { last.status = undefined; }
             else if (ev.type === "error") { last.status = undefined; last.text += `\n\n⚠️ Erro: ${ev.detail}`; }
             return copy;
           });
@@ -164,7 +218,6 @@ function App() {
 
       <AuthenticatedTemplate>
         <div className="app">
-          {/* ─── Sidebar ─── */}
           <aside className="sidebar">
             <div className="sb-head">
               <img src="/logo-ebd.png" alt="EBD" />
@@ -195,7 +248,7 @@ function App() {
                 <div
                   key={t.id}
                   className={`thread ${t.id === activeId ? "active" : ""}`}
-                  onClick={() => { setActiveId(t.id); historyRef.current = []; }}
+                  onClick={() => openThread(t.id)}
                 >
                   <span className="lbl">{t.title}</span>
                 </div>
@@ -212,7 +265,6 @@ function App() {
             </div>
           </aside>
 
-          {/* ─── Main ─── */}
           <main className="main">
             <div className="chat" ref={scrollRef}>
               <div className="thread-col">
