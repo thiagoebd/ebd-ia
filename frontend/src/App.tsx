@@ -24,6 +24,7 @@ function App() {
   const scrollRef = useRef<HTMLDivElement>(null);
   const historyRef = useRef<any[]>([]);
   const abortRef = useRef<AbortController | null>(null);
+  const taRef = useRef<HTMLTextAreaElement>(null);
 
   const active = threads.find((t) => t.id === activeId) || null;
   const messages = active?.msgs || [];
@@ -52,6 +53,7 @@ function App() {
     if (!question || busy) return;
     setError(null);
     setInput("");
+    if (taRef.current) taRef.current.style.height = "auto";
     setBusy(true);
 
     // cria thread se for a primeira mensagem
@@ -137,6 +139,13 @@ function App() {
 
   function stop() {
     abortRef.current?.abort();
+  }
+
+  function autosize() {
+    const ta = taRef.current;
+    if (!ta) return;
+    ta.style.height = "auto";
+    ta.style.height = Math.min(ta.scrollHeight, 200) + "px";
   }
 
   function onKey(e: React.KeyboardEvent) {
@@ -259,8 +268,9 @@ function App() {
             <div className="composer-wrap">
               <div className="composer">
                 <textarea
+                  ref={taRef}
                   value={input}
-                  onChange={(e) => setInput(e.target.value)}
+                  onChange={(e) => { setInput(e.target.value); autosize(); }}
                   onKeyDown={onKey}
                   placeholder="Pergunte ao EBD.ia…"
                   rows={1}
