@@ -12,7 +12,9 @@ import "./App.css";
 const API_BASE = import.meta.env.VITE_API_BASE_URL;
 
 type Msg = { role: "user" | "assistant"; text: string; status?: string; tools?: string[] };
-type Thread = { id: string; title: string; msgs: Msg[]; loaded: boolean };
+type Thread = { id: string; title: string; msgs: Msg[]; loaded: boolean; model?: string };
+type ModelInfo = { id: string; label: string; tier: string };
+type MeInfo = { role: "admin" | "user"; models: { default: string; available: ModelInfo[] } };
 
 function App() {
   const { instance, accounts } = useMsal();
@@ -21,6 +23,9 @@ function App() {
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [me, setMe] = useState<MeInfo | null>(null);
+  const [selectedModel, setSelectedModel] = useState<string>("claude-haiku-4-5");
+  const [modelOpen, setModelOpen] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
   const taRef = useRef<HTMLTextAreaElement>(null);
@@ -51,7 +56,13 @@ function App() {
         });
         if (!resp.ok) return;
         const data = await resp.json();
-        setThreads(data.map((c: any) => ({ id: c.id, title: c.title, msgs: [], loaded: false })));
+        setThreads(data.map((c: any) => ({ id: c.id, title: c.title, msgs: [], loaded: false, model: c.model })));
+        const meResp = await fetch(`${API_BASE}/api/me`, { headers: { Authorization: `Bearer ${t}` } });
+        if (meResp.ok) {
+          const meData = await meResp.json();
+          setMe({ role: meData.role, models: meData.models });
+          setSelectedModel(meData.models.default);
+        }
       } catch { /* silencioso */ }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -72,7 +83,8 @@ function App() {
       const msgs: Msg[] = (data.messages || []).map((m: any) => ({
         role: m.role, text: m.text, tools: m.tools || [],
       }));
-      setThreads((ts) => ts.map((x) => (x.id === id ? { ...x, msgs, loaded: true, title: data.title } : x)));
+      setThreads((ts) => ts.map((x) => (x.id === id ? { ...x, msgs, loaded: true, title: data.title, model: data.model } : x)));
+      if (data.model) setSelectedModel(data.model);
     } catch (e: any) {
       setError(e.message);
     }
@@ -81,6 +93,7 @@ function App() {
   function newChat() {
     setActiveId(null);
     setInput("");
+    if (me) setSelectedModel(me.models.default);
   }
 
   async function logout() {
@@ -124,7 +137,7 @@ function App() {
       const resp = await fetch(`${API_BASE}/api/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${tok}` },
-        body: JSON.stringify({ message: question, conversation_id: isNew ? null : activeId }),
+        body: JSON.stringify({ message: question, conversation_id: isNew ? null : activeId, model: selectedModel }),
         signal: controller.signal,
       });
       if (!resp.ok || !resp.body) {
@@ -331,7 +344,34 @@ function App() {
                 <div className="composer-foot">
                   <span className="chips">
                     <span className="chip"><span className="dot-ok" /> Winthor</span>
-                    <span className="chip muted">Claude Sonnet 4.6</span>
+                    {(() => {
+                      const current = me?.models.available.find((m) => m.id === selectedModel);
+                      const label = current?.label || "Claude Haiku 4.5";
+                      const isAdmin = me?.role === "admin";
+                      const lockedByConv = !!active && active.msgs.length > 0;
+                      if (!isAdmin || lockedByConv) {
+                        return <span className="chip muted" title={lockedByConv ? "Modelo fixado nessa conversa" : ""}>{label}</span>;
+                      }
+                      return (
+                        <span className="chip model-picker" onClick={() => setModelOpen((o) => !o)}>
+                          {label} <span style={{opacity: 0.5, marginLeft: 4}}>▾</span>
+                          {modelOpen && (
+                            <div className="model-menu" onClick={(e) => e.stopPropagation()}>
+                              {me!.models.available.map((m) => (
+                                <div
+                                  key={m.id}
+                                  className={`model-item ${m.id === selectedModel ? "selected" : ""}`}
+                                  onClick={() => { setSelectedModel(m.id); setModelOpen(false); }}
+                                >
+                                  <span className="model-label">{m.label}</span>
+                                  <span className="model-tier">{m.tier}</span>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </span>
+                      );
+                    })()}
                   </span>
                   {busy ? (
                     <button className="send stop" onClick={stop} title="Parar">■</button>

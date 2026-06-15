@@ -1,32 +1,25 @@
-"""Endpoint /api/me — retorna identidade do usuário logado.
-
-Primeira parada do frontend após login bem-sucedido. Devolve:
-- claims do token Entra (oid, nome, email)
-- (futuro) escopo da ACL pra essa pessoa
-
-Por enquanto, ACL não está integrada — só retorna os claims crus.
-Próximo passo (Semana 3): consultar FILIAL_ACL_CHATBOT por oid.
-"""
+"""Endpoint /api/me — identidade + role + modelos disponíveis."""
 from fastapi import APIRouter, Depends
 from gateway.app.auth.entra import verify_token
+from gateway.app.models_catalog import role_for, models_payload_for
 
 router = APIRouter()
 
 
 @router.get("/me")
 async def get_me(claims: dict = Depends(verify_token)):
+    oid = claims.get("oid")
     return {
-        "oid": claims.get("oid"),
+        "oid": oid,
         "name": claims.get("name"),
         "email": claims.get("preferred_username") or claims.get("upn") or claims.get("unique_name") or claims.get("email"),
         "tenant_id": claims.get("tid"),
-        # TODO Semana 3: integrar ACL
+        "role": role_for(oid),
+        "models": models_payload_for(oid),
         "acl": {
             "ativo": False,
             "escopo": None,
             "filiais": [],
-            "msg": "ACL ainda não configurada — Semana 3 do roadmap",
+            "msg": "ACL ainda nao configurada — Semana 3 do roadmap",
         },
-        # raw debug (remover em produção depois)
-        "_claims_raw": claims,
     }

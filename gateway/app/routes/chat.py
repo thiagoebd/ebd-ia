@@ -1,10 +1,8 @@
-"""POST /api/chat — conversa com o agente EBD.ia via streaming SSE, com persistencia.
+"""POST /api/chat — chat com streaming SSE, persistencia e seletor de modelo.
 
-Fluxo:
-  1. Resolve a conversa (conversation_id do corpo, ou cria nova).
-  2. Salva a pergunta do usuario no Postgres.
-  3. Carrega uma JANELA leve (so texto, ultimas trocas) e passa pro agente.
-  4. Faz streaming; ao terminar, salva a resposta (texto + flag de tools usados).
+Regras de modelo:
+- Conversa NOVA: usa o `model` do corpo (validado contra o role); fallback = Haiku.
+- Conversa EXISTENTE: usa o modelo gravado na conversa (nao se troca no meio).
 """
 import json
 import logging
@@ -15,9 +13,9 @@ from pydantic import BaseModel
 
 from gateway.app.auth.entra import verify_token
 from gateway.app import db
+from gateway.app.models_catalog import resolve_model
 
 from app.agent import run_turn_stream
-from app.config import settings
 
 logger = logging.getLogger("uvicorn.error")
 router = APIRouter()
@@ -26,7 +24,8 @@ router = APIRouter()
 class ChatRequest(BaseModel):
     message: str
     conversation_id: str | None = None
-    history: list | None = None  # compatibilidade; IGNORADO (janela vem do banco)
+    model: str | None = None
+    history: list | None = None  # compat (ignorado, janela vem do banco)
 
 
 def _sse(payload: dict) -> str:
@@ -41,7 +40,7 @@ def _title_from(text: str) -> str:
 @router.post("/chat")
 async def chat(body: ChatRequest, claims: dict = Depends(verify_token)):
     user_id = claims.get("oid") or claims.get("sub") or "web-user"
-    user_role = "admin"
+    user_role = "admin"  # ACL real vem depois; nao confundir com role de modelo
     user_filiais = "*"
 
     async def event_stream():
@@ -51,15 +50,20 @@ async def chat(body: ChatRequest, claims: dict = Depends(verify_token)):
             if conv_id:
                 conv = await db.get_conversation(conv_id, user_id)
                 if not conv:
-                    conv = await db.create_conversation(user_id, _title_from(body.message), settings.claude_model)
+                    model_used = resolve_model(body.model, user_id)
+                    conv = await db.create_conversation(user_id, _title_from(body.message), model_used)
                     new_conv = True
             else:
-                conv = await db.create_conversation(user_id, _title_from(body.message), settings.claude_model)
+                model_used = resolve_model(body.model, user_id)
+                conv = await db.create_conversation(user_id, _title_from(body.message), model_used)
                 new_conv = True
+
             conv_id = str(conv["id"])
+            model_used = conv["model"]  # sempre o que esta gravado na conversa
 
             yield _sse({"type": "conversation", "id": conv_id,
-                        "title": conv["title"], "new": new_conv})
+                        "title": conv["title"], "new": new_conv,
+                        "model": model_used})
 
             window = await db.build_model_window(conv_id, user_id)
             await db.add_message(conv_id, "user", {"text": body.message})
@@ -75,6 +79,7 @@ async def chat(body: ChatRequest, claims: dict = Depends(verify_token)):
                     user_role=user_role,
                     user_filiais=user_filiais,
                     channel="web",
+                    model=model_used,
                 ):
                     etype = ev.get("type")
                     if etype == "token":
@@ -87,7 +92,7 @@ async def chat(body: ChatRequest, claims: dict = Depends(verify_token)):
                         await db.add_message(conv_id, "assistant",
                                              {"text": assistant_text, "tools": tools_used})
                         saved = True
-                        ev.pop("history", None)  # nao precisa mandar o historico cru pro front
+                        ev.pop("history", None)
                     yield _sse(ev)
             finally:
                 if not saved and assistant_text:

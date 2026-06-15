@@ -217,6 +217,7 @@ async def run_turn_stream(
     user_role: str = "admin",
     user_filiais: str = "*",
     channel: str = "web",
+    model: str | None = None,
 ):
     """Versao streaming de run_turn. Em vez de retornar dict no fim,
     da yield de eventos conforme processa:
@@ -267,7 +268,7 @@ async def run_turn_stream(
         text_acc = ""
         tool_uses = []  # blocks tool_use desta iteracao
         async with _client.messages.stream(
-            model=settings.claude_model,
+            model=model or settings.claude_model,
             max_tokens=settings.max_tokens,
             system=system_blocks,
             tools=_tools,
