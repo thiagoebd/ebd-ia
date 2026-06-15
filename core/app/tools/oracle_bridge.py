@@ -13,7 +13,7 @@ ORACLE_QUERY_TOOL = {
         "Executa uma query SQL READ-ONLY contra o Oracle Winthor (EBD). "
         "Use as views GD_FATO_* / GD_DIM_* e tabelas PC* documentadas no system prompt. "
         "SEMPRE filtre por CODFILIAL quando aplicavel. "
-        "Retorna ate 1000 linhas. Timeout 60s."
+        "Retorna ate 1000 linhas. Timeout 20s — se passar disso, refine o periodo/filtro."
     ),
     "input_schema": {
         "type": "object",
@@ -53,7 +53,7 @@ async def execute_oracle_query(
                             "max_rows": max_rows,
                         },
                     ),
-                    timeout=60,
+                    timeout=20,
                 )
                 # MCP devolveu erro? (isError flag)
                 if getattr(res, "isError", False):

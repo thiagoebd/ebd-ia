@@ -1,120 +1,289 @@
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import {
   useMsal,
   AuthenticatedTemplate,
   UnauthenticatedTemplate,
 } from "@azure/msal-react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { loginRequest, apiRequest } from "./auth/authConfig";
 import "./App.css";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL;
 
+type Msg = { role: "user" | "assistant"; text: string; status?: string; tools?: string[] };
+type Thread = { id: number; title: string; msgs: Msg[] };
+
 function App() {
   const { instance, accounts } = useMsal();
-  const [me, setMe] = useState<any>(null);
+  const [threads, setThreads] = useState<Thread[]>([]);
+  const [activeId, setActiveId] = useState<number | null>(null);
+  const [input, setInput] = useState("");
+  const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const historyRef = useRef<any[]>([]);
+  const abortRef = useRef<AbortController | null>(null);
 
-  async function login() {
-    setError(null);
-    try {
-      await instance.loginRedirect(loginRequest);
-    } catch (e: any) {
-      setError(`Login falhou: ${e.message}`);
-    }
+  const active = threads.find((t) => t.id === activeId) || null;
+  const messages = active?.msgs || [];
+  const firstName = accounts[0]?.name?.split(" ")[0] || "";
+  const fullName = accounts[0]?.name || "";
+
+  useEffect(() => {
+    scrollRef.current?.scrollTo(0, scrollRef.current.scrollHeight);
+  }, [messages]);
+
+  function newChat() {
+    setActiveId(null);
+    historyRef.current = [];
+    setInput("");
   }
 
   async function logout() {
-    await instance.logoutRedirect({
-      postLogoutRedirectUri: window.location.origin,
-    });
+    await instance.logoutRedirect({ postLogoutRedirectUri: window.location.origin });
+  }
+  function login() {
+    instance.loginRedirect(loginRequest).catch((e) => setError(e.message));
   }
 
-  async function fetchMe() {
-    setLoading(true);
+  async function send(presetQuestion?: string) {
+    const question = (presetQuestion ?? input).trim();
+    if (!question || busy) return;
     setError(null);
-    setMe(null);
+    setInput("");
+    setBusy(true);
+
+    // cria thread se for a primeira mensagem
+    let tid = activeId;
+    if (tid === null) {
+      tid = Date.now();
+      const title = question.length > 42 ? question.slice(0, 42) + "…" : question;
+      setThreads((ts) => [{ id: tid!, title, msgs: [] }, ...ts]);
+      setActiveId(tid);
+      historyRef.current = [];
+    }
+
+    const pushMsgs = (updater: (m: Msg[]) => Msg[]) =>
+      setThreads((ts) => ts.map((t) => (t.id === tid ? { ...t, msgs: updater(t.msgs) } : t)));
+
+    pushMsgs((m) => [
+      ...m,
+      { role: "user", text: question },
+      { role: "assistant", text: "", status: "Pensando", tools: [] },
+    ]);
+
     try {
-      // Pega token silenciosamente (já foi obtido no login)
-      const result = await instance.acquireTokenSilent({
-        ...apiRequest,
-        account: accounts[0],
+      const tok = await instance.acquireTokenSilent({ ...apiRequest, account: accounts[0] });
+      const controller = new AbortController();
+      abortRef.current = controller;
+      const resp = await fetch(`${API_BASE}/api/chat`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${tok.accessToken}` },
+        body: JSON.stringify({ message: question, history: historyRef.current }),
+        signal: controller.signal,
       });
-
-      // Chama o gateway com o Bearer token
-      const resp = await fetch(`${API_BASE}/api/me`, {
-        headers: {
-          Authorization: `Bearer ${result.accessToken}`,
-        },
-      });
-
-      if (!resp.ok) {
-        const body = await resp.text();
-        throw new Error(`HTTP ${resp.status}: ${body}`);
+      if (!resp.ok || !resp.body) {
+        const t = await resp.text();
+        throw new Error(`HTTP ${resp.status}: ${t}`);
       }
 
-      const data = await resp.json();
-      setMe(data);
+      const reader = resp.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const parts = buffer.split("\n\n");
+        buffer = parts.pop() || "";
+        for (const part of parts) {
+          const line = part.trim();
+          if (!line.startsWith("data:")) continue;
+          const json = line.slice(5).trim();
+          if (!json) continue;
+          let ev: any;
+          try { ev = JSON.parse(json); } catch { continue; }
+          pushMsgs((m) => {
+            const copy = [...m];
+            const last = copy[copy.length - 1];
+            if (!last || last.role !== "assistant") return copy;
+            if (ev.type === "status") last.status = ev.text;
+            else if (ev.type === "tool") last.tools = [...(last.tools || []), ev.name];
+            else if (ev.type === "token") { last.status = undefined; last.text += ev.text; }
+            else if (ev.type === "done") { last.status = undefined; historyRef.current = ev.history || historyRef.current; }
+            else if (ev.type === "error") { last.status = undefined; last.text += `\n\n⚠️ Erro: ${ev.detail}`; }
+            return copy;
+          });
+        }
+      }
     } catch (e: any) {
-      setError(e.message);
+      const aborted = e?.name === "AbortError";
+      if (!aborted) setError(e.message);
+      pushMsgs((m) => {
+        const copy = [...m];
+        const last = copy[copy.length - 1];
+        if (last && last.role === "assistant") {
+          last.status = undefined;
+          if (aborted) last.text += (last.text ? "\n\n" : "") + "_(interrompido)_";
+        }
+        return copy;
+      });
     } finally {
-      setLoading(false);
+      setBusy(false);
+      abortRef.current = null;
     }
   }
 
-  return (
-    <div className="container">
-      <header>
-        <h1>EBD.ia</h1>
-        <p className="subtitle">Frontend dev — autenticação Microsoft Entra ID</p>
-      </header>
+  function stop() {
+    abortRef.current?.abort();
+  }
 
+  function onKey(e: React.KeyboardEvent) {
+    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); }
+  }
+
+  return (
+    <>
       <UnauthenticatedTemplate>
-        <div className="card">
-          <h2>Não autenticado</h2>
-          <p>Faça login com sua conta corporativa @ebdbr.com.br</p>
-          <button onClick={login}>Entrar com Microsoft</button>
+        <div className="login-screen">
+          <img src="/logo-ebd.png" alt="EBD" className="logo-login" />
+          <p className="subtitle">Agente comercial · dados do Winthor em tempo real</p>
+          <button className="btn-primary" onClick={login}>Entrar com Microsoft</button>
         </div>
       </UnauthenticatedTemplate>
 
       <AuthenticatedTemplate>
-        <div className="card success">
-          <h2>✅ Autenticado</h2>
-          <p>
-            <strong>Conta:</strong> {accounts[0]?.username}<br />
-            <strong>Nome:</strong> {accounts[0]?.name}<br />
-            <strong>Tenant:</strong> {accounts[0]?.tenantId}
-          </p>
-          <button onClick={fetchMe} disabled={loading}>
-            {loading ? "Chamando /api/me..." : "Testar /api/me no gateway"}
-          </button>
-          <button onClick={logout} className="secondary">
-            Sair
-          </button>
-        </div>
+        <div className="app">
+          {/* ─── Sidebar ─── */}
+          <aside className="sidebar">
+            <div className="sb-head">
+              <img src="/logo-ebd.png" alt="EBD" />
+              <span className="name">EBD<em>.ia</em></span>
+            </div>
 
-        {me && (
-          <div className="card">
-            <h3>Resposta do gateway:</h3>
-            <pre>{JSON.stringify(me, null, 2)}</pre>
-          </div>
-        )}
+            <button className="new-chat" onClick={newChat}>
+              <span>＋ Nova conversa</span>
+              <span className="kbd"><kbd>⌃</kbd><kbd>K</kbd></span>
+            </button>
+
+            <div className="sb-section">Biblioteca</div>
+            <div className="sb-list">
+              <div className="sb-link"><span className="lbl">Planilhas</span><span className="count">—</span></div>
+              <div className="sb-link"><span className="lbl">Documentos</span><span className="count">—</span></div>
+              <div className="sb-link"><span className="lbl">Apresentações</span><span className="count">—</span></div>
+              <div className="sb-link"><span className="lbl">Gráficos</span><span className="count">—</span></div>
+            </div>
+
+            <div className="sb-section">Conexões</div>
+            <div className="sb-list">
+              <div className="sb-link"><span className="dot-ok" /><span className="lbl">Winthor / Oracle</span></div>
+            </div>
+
+            <div className="sb-history">
+              {threads.length > 0 && <div className="sb-group">Conversas</div>}
+              {threads.map((t) => (
+                <div
+                  key={t.id}
+                  className={`thread ${t.id === activeId ? "active" : ""}`}
+                  onClick={() => { setActiveId(t.id); historyRef.current = []; }}
+                >
+                  <span className="lbl">{t.title}</span>
+                </div>
+              ))}
+            </div>
+
+            <div className="sb-foot">
+              <span className="avatar">{firstName.charAt(0)}</span>
+              <span className="who">
+                <span className="who-name">{fullName}</span>
+                <span className="who-sub">Visão Brasil · admin</span>
+              </span>
+              <button className="link" onClick={logout}>sair</button>
+            </div>
+          </aside>
+
+          {/* ─── Main ─── */}
+          <main className="main">
+            <div className="chat" ref={scrollRef}>
+              <div className="thread-col">
+                {messages.length === 0 ? (
+                  <div className="empty">
+                    <h1>Olá, {firstName}. <em>O que olhamos hoje?</em></h1>
+                    <p className="empty-sub">Pergunte em português — eu cuido do resto. Você tem visão <strong>Brasil completa</strong>.</p>
+                    <div className="suggest">
+                      <button onClick={() => send("Qual o faturamento de hoje no BR?")}>
+                        <span className="s-title">Faturamento de hoje</span>
+                        <span className="s-desc">Líquido por filial, visão BR.</span>
+                      </button>
+                      <button onClick={() => send("Top 10 filiais por faturamento no mês")}>
+                        <span className="s-title">Top 10 filiais no mês</span>
+                        <span className="s-desc">Ranking de faturamento do mês corrente.</span>
+                      </button>
+                      <button onClick={() => send("Como está a ruptura hoje no BR?")}>
+                        <span className="s-title">Ruptura agora</span>
+                        <span className="s-desc">SKUs em falta e valor perdido por filial.</span>
+                      </button>
+                      <button onClick={() => send("Top fornecedores do mês por faturamento")}>
+                        <span className="s-title">Top fornecedores</span>
+                        <span className="s-desc">Maiores fornecedores no mês corrente.</span>
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  messages.map((m, i) => (
+                    <div key={i} className={`row ${m.role}`}>
+                      <div className="gutter">
+                        {m.role === "assistant"
+                          ? <span className="bot-mark">E</span>
+                          : <span className="avatar small">{firstName.charAt(0)}</span>}
+                      </div>
+                      <div className="content">
+                        <div className="who-line">{m.role === "assistant" ? "EBD.ia" : firstName}</div>
+                        {m.role === "assistant" && m.tools && m.tools.length > 0 && (
+                          <div className="tools"><span className="tool-chip">⚡ Winthor consultado</span></div>
+                        )}
+                        {m.status && <div className="status"><span className="dots">{m.status}</span></div>}
+                        {m.text && (m.role === "assistant"
+                          ? <div className="md"><ReactMarkdown remarkPlugins={[remarkGfm]}>{m.text}</ReactMarkdown></div>
+                          : <div className="usertext">{m.text}</div>)}
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+
+            {error && <div className="error-bar">{error}</div>}
+
+            <div className="composer-wrap">
+              <div className="composer">
+                <textarea
+                  value={input}
+                  onChange={(e) => setInput(e.target.value)}
+                  onKeyDown={onKey}
+                  placeholder="Pergunte ao EBD.ia…"
+                  rows={1}
+                  disabled={busy}
+                />
+                <div className="composer-foot">
+                  <span className="chips">
+                    <span className="chip"><span className="dot-ok" /> Winthor</span>
+                    <span className="chip muted">Claude Sonnet 4.6</span>
+                  </span>
+                  {busy ? (
+                    <button className="send stop" onClick={stop} title="Parar">■</button>
+                  ) : (
+                    <button className="send" onClick={() => send()} disabled={!input.trim()}>↑</button>
+                  )}
+                </div>
+              </div>
+              <p className="disclaimer">Visão Brasil · escopo aplicado automaticamente · ⏎ enviar · ⇧⏎ nova linha</p>
+            </div>
+          </main>
+        </div>
       </AuthenticatedTemplate>
-
-      {error && (
-        <div className="card error">
-          <h3>⚠️ Erro</h3>
-          <pre>{error}</pre>
-        </div>
-      )}
-
-      <footer>
-        <p>
-          Gateway: <code>{API_BASE}</code> |
-          Client: <code>{import.meta.env.VITE_AZURE_CLIENT_ID?.substring(0, 8)}...</code>
-        </p>
-      </footer>
-    </div>
+    </>
   );
 }
 

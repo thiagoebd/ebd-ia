@@ -209,6 +209,154 @@ async def run_turn(
     }
 
 
+
+async def run_turn_stream(
+    user_message: str,
+    conversation_history: list | None = None,
+    user_id: str = "thiago",
+    user_role: str = "admin",
+    user_filiais: str = "*",
+    channel: str = "web",
+):
+    """Versao streaming de run_turn. Em vez de retornar dict no fim,
+    da yield de eventos conforme processa:
+      {"type": "status",  "text": "..."}       -> fase (consultando, analisando)
+      {"type": "token",   "text": "..."}       -> pedaco de texto da resposta final
+      {"type": "tool",    "name": "...", "input": {...}} -> tool sendo chamada
+      {"type": "done",    "history": [...], "usage": {...}, "tool_calls": [...]}
+
+    NAO substitui run_turn (Telegram continua usando o original).
+    """
+    messages = list(conversation_history or [])
+    messages = _trim_history(messages)
+    messages.append({"role": "user", "content": user_message})
+
+    ctx_suffix = (
+        f"\n\n## CONTEXTO DA CONVERSA ATUAL\n"
+        f"- User ID: {user_id}\n"
+        f"- Role: {user_role}\n"
+        f"- Filiais permitidas: {user_filiais}\n"
+        f"- CANAL: {channel}  <- APLIQUE AS REGRAS DE FORMATACAO DO CANAL\n"
+    )
+    if user_role == "admin":
+        ctx_suffix += (
+            "- Voce PODE propor auto-append na knowledge base via tool knowledge_append "
+            "quando descobrir fato novo util (template SQL validado, cicatriz, regra de negocio). "
+            "NAO use pra dados volateis. Sempre peca '/aprovar PROP-XXXX' depois de propor.\n"
+        )
+    else:
+        ctx_suffix += (
+            "- Voce NAO TEM permissao pra propor auto-append (apenas admin). "
+            "Se descobrir algo util, sugira ao usuario contatar um admin.\n"
+        )
+
+    system_blocks = [{
+        "type": "text",
+        "text": _system_prompt + ctx_suffix,
+        "cache_control": {"type": "ephemeral", "ttl": "1h"},
+    }]
+
+    tool_calls_log = []
+    iterations = 0
+    final_usage = {}
+
+    while iterations < settings.max_iterations:
+        iterations += 1
+
+        # Streaming da chamada ao Claude
+        text_acc = ""
+        tool_uses = []  # blocks tool_use desta iteracao
+        async with _client.messages.stream(
+            model=settings.claude_model,
+            max_tokens=settings.max_tokens,
+            system=system_blocks,
+            tools=_tools,
+            messages=messages,
+        ) as stream:
+            async for event in stream:
+                if event.type == "content_block_delta":
+                    delta = event.delta
+                    if getattr(delta, "type", None) == "text_delta":
+                        text_acc += delta.text
+                        yield {"type": "token", "text": delta.text}
+            final_message = await stream.get_final_message()
+
+        # Registra a mensagem do assistant no historico.
+        # Serializa SO os campos que a API aceita na ENTRADA (whitelist por tipo).
+        # model_dump() cru vaza campos de saida (parsed_output, etc) que a API
+        # rejeita quando o historico e reenviado no proximo turno -> erro 400.
+        assistant_content = []
+        for b in final_message.content:
+            btype = getattr(b, "type", None)
+            if btype == "text":
+                assistant_content.append({"type": "text", "text": b.text})
+            elif btype == "tool_use":
+                assistant_content.append({
+                    "type": "tool_use",
+                    "id": b.id,
+                    "name": b.name,
+                    "input": b.input,
+                })
+            # outros tipos (thinking, etc) sao ignorados no historico reenviado
+        messages.append({"role": "assistant", "content": assistant_content})
+
+        # Captura usage da ultima iteracao
+        final_usage = {
+            "input_tokens": final_message.usage.input_tokens,
+            "output_tokens": final_message.usage.output_tokens,
+            "cache_creation_input_tokens": getattr(final_message.usage, "cache_creation_input_tokens", 0),
+            "cache_read_input_tokens": getattr(final_message.usage, "cache_read_input_tokens", 0),
+        }
+
+        # Terminou? (sem tool_use) -> emite done e encerra
+        if final_message.stop_reason != "tool_use":
+            yield {
+                "type": "done",
+                "history": messages,
+                "tool_calls": tool_calls_log,
+                "iterations": iterations,
+                "usage": final_usage,
+                "stop_reason": final_message.stop_reason,
+            }
+            return
+
+        # Tem tool_use -> executa cada tool e emite status
+        tool_results = []
+        for block in final_message.content:
+            if block.type == "tool_use":
+                tool_calls_log.append({"name": block.name, "input": block.input, "id": block.id})
+                # status amigavel por tipo de tool
+                if block.name == "oracle_query":
+                    yield {"type": "status", "text": "Consultando o Winthor..."}
+                elif block.name == "knowledge_append":
+                    yield {"type": "status", "text": "Registrando conhecimento..."}
+                elif block.name == "list_proposals":
+                    yield {"type": "status", "text": "Listando propostas..."}
+                else:
+                    yield {"type": "status", "text": f"Executando {block.name}..."}
+
+                yield {"type": "tool", "name": block.name, "input": block.input}
+
+                result_str = await _run_tool(block.name, block.input, user_id, user_role)
+                tool_results.append({
+                    "type": "tool_result",
+                    "tool_use_id": block.id,
+                    "content": result_str,
+                })
+        messages.append({"role": "user", "content": tool_results})
+        yield {"type": "status", "text": "Analisando os dados..."}
+
+    # Esgotou iteracoes
+    yield {
+        "type": "done",
+        "history": messages,
+        "tool_calls": tool_calls_log,
+        "iterations": iterations,
+        "usage": final_usage,
+        "stop_reason": "max_iterations",
+    }
+
+
 if __name__ == "__main__":
     async def main():
         print(f"Modelo: {settings.claude_model}")

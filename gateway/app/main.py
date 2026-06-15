@@ -31,7 +31,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 
-from gateway.app.routes import health, me
+from gateway.app.routes import health, me, chat
 
 app = FastAPI(
     title="EBD.ia Gateway",
@@ -56,6 +56,7 @@ app.add_middleware(
 # Rotas da API (vêm ANTES do static pra ter prioridade no roteamento)
 app.include_router(health.router, prefix="/api", tags=["meta"])
 app.include_router(me.router, prefix="/api", tags=["auth"])
+app.include_router(chat.router, prefix="/api", tags=["chat"])
 
 
 # ============================================================
@@ -94,6 +95,11 @@ if FRONTEND_DIST.exists():
         # Se for chamada de API que não bateu nas rotas anteriores, retorna 404 JSON
         if full_path.startswith("api/"):
             return JSONResponse({"detail": "Not Found"}, status_code=404)
+        # Se existir um arquivo real no dist/ (logo, imagens, etc), serve ele
+        candidate = (FRONTEND_DIST / full_path).resolve()
+        # proteção contra path traversal: candidate tem que estar DENTRO de dist/
+        if candidate.is_file() and str(candidate).startswith(str(FRONTEND_DIST.resolve())):
+            return FileResponse(candidate)
         # Senão, devolve o index.html (SPA cuida do roteamento)
         return FileResponse(FRONTEND_DIST / "index.html")
 else:
