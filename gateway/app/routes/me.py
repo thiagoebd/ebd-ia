@@ -18,7 +18,7 @@ async def get_me(claims: dict = Depends(verify_token)):
     return {
         "oid": claims.get("oid"),
         "name": claims.get("name"),
-        "email": claims.get("preferred_username") or claims.get("email"),
+        "email": claims.get("preferred_username") or claims.get("upn") or claims.get("unique_name") or claims.get("email"),
         "tenant_id": claims.get("tid"),
         # TODO Semana 3: integrar ACL
         "acl": {

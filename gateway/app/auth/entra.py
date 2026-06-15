@@ -26,7 +26,12 @@ if not TENANT_ID or not CLIENT_ID:
     )
 
 # Endpoints derivados
-ISSUER = f"https://login.microsoftonline.com/{TENANT_ID}/v2.0"
+# O Entra pode emitir token v1 (sts.windows.net) ou v2 (login.microsoftonline.com/v2.0)
+# dependendo de accessTokenAcceptedVersion no manifest. Aceitamos AMBOS — a segurança
+# vem da validação de assinatura + audience + expiração, não da string do issuer.
+ISSUER_V2 = f"https://login.microsoftonline.com/{TENANT_ID}/v2.0"
+ISSUER_V1 = f"https://sts.windows.net/{TENANT_ID}/"
+VALID_ISSUERS = {ISSUER_V1, ISSUER_V2}
 JWKS_URL = f"https://login.microsoftonline.com/{TENANT_ID}/discovery/v2.0/keys"
 
 # AUDIENCE = Application ID URI definido em "Expose an API" no Entra portal
@@ -57,8 +62,10 @@ async def verify_token(
             signing_key,
             algorithms=["RS256"],
             audience=AUDIENCE,
-            issuer=ISSUER,
         )
+        # Valida issuer manualmente contra v1 OU v2 do mesmo tenant
+        if payload.get("iss") not in VALID_ISSUERS:
+            raise jwt.InvalidIssuerError(payload.get("iss"))
         return payload
     except jwt.ExpiredSignatureError:
         raise HTTPException(
@@ -75,7 +82,7 @@ async def verify_token(
     except jwt.InvalidIssuerError:
         raise HTTPException(
             status.HTTP_401_UNAUTHORIZED,
-            detail=f"Issuer inválido (esperado {ISSUER})",
+            detail=f"Issuer inválido (aceitos: v1 sts.windows.net ou v2 login.microsoftonline.com do tenant)",
             headers={"WWW-Authenticate": "Bearer"},
         )
     except jwt.InvalidTokenError as e:
