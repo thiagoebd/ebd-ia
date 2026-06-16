@@ -37,3 +37,13 @@ async def get_conv(conv_id: str, claims: dict = Depends(verify_token)):
                          "tools": c.get("tools", [])})
     return {"id": str(conv["id"]), "title": conv["title"],
             "model": conv["model"], "messages": out_msgs}
+
+
+@router.delete("/conversations/{conv_id}")
+async def delete_conv(conv_id: str, claims: dict = Depends(verify_token)):
+    uid = _uid(claims)
+    ok = await db.delete_conversation(conv_id, uid)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Conversa nao encontrada")
+    return {"deleted": True, "id": conv_id}
+

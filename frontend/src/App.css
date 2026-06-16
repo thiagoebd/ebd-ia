@@ -145,3 +145,28 @@ button{font:inherit;color:inherit;cursor:pointer}
 .model-item.selected { background: rgba(28,44,94,0.10); }
 .model-label { font-weight: 500; color: #1c2c5e; }
 .model-tier { font-size: 11px; opacity: 0.6; }
+
+/* ── Botão apagar conversa ─────────────────────────────────────────────── */
+.thread { position: relative; display: flex; align-items: center; gap: 6px; }
+.thread .lbl { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.thread-del {
+  opacity: 0; flex: none;
+  background: transparent; border: 0; cursor: pointer;
+  padding: 2px 8px; border-radius: 6px;
+  font-size: 13px; color: rgba(0,0,0,0.4);
+  transition: opacity .12s, background .12s, color .12s;
+}
+.thread:hover .thread-del { opacity: 1; }
+.thread-del:hover { background: rgba(220, 38, 38, 0.10); color: #b91c1c; }
+.thread.confirming .thread-del {
+  opacity: 1;
+  background: #b91c1c; color: #fff;
+  font-size: 11px; font-weight: 500;
+  padding: 2px 8px;
+}
+.thread.confirming .thread-del:hover { background: #991b1b; }
+
+/* ── Logo EBD vira botão de reload ─────────────────────────────────────── */
+.sb-head { cursor: pointer; user-select: none; transition: opacity .12s; }
+.sb-head:hover { opacity: 0.7; }
+.sb-head:active { opacity: 0.5; }

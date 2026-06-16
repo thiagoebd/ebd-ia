@@ -53,7 +53,7 @@ async def execute_oracle_query(
                             "max_rows": max_rows,
                         },
                     ),
-                    timeout=20,
+                    timeout=90,
                 )
                 # MCP devolveu erro? (isError flag)
                 if getattr(res, "isError", False):
@@ -98,3 +98,45 @@ if __name__ == "__main__":
         print(format_result_for_claude(result))
 
     asyncio.run(main())
+
+
+
+# ─── Variante streaming pra o agente web ──────────────────────────────────
+# Roda a query em task paralela e yielda heartbeat a cada HEARTBEAT_SECS
+# enquanto ela não termina. Telegram continua usando execute_oracle_query
+# normal (call único). Web usa esta pra ter feedback vivo no SSE.
+
+HEARTBEAT_SECS = 15
+ORACLE_TIMEOUT = 90
+
+
+async def execute_oracle_query_streaming(
+    sql: str,
+    max_rows: int = 100,
+    user_identifier: str = "+5511999990001",
+    canal: str = "web",
+):
+    """Async generator. Yielda:
+      {"type":"progress","elapsed":N} a cada 15s
+      {"type":"result","payload":{...}} no fim (sucesso ou erro)
+    """
+    import time
+    task = asyncio.create_task(execute_oracle_query(
+        sql=sql, max_rows=max_rows,
+        user_identifier=user_identifier, canal=canal,
+    ))
+    t0 = time.monotonic()
+    while not task.done():
+        try:
+            await asyncio.wait_for(asyncio.shield(task), timeout=HEARTBEAT_SECS)
+        except asyncio.TimeoutError:
+            elapsed = int(time.monotonic() - t0)
+            yield {"type": "progress", "elapsed": elapsed}
+            if elapsed >= ORACLE_TIMEOUT + 5:
+                task.cancel()
+                yield {"type": "result", "payload": {
+                    "status": "error",
+                    "error": {"code": "TIMEOUT", "message": f"Query passou de {ORACLE_TIMEOUT}s — interrompida."},
+                }}
+                return
+    yield {"type": "result", "payload": task.result()}

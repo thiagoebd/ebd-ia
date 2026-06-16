@@ -13,6 +13,7 @@ from app.system_prompt import build_system_prompt
 from app.tools.oracle_bridge import (
     ORACLE_QUERY_TOOL,
     execute_oracle_query,
+    execute_oracle_query_streaming,
     format_result_for_claude,
 )
 from app.tools.knowledge_append import (
@@ -328,17 +329,37 @@ async def run_turn_stream(
                 tool_calls_log.append({"name": block.name, "input": block.input, "id": block.id})
                 # status amigavel por tipo de tool
                 if block.name == "oracle_query":
-                    yield {"type": "status", "text": "Consultando o Winthor..."}
-                elif block.name == "knowledge_append":
-                    yield {"type": "status", "text": "Registrando conhecimento..."}
-                elif block.name == "list_proposals":
-                    yield {"type": "status", "text": "Listando propostas..."}
+                    sql = (block.input or {}).get("sql", "")
+                    # detecta menção a Txxx no SQL ou na conversa pra dar status melhor
+                    import re
+                    m = re.search(r"\bT(\d{3})\b", sql + " " + user_message)
+                    label = f"T{m.group(1)}" if m else "consulta personalizada"
+                    yield {"type": "status", "text": f"Consultando Winthor ({label}) — pode levar até 90s..."}
+                    yield {"type": "tool", "name": block.name, "input": block.input}
+                    # roda em modo streaming pra emitir progresso
+                    final_payload = None
+                    async for ev in execute_oracle_query_streaming(
+                        sql=sql,
+                        max_rows=(block.input or {}).get("max_rows", 100),
+                        user_identifier="+5511999990001",
+                        canal="web",
+                    ):
+                        if ev["type"] == "progress":
+                            yield {"type": "status",
+                                   "text": f"Ainda processando — {ev['elapsed']}s decorridos. Aguarde..."}
+                        else:
+                            final_payload = ev["payload"]
+                    result_str = format_result_for_claude(final_payload)
                 else:
-                    yield {"type": "status", "text": f"Executando {block.name}..."}
+                    if block.name == "knowledge_append":
+                        yield {"type": "status", "text": "Registrando conhecimento..."}
+                    elif block.name == "list_proposals":
+                        yield {"type": "status", "text": "Listando propostas..."}
+                    else:
+                        yield {"type": "status", "text": f"Executando {block.name}..."}
+                    yield {"type": "tool", "name": block.name, "input": block.input}
+                    result_str = await _run_tool(block.name, block.input, user_id, user_role)
 
-                yield {"type": "tool", "name": block.name, "input": block.input}
-
-                result_str = await _run_tool(block.name, block.input, user_id, user_role)
                 tool_results.append({
                     "type": "tool_result",
                     "tool_use_id": block.id,

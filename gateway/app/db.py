@@ -154,3 +154,14 @@ async def build_model_window(conv_id: str, user_oid: str, max_pairs: int = 10) -
         if text:
             window.append({"role": m["role"], "content": text})
     return window
+
+async def delete_conversation(conv_id: str, user_oid: str) -> bool:
+    """Apaga a conversa SE pertencer ao user_oid. ON DELETE CASCADE
+    do schema cuida das mensagens. Retorna True se algo foi apagado."""
+    result = await _pool_or_raise().execute(
+        "DELETE FROM conversations WHERE id = $1::uuid AND user_oid = $2",
+        conv_id, user_oid,
+    )
+    # asyncpg retorna 'DELETE N' — N=1 sucesso, N=0 não existia ou não era do user
+    return result.endswith(" 1")
+

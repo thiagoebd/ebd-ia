@@ -26,6 +26,7 @@ function App() {
   const [me, setMe] = useState<MeInfo | null>(null);
   const [selectedModel, setSelectedModel] = useState<string>("claude-haiku-4-5");
   const [modelOpen, setModelOpen] = useState(false);
+  const [confirmingDelete, setConfirmingDelete] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
   const taRef = useRef<HTMLTextAreaElement>(null);
@@ -87,6 +88,36 @@ function App() {
       if (data.model) setSelectedModel(data.model);
     } catch (e: any) {
       setError(e.message);
+    }
+  }
+
+  async function deleteThread(id: string) {
+    try {
+      const tok = await token();
+      const resp = await fetch(`${API_BASE}/api/conversations/${id}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${tok}` },
+      });
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      setThreads((ts) => ts.filter((t) => t.id !== id));
+      if (activeId === id) setActiveId(null);
+      setConfirmingDelete(null);
+    } catch (e: any) {
+      setError(e.message);
+      setConfirmingDelete(null);
+    }
+  }
+
+  function requestDelete(id: string, e: React.MouseEvent) {
+    e.stopPropagation(); // não abre a thread
+    if (confirmingDelete === id) {
+      deleteThread(id);
+    } else {
+      setConfirmingDelete(id);
+      // reset após 3s se usuário não confirmar
+      setTimeout(() => {
+        setConfirmingDelete((cur) => (cur === id ? null : cur));
+      }, 3000);
     }
   }
 
@@ -232,7 +263,14 @@ function App() {
       <AuthenticatedTemplate>
         <div className="app">
           <aside className="sidebar">
-            <div className="sb-head">
+            <div
+              className="sb-head"
+              onClick={() => window.location.reload()}
+              title="Recarregar"
+              role="button"
+              tabIndex={0}
+              onKeyDown={(e) => { if (e.key === "Enter") window.location.reload(); }}
+            >
               <img src="/logo-ebd.png" alt="EBD" />
               <span className="name">EBD<em>.ia</em></span>
             </div>
@@ -260,10 +298,18 @@ function App() {
               {threads.map((t) => (
                 <div
                   key={t.id}
-                  className={`thread ${t.id === activeId ? "active" : ""}`}
+                  className={`thread ${t.id === activeId ? "active" : ""} ${confirmingDelete === t.id ? "confirming" : ""}`}
                   onClick={() => openThread(t.id)}
                 >
                   <span className="lbl">{t.title}</span>
+                  <button
+                    className="thread-del"
+                    onClick={(e) => requestDelete(t.id, e)}
+                    title={confirmingDelete === t.id ? "Clique novamente para confirmar" : "Apagar conversa"}
+                    aria-label="Apagar conversa"
+                  >
+                    {confirmingDelete === t.id ? "Apagar?" : "×"}
+                  </button>
                 </div>
               ))}
             </div>
