@@ -83,3 +83,50 @@ CREATE_EXCEL_TOOL = {
         "required": ["title", "sheets"],
     },
 }
+
+
+CREATE_PDF_TOOL = {
+    "name": "create_pdf",
+    "description": (
+        "OBRIGATÓRIO chamar esta tool quando o usuário pedir PDF/relatório/imprimir/exportar PDF. "
+        "Não chamar = bug grave. Gera relatório .pdf clean com cabeçalho EBD (logo top-right + título), "
+        "rodapé com data e disclaimer, salva em /var/ebd-ia/artifacts/ e retorna ID do artefato pro "
+        "frontend mostrar card de download. O CONTEÚDO do PDF é Markdown (mesmo formato da resposta "
+        "no chat — você passa as seções, tabela e análise como markdown_body). "
+        "NUNCA gere espontaneamente (só quando pedido). REUTILIZE rows que oracle_query acabou de "
+        "retornar nesta mesma rodada — NÃO rode oracle_query duas vezes. "
+        "Se oracle_query falhar, ajuste o SQL e tente de novo — não desista do PDF."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "title": {
+                "type": "string",
+                "description": "Título do relatório — vira nome do arquivo e cabeçalho. Ex: 'Ruptura por Filial — 16/06/2026'",
+            },
+            "subtitle": {
+                "type": "string",
+                "description": "Subtítulo curto. Ex: 'Visão BR · hoje 16/06/2026'",
+            },
+            "markdown_body": {
+                "type": "string",
+                "description": (
+                    "Conteúdo do relatório em Markdown. Use ## para seções (ex: Resumo executivo, "
+                    "Detalhamento, Próximos passos). Use tabela markdown (| col | col |) pros dados. "
+                    "Use **negrito** pra destaque. NÃO repita o título (já está no cabeçalho). "
+                    "NÃO inclua data/rodapé (já estão no template)."
+                ),
+            },
+            "metadata": {
+                "type": "object",
+                "description": "Metadados pra linha de contexto abaixo do subtítulo (linguagem de negócio, sem schema técnico).",
+                "properties": {
+                    "source_label": {"type": "string", "description": "Ex: 'Ruptura de Pedidos · visão BR'"},
+                    "period": {"type": "string", "description": "Ex: 'hoje 16/06/2026'"},
+                    "scope": {"type": "string", "description": "Ex: '8 filiais com ocorrência'"},
+                },
+            },
+        },
+        "required": ["title", "markdown_body"],
+    },
+}

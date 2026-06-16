@@ -17,8 +17,9 @@ from app.tools.oracle_bridge import (
     execute_oracle_query_streaming,
     format_result_for_claude,
 )
-from app.tools.artifact_tools import CREATE_EXCEL_TOOL
+from app.tools.artifact_tools import CREATE_EXCEL_TOOL, CREATE_PDF_TOOL
 from app.tools.excel_builder import build_excel
+from app.tools.pdf_builder import build_pdf
 from app.artifacts import now_br_str
 from app.tools.knowledge_append import (
     KNOWLEDGE_APPEND_TOOL,
@@ -29,7 +30,7 @@ from app.tools.knowledge_append import (
 
 _client = AsyncAnthropic(api_key=settings.anthropic_api_key)
 _system_prompt = build_system_prompt()
-_tools = [ORACLE_QUERY_TOOL, KNOWLEDGE_APPEND_TOOL, LIST_PROPOSALS_TOOL, CREATE_EXCEL_TOOL]
+_tools = [ORACLE_QUERY_TOOL, KNOWLEDGE_APPEND_TOOL, LIST_PROPOSALS_TOOL, CREATE_EXCEL_TOOL, CREATE_PDF_TOOL]
 
 
 def reload_system_prompt() -> int:
@@ -62,6 +63,8 @@ async def _run_tool(tool_name: str, tool_input: dict, user_id: str, user_role: s
         return tool_list_proposals(user_id=user_id)
     if tool_name == "create_excel":
         return await _run_create_excel(tool_input, user_id)
+    if tool_name == "create_pdf":
+        return await _run_create_pdf(tool_input, user_id)
     return f"ERRO: tool '{tool_name}' nao implementada"
 
 
@@ -466,4 +469,48 @@ async def _run_create_excel(tool_input: dict, user_id: str) -> str:
     except Exception as e:
         logger.exception("Erro ao gerar Excel")
         return f"ERRO ao gerar planilha: {type(e).__name__}: {str(e)[:200]}"
+
+
+async def _run_create_pdf(tool_input: dict, user_id: str) -> str:
+    """Executa a tool create_pdf: gera o PDF e registra no Postgres."""
+    import logging
+    logger = logging.getLogger("uvicorn.error")
+    try:
+        title = tool_input.get("title", "Relatório EBD")
+        subtitle = tool_input.get("subtitle")
+        markdown_body = tool_input.get("markdown_body", "")
+        metadata = tool_input.get("metadata", {})
+
+        if not markdown_body.strip():
+            return "ERRO: markdown_body vazio"
+
+        artifact_id, file_path, filename, size_bytes = build_pdf(
+            title=title,
+            markdown_body=markdown_body,
+            subtitle=subtitle,
+            metadata=metadata,
+        )
+
+        from gateway.app import db as gw_db
+        row = await gw_db.create_artifact(
+            user_oid=str(user_id),
+            kind="pdf",
+            filename=filename,
+            title=title,
+            file_path=str(file_path),
+            size_bytes=size_bytes,
+            metadata={
+                "source_label": metadata.get("source_label", ""),
+                "period": metadata.get("period", ""),
+                "scope": metadata.get("scope", ""),
+                "subtitle": subtitle or "",
+            },
+        )
+        return (
+            f"ARTEFATO_CRIADO type=pdf id={row['id']} "
+            f'filename="{filename}" size_bytes={size_bytes}'
+        )
+    except Exception as e:
+        logger.exception("Erro ao gerar PDF")
+        return f"ERRO ao gerar PDF: {type(e).__name__}: {str(e)[:200]}"
 
