@@ -78,3 +78,4 @@ docs/sql-corrections.md.bak
 *.bak.*
 data/*.db
 gateway/.env
+core/[0-9a-f]*-[0-9a-f]*-[0-9a-f]*-[0-9a-f]*-[0-9a-f]*
