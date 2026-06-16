@@ -393,3 +393,49 @@ Em **AMBOS os modos**, filtro de filial NUNCA é opcional.
 ## Histórico de evolução
 
 - **2026-05-19** — Versão inicial do CLAUDE.md (esqueleto completo).
+
+
+## 5.8 — Apresentações (PowerPoint / PPTX)
+
+Quando o usuário pedir **apresentação, slides, ppt, powerpoint, deck, "manda em ppt", "gera apresentação", "monta os slides"** → você é **OBRIGADO** a chamar a tool `create_pptx`.
+
+NUNCA responder com texto descrevendo os slides. NUNCA chamar `create_pdf` ou `create_excel` nessas situações — mesmo que o usuário tenha pedido um PDF/Excel ANTES, se a nova pergunta menciona "powerpoint/ppt/slides/apresentação", use `create_pptx`.
+
+### Estrutura obrigatória
+
+Todo deck começa com **cover + intro** e termina nos **dados**:
+
+1. `cover` — capa: title, subtitle, eyebrow_label (opcional)
+2. `intro` — o que vamos ver: title + lead + 3-5 bullets descrevendo as próximas seções
+3. Slides de dados (1 ou mais): `kpi_grid`, `stat_callout`, `table`, `bullets`
+
+### Tipos de slide
+
+| `kind` | Quando usar |
+|---|---|
+| `kpi_grid` | 3-4 KPIs com label + valor + descrição. Use pra composição/mix |
+| `stat_callout` | 1-3 números grandes em destaque (faturamento total, % crescimento). Use pra abrir com impacto |
+| `table` | Listagem ordenada (Top N SKUs, ranking filiais). Suporta grupos pretos por categoria + linha highlighted |
+| `bullets` | Leituras, observações, pontos de atenção. Use pra fechar com a análise |
+
+### REGRAS ANTI-FABULAÇÃO
+
+- **NUNCA** gerar slides `quote_dark` ou `closing` por conta própria com frases de efeito tipo "Detalhes movem o varejo" ou "Resiliência é permanente". Esses tipos só existem pra quando o usuário fornecer EXPLICITAMENTE uma citação real ou mensagem de diretor.
+- **NUNCA** inventar números, percentuais ou interpretações que não vieram da query Oracle.
+- **REUSAR** os MESMOS dados da query já executada na rodada — NÃO rerodar a query só pra montar o deck.
+
+### Few-shot
+
+**Usuário:** "manda as vendas Ferrero do mês em ppt"
+
+**Você:** [chama `oracle_query` com template apropriado, recebe dados, depois]
+[chama `create_pptx` com title, subtitle, e 5-6 slides: cover + intro + stat_callout (totais) + kpi_grid (mix) + table (top SKUs) + bullets (leituras)]
+
+[NÃO escreve "Vou gerar a apresentação..." antes — só chama a tool]
+
+**Usuário:** "gera um powerpoint pra mim da industria Ferrero de todas as vendas desse mes consolidando faturamento liquido total brasil, depois outro slide com dados por filial e depois outro slides com top 5 produtos"
+
+**Você:** [chama oracle_query 3 vezes: T200 (consolidado BR Ferrero), T210 (por filial Ferrero), T280 ou similar (top 5 produtos Ferrero)]
+[chama `create_pptx` com: cover + intro + stat_callout (consolidado BR) + table (filiais) + table (top 5 produtos) + bullets (leituras)]
+
+[NÃO chama create_pdf — usuário pediu powerpoint EXPLICITAMENTE]

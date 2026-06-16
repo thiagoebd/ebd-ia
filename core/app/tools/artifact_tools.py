@@ -130,3 +130,59 @@ CREATE_PDF_TOOL = {
         "required": ["title", "markdown_body"],
     },
 }
+
+
+# ───────────────────────── PowerPoint / Apresentações ─────────────────────────
+
+CREATE_PPTX_TOOL = {
+    "name": "create_pptx",
+    "description": (
+        "Gera deck PowerPoint (.pptx) com identidade visual EBD. "
+        "USE quando o usuário pedir apresentação/slides/ppt/powerpoint/deck/'manda em ppt'. "
+        "NÃO use create_pdf nem create_excel nesses casos.\n\n"
+        "SCHEMA DE CADA SLIDE (campo 'kind' obrigatório):\n\n"
+        "1) cover (1º slide, obrigatório):\n"
+        "   {'kind':'cover', 'title':'...', 'subtitle':'...', 'eyebrow_label':'...' (opcional)}\n\n"
+        "2) intro (2º slide, obrigatório):\n"
+        "   {'kind':'intro', 'title':'O que vamos ver', 'lead':'descrição curta', "
+        "'bullets':['descrição da seção 1', 'descrição da seção 2', ...]}\n\n"
+        "3) stat_callout (1-3 números gigantes em destaque):\n"
+        "   {'kind':'stat_callout', 'title':'...', 'subtitle':'...' (opcional), "
+        "'stats':[{'label':'FATURAMENTO MTD', 'value':'R$ 15,1M', 'description':'detalhe'}, ...]}\n"
+        "   Use pra abrir com impacto (totais, %, share).\n\n"
+        "4) kpi_grid (3-4 KPIs em cards):\n"
+        "   {'kind':'kpi_grid', 'title':'...', 'subtitle':'...' (opcional), "
+        "'kpis':[{'label':'...', 'value':'...', 'description':'...', 'highlighted':true (opcional)}, ...]}\n\n"
+        "5) table (tabela ordenada):\n"
+        "   {'kind':'table', 'title':'...', 'subtitle':'...' (opcional), "
+        "'columns':[{'key':'filial','label':'Filial','type':'text','width':2.5}, "
+        "{'key':'liq','label':'Líquido','type':'money','width':1.2}, "
+        "{'key':'pct','label':'% Meta','type':'percent','width':0.9}], "
+        "'rows':[{'filial':'EBD SP','liq':1888711,'pct':8.52}, ...]}\n"
+        "   IMPORTANTE: 'columns' SEMPRE lista de DICTS (NÃO strings). "
+        "Types disponíveis: text, money, int, percent.\n\n"
+        "6) bullets (leituras/observações finais):\n"
+        "   {'kind':'bullets', 'title':'...', 'subtitle':'...' (opcional), "
+        "'items':[{'label':'Destaque', 'text':'observação detalhada'}, ...]}\n"
+        "   IMPORTANTE: campo é 'items' (NÃO 'bullets', NÃO 'points', NÃO 'texts').\n\n"
+        "REGRAS:\n"
+        "- SEMPRE: cover + intro + 1-N slides de dados\n"
+        "- NUNCA: gerar quote_dark/closing com frases de efeito inventadas\n"
+        "- SE A TOOL RETORNAR ERRO: NÃO tentar refazer mais de 1 vez — reporte ao usuário em uma frase e ofereça PDF/Excel como alternativa\n"
+        "- REUSAR dados de queries Oracle já executadas na rodada — NÃO rerodar"
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "title":         {"type": "string", "description": "Título da capa"},
+            "subtitle":      {"type": "string", "description": "Subtítulo vermelho da capa"},
+            "footer_author": {"type": "string", "description": "Autor/área (rodapé)"},
+            "slides": {
+                "type": "array",
+                "description": "Lista de slides; cada um com 'kind' obrigatório e demais campos conforme schema acima",
+                "items": {"type": "object"}
+            }
+        },
+        "required": ["title", "subtitle", "slides"]
+    }
+}

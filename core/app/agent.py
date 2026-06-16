@@ -17,9 +17,10 @@ from app.tools.oracle_bridge import (
     execute_oracle_query_streaming,
     format_result_for_claude,
 )
-from app.tools.artifact_tools import CREATE_EXCEL_TOOL, CREATE_PDF_TOOL
+from app.tools.artifact_tools import CREATE_EXCEL_TOOL, CREATE_PDF_TOOL, CREATE_PPTX_TOOL
 from app.tools.excel_builder import build_excel
 from app.tools.pdf_builder import build_pdf
+from app.tools.pptx_builder import build_pptx
 from app.artifacts import now_br_str
 from app.tools.knowledge_append import (
     KNOWLEDGE_APPEND_TOOL,
@@ -30,7 +31,7 @@ from app.tools.knowledge_append import (
 
 _client = AsyncAnthropic(api_key=settings.anthropic_api_key)
 _system_prompt = build_system_prompt()
-_tools = [ORACLE_QUERY_TOOL, KNOWLEDGE_APPEND_TOOL, LIST_PROPOSALS_TOOL, CREATE_EXCEL_TOOL, CREATE_PDF_TOOL]
+_tools = [ORACLE_QUERY_TOOL, KNOWLEDGE_APPEND_TOOL, LIST_PROPOSALS_TOOL, CREATE_EXCEL_TOOL, CREATE_PDF_TOOL, CREATE_PPTX_TOOL]
 
 
 def reload_system_prompt() -> int:
@@ -65,6 +66,8 @@ async def _run_tool(tool_name: str, tool_input: dict, user_id: str, user_role: s
         return await _run_create_excel(tool_input, user_id)
     if tool_name == "create_pdf":
         return await _run_create_pdf(tool_input, user_id)
+    if tool_name == "create_pptx":
+        return await _run_create_pptx(tool_input, user_id)
     return f"ERRO: tool '{tool_name}' nao implementada"
 
 
@@ -514,3 +517,55 @@ async def _run_create_pdf(tool_input: dict, user_id: str) -> str:
         logger.exception("Erro ao gerar PDF")
         return f"ERRO ao gerar PDF: {type(e).__name__}: {str(e)[:200]}"
 
+
+
+async def _run_create_pptx(tool_input: dict, user_id: str) -> str:
+    """Executa a tool create_pptx: gera o deck PPTX e registra no Postgres."""
+    import logging
+    logger = logging.getLogger("uvicorn.error")
+    try:
+        title         = tool_input.get("title", "Apresentação EBD")
+        subtitle      = tool_input.get("subtitle", "")
+        footer_author = tool_input.get("footer_author", "EBD.ia")
+        slides        = tool_input.get("slides", [])
+
+        if not slides:
+            return "ERRO: lista 'slides' está vazia"
+        if not any(s.get("kind") == "cover" for s in slides):
+            return "ERRO: deck obrigatoriamente começa com kind='cover'"
+
+        # Gera path no /var/ebd-ia/artifacts (mesmo helper do Excel/PDF)
+        from app.artifacts import new_artifact_path
+        _artifact_id_disk, file_path = new_artifact_path("pptx")
+
+        # Constrói o deck no path certo
+        _, fp, filename, size_bytes = build_pptx(
+            title=title,
+            subtitle=subtitle,
+            slides=slides,
+            footer_author=footer_author,
+            output_path=file_path,
+        )
+
+        # Registra no Postgres via gateway (cicatriz 4: usa row['id'])
+        from gateway.app import db as gw_db
+        row = await gw_db.create_artifact(
+            user_oid=str(user_id),
+            kind="pptx",
+            filename=filename,
+            title=title,
+            file_path=str(fp),
+            size_bytes=size_bytes,
+            metadata={
+                "subtitle": subtitle,
+                "slides_count": len(slides),
+                "kinds": [s.get("kind") for s in slides],
+            },
+        )
+        return (
+            f"ARTEFATO_CRIADO type=pptx id={row['id']} "
+            f'filename="{filename}" size_bytes={size_bytes}'
+        )
+    except Exception as e:
+        logger.exception("Erro ao gerar PPTX")
+        return f"ERRO ao gerar PPTX: {type(e).__name__}: {str(e)[:200]}"
