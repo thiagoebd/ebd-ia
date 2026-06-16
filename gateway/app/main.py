@@ -27,7 +27,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
 
-from gateway.app.routes import health, me, chat, conversations
+from gateway.app.routes import health, me, chat, conversations, artifacts
 from gateway.app import db
 
 log = logging.getLogger("uvicorn.error")
@@ -68,6 +68,7 @@ app.include_router(health.router, prefix="/api", tags=["meta"])
 app.include_router(me.router, prefix="/api", tags=["auth"])
 app.include_router(chat.router, prefix="/api", tags=["chat"])
 app.include_router(conversations.router, prefix="/api", tags=["conversations"])
+app.include_router(artifacts.router, prefix="/api", tags=["artifacts"])
 
 
 FRONTEND_DIST = ROOT / "frontend" / "dist"

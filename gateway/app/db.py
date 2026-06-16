@@ -165,3 +165,58 @@ async def delete_conversation(conv_id: str, user_oid: str) -> bool:
     # asyncpg retorna 'DELETE N' — N=1 sucesso, N=0 não existia ou não era do user
     return result.endswith(" 1")
 
+
+# ─── ARTEFATOS ──────────────────────────────────────────────────────────
+async def create_artifact(
+    user_oid: str,
+    kind: str,
+    filename: str,
+    title: str,
+    file_path: str,
+    size_bytes: int,
+    conversation_id: str | None = None,
+    metadata: dict | None = None,
+) -> dict:
+    """Registra metadado do artefato no Postgres. Arquivo já deve estar em disco."""
+    import json
+    pool = _pool_or_raise()
+    row = await pool.fetchrow(
+        """INSERT INTO artifacts
+           (user_oid, conversation_id, kind, filename, title, file_path, size_bytes, metadata)
+           VALUES ($1, $2::uuid, $3, $4, $5, $6, $7, $8::jsonb)
+           RETURNING id, kind, filename, title, size_bytes, created_at""",
+        user_oid, conversation_id, kind, filename, title, file_path, size_bytes,
+        json.dumps(metadata or {}, ensure_ascii=False),
+    )
+    return dict(row)
+
+
+async def get_artifact(artifact_id: str, user_oid: str) -> dict | None:
+    """Busca artefato SE pertence ao user_oid. Retorna inclui file_path."""
+    row = await _pool_or_raise().fetchrow(
+        """SELECT id, user_oid, kind, filename, title, file_path, size_bytes,
+                  metadata, created_at, conversation_id
+           FROM artifacts WHERE id = $1::uuid AND user_oid = $2""",
+        artifact_id, user_oid,
+    )
+    return dict(row) if row else None
+
+
+async def list_artifacts(user_oid: str, kind: str | None = None, limit: int = 50) -> list:
+    """Lista artefatos do user. Opcional: filtrar por kind (xlsx/pdf/pptx/chart)."""
+    if kind:
+        rows = await _pool_or_raise().fetch(
+            """SELECT id, kind, filename, title, size_bytes, created_at
+               FROM artifacts WHERE user_oid = $1 AND kind = $2
+               ORDER BY created_at DESC LIMIT $3""",
+            user_oid, kind, limit,
+        )
+    else:
+        rows = await _pool_or_raise().fetch(
+            """SELECT id, kind, filename, title, size_bytes, created_at
+               FROM artifacts WHERE user_oid = $1
+               ORDER BY created_at DESC LIMIT $2""",
+            user_oid, limit,
+        )
+    return [dict(r) for r in rows]
+

@@ -1,3 +1,4 @@
+import re
 """Loop principal do agente EBD.ia.
 
 Otimizacoes:
@@ -16,6 +17,9 @@ from app.tools.oracle_bridge import (
     execute_oracle_query_streaming,
     format_result_for_claude,
 )
+from app.tools.artifact_tools import CREATE_EXCEL_TOOL
+from app.tools.excel_builder import build_excel
+from app.artifacts import now_br_str
 from app.tools.knowledge_append import (
     KNOWLEDGE_APPEND_TOOL,
     LIST_PROPOSALS_TOOL,
@@ -25,7 +29,7 @@ from app.tools.knowledge_append import (
 
 _client = AsyncAnthropic(api_key=settings.anthropic_api_key)
 _system_prompt = build_system_prompt()
-_tools = [ORACLE_QUERY_TOOL, KNOWLEDGE_APPEND_TOOL, LIST_PROPOSALS_TOOL]
+_tools = [ORACLE_QUERY_TOOL, KNOWLEDGE_APPEND_TOOL, LIST_PROPOSALS_TOOL, CREATE_EXCEL_TOOL]
 
 
 def reload_system_prompt() -> int:
@@ -56,6 +60,8 @@ async def _run_tool(tool_name: str, tool_input: dict, user_id: str, user_role: s
         )
     if tool_name == "list_proposals":
         return tool_list_proposals(user_id=user_id)
+    if tool_name == "create_excel":
+        return await _run_create_excel(tool_input, user_id)
     return f"ERRO: tool '{tool_name}' nao implementada"
 
 
@@ -360,6 +366,20 @@ async def run_turn_stream(
                     yield {"type": "tool", "name": block.name, "input": block.input}
                     result_str = await _run_tool(block.name, block.input, user_id, user_role)
 
+                # Se a tool retornou ARTEFATO_CRIADO, emite evento pro frontend
+                if isinstance(result_str, str) and result_str.startswith('ARTEFATO_CRIADO'):
+                    _m_id = re.search(r'id=(\S+)', result_str)
+                    _m_fn = re.search(r'filename="([^"]+)"', result_str)
+                    _m_sz = re.search(r'size_bytes=(\d+)', result_str)
+                    _m_kd = re.search(r'type=(\S+)', result_str)
+                    if _m_id and _m_fn:
+                        yield {
+                            'type': 'artifact',
+                            'id': _m_id.group(1),
+                            'kind': _m_kd.group(1) if _m_kd else 'xlsx',
+                            'filename': _m_fn.group(1),
+                            'size_bytes': int(_m_sz.group(1)) if _m_sz else 0,
+                        }
                 tool_results.append({
                     "type": "tool_result",
                     "tool_use_id": block.id,
@@ -392,3 +412,58 @@ if __name__ == "__main__":
         u = result.get("usage", {})
         print(f"\nTokens: in={u.get('input_tokens',0)} out={u.get('output_tokens',0)} cache_r={u.get('cache_read_input_tokens',0):,}")
     asyncio.run(main())
+
+
+async def _run_create_excel(tool_input: dict, user_id: str) -> str:
+    """Executa a tool create_excel: gera o XLSX e registra no Postgres.
+
+    Retorna texto pro Claude (1-2 linhas) com o ID do artefato.
+    O frontend renderiza o card a partir do evento {type:"artifact"} emitido
+    em run_turn_stream após esta função retornar.
+    """
+    import logging
+    logger = logging.getLogger("uvicorn.error")
+    try:
+        title = tool_input.get("title", "Planilha EBD")
+        subtitle = tool_input.get("subtitle")
+        sheets = tool_input.get("sheets", [])
+        metadata = tool_input.get("metadata", {})
+
+        if not sheets:
+            return "ERRO: nenhuma aba fornecida (parâmetro 'sheets' vazio)"
+
+        # Gera o arquivo
+        artifact_id, file_path, filename, size_bytes = build_excel(
+            title=title,
+            sheets=sheets,
+            subtitle=subtitle,
+            metadata=metadata,
+        )
+
+        # Registra no Postgres via gateway.db (requer pool já inicializado)
+        from gateway.app import db as gw_db
+        row = await gw_db.create_artifact(
+            user_oid=str(user_id),
+            kind="xlsx",
+            filename=filename,
+            title=title,
+            file_path=str(file_path),
+            size_bytes=size_bytes,
+            metadata={
+                "source_label": metadata.get("source_label", ""),
+                "period": metadata.get("period", ""),
+                "scope": metadata.get("scope", ""),
+                "subtitle": subtitle or "",
+                "rows_total": sum(len(sh.get("rows", [])) for sh in sheets),
+            },
+        )
+        # Devolve um payload bem direto pro Claude — ele só precisa saber que deu certo + ID
+        # para mencionar na resposta. O card vem por evento SSE separado.
+        return (
+            f"ARTEFATO_CRIADO type=xlsx id={row['id']} "
+            f'filename="{filename}" size_bytes={size_bytes}'
+        )
+    except Exception as e:
+        logger.exception("Erro ao gerar Excel")
+        return f"ERRO ao gerar planilha: {type(e).__name__}: {str(e)[:200]}"
+

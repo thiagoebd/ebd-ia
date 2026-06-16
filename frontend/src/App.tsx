@@ -8,10 +8,11 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { loginRequest, apiRequest } from "./auth/authConfig";
 import "./App.css";
+import { ArtifactCard, type ArtifactRef } from "./ArtifactCard";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL;
 
-type Msg = { role: "user" | "assistant"; text: string; status?: string; tools?: string[] };
+type Msg = { role: "user" | "assistant"; text: string; status?: string; tools?: string[]; artifacts?: ArtifactRef[] };
 type Thread = { id: string; title: string; msgs: Msg[]; loaded: boolean; model?: string };
 type ModelInfo = { id: string; label: string; tier: string };
 type MeInfo = { role: "admin" | "user"; models: { default: string; available: ModelInfo[] } };
@@ -82,7 +83,7 @@ function App() {
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       const data = await resp.json();
       const msgs: Msg[] = (data.messages || []).map((m: any) => ({
-        role: m.role, text: m.text, tools: m.tools || [],
+        role: m.role, text: m.text, tools: m.tools || [], artifacts: m.artifacts || [],
       }));
       setThreads((ts) => ts.map((x) => (x.id === id ? { ...x, msgs, loaded: true, title: data.title, model: data.model } : x)));
       if (data.model) setSelectedModel(data.model);
@@ -212,6 +213,7 @@ function App() {
             else if (ev.type === "tool") last.tools = [...(last.tools || []), ev.name];
             else if (ev.type === "token") { last.status = undefined; last.text += ev.text; }
             else if (ev.type === "done") { last.status = undefined; }
+            else if (ev.type === "artifact") { last.artifacts = [...(last.artifacts || []), { id: ev.id, kind: ev.kind, filename: ev.filename, size_bytes: ev.size_bytes }]; }
             else if (ev.type === "error") { last.status = undefined; last.text += `\n\n⚠️ Erro: ${ev.detail}`; }
             return copy;
           });
@@ -331,6 +333,7 @@ function App() {
                   <div className="empty">
                     <h1>Olá, {firstName}. <em>O que olhamos hoje?</em></h1>
                     <p className="empty-sub">Pergunte em português — eu cuido do resto. Você tem visão <strong>Brasil completa</strong>.</p>
+                    <p className="empty-sub">Posso gerar <strong>Excel, PDF e PowerPoint</strong> quando você pedir.</p>
                     <div className="suggest">
                       <button onClick={() => send("Qual o faturamento de hoje no BR?")}>
                         <span className="s-title">Faturamento de hoje</span>
@@ -362,6 +365,13 @@ function App() {
                         <div className="who-line">{m.role === "assistant" ? "EBD.ia" : firstName}</div>
                         {m.role === "assistant" && m.tools && m.tools.length > 0 && (
                           <div className="tools"><span className="tool-chip">⚡ Winthor consultado</span></div>
+                        )}
+                        {m.role === "assistant" && m.artifacts && m.artifacts.length > 0 && (
+                          <div className="artifacts">
+                            {m.artifacts.map((a) => (
+                              <ArtifactCard key={a.id} artifact={a} getToken={token} />
+                            ))}
+                          </div>
                         )}
                         {m.status && <div className="status"><span className="dots">{m.status}</span></div>}
                         {m.text && (m.role === "assistant"
