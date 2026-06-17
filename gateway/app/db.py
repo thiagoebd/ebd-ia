@@ -133,12 +133,31 @@ async def get_messages(conv_id: str, user_oid: str, limit=None) -> list:
                WHERE conversation_id = $1::uuid ORDER BY created_at""",
             conv_id,
         )
+    # Busca artifacts da conversa e associa por janela temporal a cada msg do assistant
+    artifact_rows = await pool.fetch(
+        """SELECT id, kind, filename, size_bytes, created_at FROM artifacts
+           WHERE conversation_id = $1::uuid ORDER BY created_at""",
+        conv_id,
+    )
     out = []
-    for r in rows:
+    for i, r in enumerate(rows):
         content = r["content"]
         if isinstance(content, str):
             content = json.loads(content)
+        msg_artifacts = []
+        if r["role"] == "assistant":
+            t_start = r["created_at"]
+            t_end = rows[i+1]["created_at"] if i+1 < len(rows) else None
+            for a in artifact_rows:
+                if a["created_at"] >= t_start and (t_end is None or a["created_at"] < t_end):
+                    msg_artifacts.append({
+                        "id": str(a["id"]),
+                        "kind": a["kind"],
+                        "filename": a["filename"],
+                        "size_bytes": a["size_bytes"],
+                    })
         out.append({"role": r["role"], "content": content,
+                    "artifacts": msg_artifacts,
                     "created_at": r["created_at"].isoformat()})
     return out
 

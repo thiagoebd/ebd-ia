@@ -20,6 +20,7 @@ type MeInfo = { role: "admin" | "user"; models: { default: string; available: Mo
 function App() {
   const { instance, accounts } = useMsal();
   const [threads, setThreads] = useState<Thread[]>([]);
+  const [historySearch, setHistorySearch] = useState<string>("");
   const [activeId, setActiveId] = useState<string | null>(null);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
@@ -296,8 +297,31 @@ function App() {
             </div>
 
             <div className="sb-history">
-              {threads.length > 0 && <div className="sb-group">Conversas</div>}
-              {threads.map((t) => (
+              {threads.length > 0 && (
+                <>
+                  <div className="sb-group">Conversas</div>
+                  <div className="sb-search">
+                    <input
+                      type="text"
+                      value={historySearch}
+                      onChange={(e) => setHistorySearch(e.target.value)}
+                      placeholder="Buscar nas conversas…"
+                      aria-label="Buscar nas conversas"
+                    />
+                    {historySearch && (
+                      <button
+                        className="sb-search-clear"
+                        onClick={() => setHistorySearch("")}
+                        aria-label="Limpar busca"
+                        title="Limpar"
+                      >×</button>
+                    )}
+                  </div>
+                </>
+              )}
+              {threads
+                .filter((t) => !historySearch || t.title.toLowerCase().includes(historySearch.toLowerCase()))
+                .map((t) => (
                 <div
                   key={t.id}
                   className={`thread ${t.id === activeId ? "active" : ""} ${confirmingDelete === t.id ? "confirming" : ""}`}
@@ -314,6 +338,9 @@ function App() {
                   </button>
                 </div>
               ))}
+              {historySearch && threads.filter((t) => t.title.toLowerCase().includes(historySearch.toLowerCase())).length === 0 && (
+                <div className="sb-empty-search">Sem resultados para "{historySearch}"</div>
+              )}
             </div>
 
             <div className="sb-foot">
@@ -331,7 +358,7 @@ function App() {
               <div className="thread-col">
                 {messages.length === 0 ? (
                   <div className="empty">
-                    <h1>Olá, {firstName}. <em>O que olhamos hoje?</em></h1>
+                    <h1>Como posso te <em>ajudar hoje?</em></h1>
                     <p className="empty-sub">Pergunte em português — eu cuido do resto. Você tem visão <strong>Brasil completa</strong>.</p>
                     <p className="empty-sub">Posso gerar <strong>Excel, PDF e PowerPoint</strong> quando você pedir.</p>
                     <div className="suggest">
@@ -350,6 +377,14 @@ function App() {
                       <button onClick={() => send("Top fornecedores do mês por faturamento")}>
                         <span className="s-title">Top fornecedores</span>
                         <span className="s-desc">Maiores fornecedores no mês corrente.</span>
+                      </button>
+                      <button onClick={() => send("Quantos vendedores transmitiram pedido hoje no BR?")}>
+                        <span className="s-title">Vendedores em campo hoje</span>
+                        <span className="s-desc">Quem transmitiu pedido até agora.</span>
+                      </button>
+                      <button onClick={() => send("Como cada regional está vs meta do mês?")}>
+                        <span className="s-title">% Meta por regional</span>
+                        <span className="s-desc">Realização do mês por regional.</span>
                       </button>
                     </div>
                   </div>

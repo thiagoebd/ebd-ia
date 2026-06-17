@@ -12,10 +12,12 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from gateway.app.auth.entra import verify_token
+from gateway.app.models_catalog import is_admin
+from fastapi import HTTPException
 from gateway.app import db
 from gateway.app.models_catalog import resolve_model
 
-from app.agent import run_turn_stream
+from app.agent import run_turn_stream, _conv_id_ctx
 
 logger = logging.getLogger("uvicorn.error")
 router = APIRouter()
@@ -39,8 +41,11 @@ def _title_from(text: str) -> str:
 
 @router.post("/chat")
 async def chat(body: ChatRequest, claims: dict = Depends(verify_token)):
-    user_id = claims.get("oid") or claims.get("sub") or "web-user"
-    user_role = "admin"  # ACL real vem depois; nao confundir com role de modelo
+    oid = claims.get("oid")
+    if not is_admin(oid):
+        raise HTTPException(status_code=403, detail="Seu acesso ainda nao foi configurado. Fale com o admin (TI Grupo EBD).")
+    user_id = oid or claims.get("sub") or "web-user"
+    user_role = "admin"  # passou aqui = autorizado pela ACL
     user_filiais = "*"
 
     async def event_stream():
@@ -59,6 +64,7 @@ async def chat(body: ChatRequest, claims: dict = Depends(verify_token)):
                 new_conv = True
 
             conv_id = str(conv["id"])
+            _conv_id_ctx.set(conv_id)
             model_used = conv["model"]  # sempre o que esta gravado na conversa
 
             yield _sse({"type": "conversation", "id": conv_id,

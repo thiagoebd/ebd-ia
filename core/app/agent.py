@@ -21,6 +21,8 @@ from app.tools.artifact_tools import CREATE_EXCEL_TOOL, CREATE_PDF_TOOL, CREATE_
 from app.tools.excel_builder import build_excel
 from app.tools.pdf_builder import build_pdf
 from app.tools.pptx_builder import build_pptx
+import contextvars as _contextvars
+_conv_id_ctx: _contextvars.ContextVar = _contextvars.ContextVar("ebd_conv_id", default=None)
 from app.artifacts import now_br_str
 from app.tools.knowledge_append import (
     KNOWLEDGE_APPEND_TOOL,
@@ -449,6 +451,7 @@ async def _run_create_excel(tool_input: dict, user_id: str) -> str:
         # Registra no Postgres via gateway.db (requer pool já inicializado)
         from gateway.app import db as gw_db
         row = await gw_db.create_artifact(
+            conversation_id=_conv_id_ctx.get(),
             user_oid=str(user_id),
             kind="xlsx",
             filename=filename,
@@ -496,6 +499,7 @@ async def _run_create_pdf(tool_input: dict, user_id: str) -> str:
 
         from gateway.app import db as gw_db
         row = await gw_db.create_artifact(
+            conversation_id=_conv_id_ctx.get(),
             user_oid=str(user_id),
             kind="pdf",
             filename=filename,
@@ -550,6 +554,7 @@ async def _run_create_pptx(tool_input: dict, user_id: str) -> str:
         # Registra no Postgres via gateway (cicatriz 4: usa row['id'])
         from gateway.app import db as gw_db
         row = await gw_db.create_artifact(
+            conversation_id=_conv_id_ctx.get(),
             user_oid=str(user_id),
             kind="pptx",
             filename=filename,
