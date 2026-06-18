@@ -5,6 +5,8 @@ from typing import Any
 from mcp import ClientSession
 from mcp.client.streamable_http import streamablehttp_client
 from app.config import settings
+import logging
+_log = logging.getLogger("uvicorn.error")
 
 
 ORACLE_QUERY_TOOL = {
@@ -70,13 +72,21 @@ def format_result_for_claude(payload: dict) -> str:
     status = payload.get("status", "unknown")
     if status != "ok":
         err = payload.get("error", {})
-        return f"ERRO: {err.get('code','?')} - {err.get('message','?')}"
+        code = err.get("code", "?")
+        msg = err.get("message", "?")
+        _log.warning("oracle_query FAIL code=%s msg=%s", code, str(msg)[:200])
+        # Marcador inequivoco que o agent/gateway detectam pra BLOQUEAR fabulacao
+        return (f"__ORACLE_ERROR__ A consulta ao Winthor FALHOU ({code}: {msg}). "
+                f"Voce NAO TEM dados. NUNCA invente numeros. Responda exatamente: "
+                f"'Nao consegui consultar o Winthor agora — tenta de novo daqui a pouco?'")
     result = payload.get("result", {})
     rows = result.get("rows", [])
     elapsed = payload.get("elapsed_ms", 0)
     truncated = result.get("truncated", False)
     if not rows:
+        _log.info("oracle_query OK rows=0 elapsed=%.0fms", elapsed)
         return f"OK (0 linhas, {elapsed:.0f}ms)"
+    _log.info("oracle_query OK rows=%d elapsed=%.0fms truncated=%s", len(rows), elapsed, truncated)
     cols = list(rows[0].keys())
     lines = [f"OK ({len(rows)} linhas, {elapsed:.0f}ms){' [TRUNCATED]' if truncated else ''}"]
     lines.append(" | ".join(cols))

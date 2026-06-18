@@ -275,6 +275,7 @@ async def run_turn_stream(
     tool_calls_log = []
     iterations = 0
     final_usage = {}
+    tool_outcomes = []  # [(tool_name, success_bool), ...] desta turn
 
     while iterations < settings.max_iterations:
         iterations += 1
@@ -330,6 +331,7 @@ async def run_turn_stream(
                 "type": "done",
                 "history": messages,
                 "tool_calls": tool_calls_log,
+                "tool_outcomes": tool_outcomes,
                 "iterations": iterations,
                 "usage": final_usage,
                 "stop_reason": final_message.stop_reason,
@@ -364,6 +366,9 @@ async def run_turn_stream(
                         else:
                             final_payload = ev["payload"]
                     result_str = format_result_for_claude(final_payload)
+                    _ok = not (isinstance(result_str, str) and result_str.startswith("__ORACLE_ERROR__"))
+                    tool_outcomes.append((block.name, _ok))
+                    yield {"type": "tool_done", "name": block.name, "success": _ok}
                 else:
                     if block.name == "knowledge_append":
                         yield {"type": "status", "text": "Registrando conhecimento..."}
@@ -373,6 +378,9 @@ async def run_turn_stream(
                         yield {"type": "status", "text": f"Executando {block.name}..."}
                     yield {"type": "tool", "name": block.name, "input": block.input}
                     result_str = await _run_tool(block.name, block.input, user_id, user_role)
+                    _ok = not (isinstance(result_str, str) and (result_str.startswith("ERRO") or result_str.startswith("__ORACLE_ERROR__")))
+                    tool_outcomes.append((block.name, _ok))
+                    yield {"type": "tool_done", "name": block.name, "success": _ok}
 
                 # Se a tool retornou ARTEFATO_CRIADO, emite evento pro frontend
                 if isinstance(result_str, str) and result_str.startswith('ARTEFATO_CRIADO'):

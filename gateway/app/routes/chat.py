@@ -19,6 +19,22 @@ from gateway.app.models_catalog import resolve_model
 
 from app.agent import run_turn_stream, _conv_id_ctx
 
+import re as _re
+
+def _looks_like_data(text: str) -> bool:
+    """Detecta se a resposta apresenta numeros/valores/tabela como se fossem dados reais."""
+    if not text:
+        return False
+    if _re.search(r"R\$\s*[\d.]", text):          # R$ 1.234
+        return True
+    if _re.search(r"\|[^\n]*\d[^\n]*\|", text):  # linha de tabela com numero
+        return True
+    if _re.search(r"\b\d{1,3}(?:\.\d{3})+\b", text):  # 1.358 / 9.521.869
+        return True
+    return False
+
+
+
 logger = logging.getLogger("uvicorn.error")
 router = APIRouter()
 
@@ -75,7 +91,9 @@ async def chat(body: ChatRequest, claims: dict = Depends(verify_token)):
             await db.add_message(conv_id, "user", {"text": body.message})
 
             assistant_text = ""
-            tools_used = []
+            tools_used = []          # so tools com SUCESSO (controla badge)
+            tool_outcomes = []       # [(name, success)] reportado pelo agent
+            any_tool_failed = False
             saved = False
             try:
                 async for ev in run_turn_stream(
@@ -90,11 +108,34 @@ async def chat(body: ChatRequest, claims: dict = Depends(verify_token)):
                     etype = ev.get("type")
                     if etype == "token":
                         assistant_text += ev.get("text", "")
-                    elif etype == "tool":
+                    elif etype == "tool_done":
+                        # Badge SO acende em sucesso real
                         name = ev.get("name")
-                        if name and name not in tools_used:
-                            tools_used.append(name)
+                        if ev.get("success"):
+                            if name and name not in tools_used:
+                                tools_used.append(name)
+                        else:
+                            any_tool_failed = True
+                        # nao repassa tool_done cru pro frontend (interno)
+                        continue
                     elif etype == "done":
+                        tool_outcomes = ev.get("tool_outcomes", [])
+                        any_ok = any(ok for (_n, ok) in tool_outcomes)
+                        # ── TRAVA ANTI-FABULACAO ──────────────────────────────
+                        # Se a resposta apresenta dados (numeros/R$/tabela) mas
+                        # NENHUMA tool teve sucesso nesta turn -> os numeros foram
+                        # inventados. Bloqueia, substitui o texto, zera o badge.
+                        if _looks_like_data(assistant_text) and not any_ok:
+                            logger.error(
+                                "ANTI-FABULACAO disparou: resposta com dados sem tool OK. "
+                                "tool_outcomes=%s preview=%r",
+                                tool_outcomes, assistant_text[:200],
+                            )
+                            assistant_text = ("Nao consegui consultar o Winthor agora — "
+                                              "tenta de novo daqui a pouco?")
+                            tools_used = []
+                            ev["text"] = assistant_text
+                            ev["fabricacao_bloqueada"] = True
                         await db.add_message(conv_id, "assistant",
                                              {"text": assistant_text, "tools": tools_used})
                         saved = True
@@ -102,6 +143,11 @@ async def chat(body: ChatRequest, claims: dict = Depends(verify_token)):
                     yield _sse(ev)
             finally:
                 if not saved and assistant_text:
+                    # mesma trava no caminho de excecao/interrupcao
+                    if _looks_like_data(assistant_text) and not tools_used:
+                        assistant_text = ("Nao consegui consultar o Winthor agora — "
+                                          "tenta de novo daqui a pouco?")
+                        tools_used = []
                     await db.add_message(conv_id, "assistant",
                                          {"text": assistant_text, "tools": tools_used})
         except Exception as e:
