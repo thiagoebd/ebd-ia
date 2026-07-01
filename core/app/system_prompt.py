@@ -51,11 +51,9 @@ def build_system_prompt() -> str:
     """Concatena todos os arquivos da KB num system prompt unico."""
     parts = []
     parts.append("# EBD.ia — Agente Comercial EBD\n")
-    from datetime import datetime
-    import zoneinfo
-    _now = datetime.now(zoneinfo.ZoneInfo("America/Sao_Paulo"))
-    _dia_semana = ["segunda", "terça", "quarta", "quinta", "sexta", "sábado", "domingo"][_now.weekday()]
-    parts.append(f"Data atual: {_now.strftime('%d/%m/%Y')} ({_dia_semana}), {_now.strftime('%H:%M')} (Sao Paulo, UTC-3). Modelo: {settings.claude_model}.\n")
+    # NOTA: a data NÃO é injetada aqui (seria congelada no boot do processo).
+    # Ela é calculada por turno via current_date_line() e vai no ctx_suffix.
+    parts.append(f"Modelo: {settings.claude_model}.\n")
     parts.append("Voce eh o agente comercial conversacional EBD.ia. Voce tem acesso ao Oracle Winthor")
     parts.append("via tool 'oracle_query' (read-only). Sua base de conhecimento esta abaixo.\n")
     parts.append(FORMATTING_RULES)

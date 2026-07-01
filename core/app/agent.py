@@ -44,6 +44,19 @@ def reload_system_prompt() -> int:
     _system_prompt = build_system_prompt()
     return len(_system_prompt)
 
+
+def current_date_line() -> str:
+    """Linha de data/hora recalculada A CADA TURNO (nunca congela no boot).
+    Vai no ctx_suffix, fora do _system_prompt estatico que fica em cache."""
+    from datetime import datetime
+    import zoneinfo
+    _now = datetime.now(zoneinfo.ZoneInfo("America/Sao_Paulo"))
+    _dia = ["segunda", "terça", "quarta", "quinta", "sexta", "sábado", "domingo"][_now.weekday()]
+    return (
+        f"Data atual: {_now.strftime('%d/%m/%Y')} ({_dia}), "
+        f"{_now.strftime('%H:%M')} (Sao Paulo, UTC-3).\n"
+    )
+
 MAX_HISTORY_PAIRS = 10
 
 
@@ -168,7 +181,7 @@ async def run_turn(
 
     system_blocks = [{
         "type": "text",
-        "text": _system_prompt + ctx_suffix,
+        "text": current_date_line() + _system_prompt + ctx_suffix,
         "cache_control": {"type": "ephemeral", "ttl": "1h"},  # 1h em vez de 5min default
     }]
 
@@ -268,7 +281,7 @@ async def run_turn_stream(
 
     system_blocks = [{
         "type": "text",
-        "text": _system_prompt + ctx_suffix,
+        "text": current_date_line() + _system_prompt + ctx_suffix,
         "cache_control": {"type": "ephemeral", "ttl": "1h"},
     }]
 
@@ -347,7 +360,6 @@ async def run_turn_stream(
                 if block.name == "oracle_query":
                     sql = (block.input or {}).get("sql", "")
                     # detecta menção a Txxx no SQL ou na conversa pra dar status melhor
-                    import re
                     m = re.search(r"\bT(\d{3})\b", sql + " " + user_message)
                     label = f"T{m.group(1)}" if m else "consulta personalizada"
                     yield {"type": "status", "text": f"Consultando Winthor ({label}) — pode levar até 90s..."}
@@ -366,6 +378,8 @@ async def run_turn_stream(
                         else:
                             final_payload = ev["payload"]
                     result_str = format_result_for_claude(final_payload)
+                    import logging as _fl
+                    _fl.getLogger("uvicorn.error").info("ORACLE_FORENSE sql=%r >>> result=%r", sql[:300], result_str[:400])
                     _ok = not (isinstance(result_str, str) and result_str.startswith("__ORACLE_ERROR__"))
                     tool_outcomes.append((block.name, _ok))
                     yield {"type": "tool_done", "name": block.name, "success": _ok}
@@ -374,6 +388,12 @@ async def run_turn_stream(
                         yield {"type": "status", "text": "Registrando conhecimento..."}
                     elif block.name == "list_proposals":
                         yield {"type": "status", "text": "Listando propostas..."}
+                    elif block.name == "create_excel":
+                        yield {"type": "status", "text": "Montando a planilha Excel..."}
+                    elif block.name == "create_pdf":
+                        yield {"type": "status", "text": "Gerando o documento PDF..."}
+                    elif block.name == "create_pptx":
+                        yield {"type": "status", "text": "Montando a apresentação..."}
                     else:
                         yield {"type": "status", "text": f"Executando {block.name}..."}
                     yield {"type": "tool", "name": block.name, "input": block.input}

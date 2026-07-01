@@ -6,6 +6,7 @@ Regras de modelo:
 """
 import json
 import logging
+import time
 
 from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
@@ -58,13 +59,16 @@ def _title_from(text: str) -> str:
 @router.post("/chat")
 async def chat(body: ChatRequest, claims: dict = Depends(verify_token)):
     oid = claims.get("oid")
-    if not is_admin(oid):
+    _email = claims.get("preferred_username") or claims.get("upn") or claims.get("unique_name") or claims.get("email")
+    if not is_admin(oid, _email):
         raise HTTPException(status_code=403, detail="Seu acesso ainda nao foi configurado. Fale com o admin (TI Grupo EBD).")
     user_id = oid or claims.get("sub") or "web-user"
     user_role = "admin"  # passou aqui = autorizado pela ACL
     user_filiais = "*"
 
     async def event_stream():
+        _t0 = time.perf_counter()
+        def _lap(tag): logger.info(f'[PERF] {tag}: {(time.perf_counter()-_t0)*1000:.0f}ms')
         conv_id = body.conversation_id
         new_conv = False
         try:
@@ -88,7 +92,9 @@ async def chat(body: ChatRequest, claims: dict = Depends(verify_token)):
                         "model": model_used})
 
             window = await db.build_model_window(conv_id, user_id)
+            _lap('window pronta')
             await db.add_message(conv_id, "user", {"text": body.message})
+            _lap('user msg gravada')
 
             assistant_text = ""
             tools_used = []          # so tools com SUCESSO (controla badge)
@@ -107,7 +113,11 @@ async def chat(body: ChatRequest, claims: dict = Depends(verify_token)):
                 ):
                     etype = ev.get("type")
                     if etype == "token":
+                        if not assistant_text: _lap('PRIMEIRO TOKEN do agent')
                         assistant_text += ev.get("text", "")
+                    elif etype == "tool" or etype == "tool_use":
+                        if not getattr(event_stream, "_tool_marked", False):
+                            _lap("PRIMEIRA TOOL chamada"); event_stream._tool_marked = True
                     elif etype == "tool_done":
                         # Badge SO acende em sucesso real
                         name = ev.get("name")
