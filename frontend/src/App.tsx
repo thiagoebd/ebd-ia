@@ -212,7 +212,7 @@ function App() {
             if (!last || last.role !== "assistant") return copy;
             if (ev.type === "status") last.status = ev.text;
             else if (ev.type === "tool") last.tools = [...(last.tools || []), ev.name];
-            else if (ev.type === "token") { last.status = undefined; last.text += ev.text; }
+            else if (ev.type === "token") { last.text += ev.text; }
             else if (ev.type === "done") { last.status = undefined; }
             else if (ev.type === "artifact") { last.artifacts = [...(last.artifacts || []), { id: ev.id, kind: ev.kind, filename: ev.filename, size_bytes: ev.size_bytes }]; }
             else if (ev.type === "error") { last.status = undefined; last.text += `\n\n⚠️ Erro: ${ev.detail}`; }

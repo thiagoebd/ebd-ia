@@ -18,10 +18,17 @@ ADMIN_MODELS = [m["id"] for m in ALL_MODELS]
 ADMIN_OIDS = {
     o.strip() for o in os.getenv("ADMIN_OIDS", "").split(",") if o.strip()
 }
+ADMIN_EMAILS = {
+    e.strip().lower() for e in os.getenv("ADMIN_EMAILS", "").split(",") if e.strip()
+}
 
 
-def is_admin(oid: str | None) -> bool:
-    return bool(oid) and oid in ADMIN_OIDS
+def is_admin(oid: str | None, email: str | None = None) -> bool:
+    if oid and oid in ADMIN_OIDS:
+        return True
+    if email and email.strip().lower() in ADMIN_EMAILS:
+        return True
+    return False
 
 
 def role_for(oid: str | None) -> str:
