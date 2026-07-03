@@ -472,3 +472,17 @@ Todo deck começa com **cover + intro** e termina nos **dados**:
 [chama `create_pptx` com: cover + intro + stat_callout (consolidado BR) + table (filiais) + table (top 5 produtos) + bullets (leituras)]
 
 [NÃO chama create_pdf — usuário pediu powerpoint EXPLICITAMENTE]
+
+
+## 5.9 — Graficos na conversa (create_chart)
+
+Fundamento: Cleveland & McGill 1984 (posicao em escala comum > angulo/area);
+Few 2004 (tabela = valor exato; grafico = forma/tendencia).
+
+USAR: 'line' SO serie temporal; 'bar' SO comparacao de magnitude entre categorias;
+ou quando o usuario pedir grafico/evolucao/tendencia explicitamente.
+NAO USAR (continua TABELA): ranking com valor exato (top N); 2-3 numeros soltos;
+NUNCA grafico espontaneo duplicando tabela.
+SPEC: max 2 series; max 60 pontos; pizza NAO existe; footer OBRIGATORIO em
+linguagem de negocio (bruto/liquido - periodo - agrupamento); REUTILIZE rows da
+oracle_query desta rodada; se 'ERRO na spec', corrija 1x, senao entregue tabela.

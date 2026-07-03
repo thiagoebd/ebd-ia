@@ -41,7 +41,8 @@ from app.tools.oracle_bridge import (
     execute_oracle_query_streaming,
     format_result_for_claude,
 )
-from app.tools.artifact_tools import CREATE_EXCEL_TOOL, CREATE_PDF_TOOL, CREATE_PPTX_TOOL
+from app.tools.artifact_tools import CREATE_EXCEL_TOOL, CREATE_PDF_TOOL, CREATE_PPTX_TOOL, CREATE_CHART_TOOL
+from app.tools.chart_builder import build_chart
 from app.tools.excel_builder import build_excel
 from app.tools.pdf_builder import build_pdf
 from app.tools.pptx_builder import build_pptx
@@ -57,7 +58,7 @@ from app.tools.knowledge_append import (
 
 _client = AsyncAnthropic(api_key=settings.anthropic_api_key)
 _system_prompt = build_system_prompt()
-_tools = [ORACLE_QUERY_TOOL, KNOWLEDGE_APPEND_TOOL, LIST_PROPOSALS_TOOL, CREATE_EXCEL_TOOL, CREATE_PDF_TOOL, CREATE_PPTX_TOOL]
+_tools = [ORACLE_QUERY_TOOL, KNOWLEDGE_APPEND_TOOL, LIST_PROPOSALS_TOOL, CREATE_EXCEL_TOOL, CREATE_PDF_TOOL, CREATE_PPTX_TOOL, CREATE_CHART_TOOL]
 
 
 def reload_system_prompt() -> int:
@@ -107,6 +108,8 @@ async def _run_tool(tool_name: str, tool_input: dict, user_id: str, user_role: s
         return await _run_create_pdf(tool_input, user_id)
     if tool_name == "create_pptx":
         return await _run_create_pptx(tool_input, user_id)
+    if tool_name == "create_chart":
+        return await _run_create_chart(tool_input, user_id)
     return f"ERRO: tool '{tool_name}' nao implementada"
 
 
@@ -418,6 +421,8 @@ async def run_turn_stream(
                         yield {"type": "status", "text": "Gerando o documento PDF..."}
                     elif block.name == "create_pptx":
                         yield {"type": "status", "text": "Montando a apresentação..."}
+                    elif block.name == "create_chart":
+                        yield {"type": "status", "text": "Montando o gráfico..."}
                     else:
                         yield {"type": "status", "text": f"Executando {block.name}..."}
                     yield {"type": "tool", "name": block.name, "input": block.input}
@@ -527,6 +532,41 @@ async def _run_create_excel(tool_input: dict, user_id: str) -> str:
     except Exception as e:
         logger.exception("Erro ao gerar Excel")
         return f"ERRO ao gerar planilha: {type(e).__name__}: {str(e)[:200]}"
+
+
+async def _run_create_chart(tool_input: dict, user_id: str) -> str:
+    """create_chart: valida spec (line|bar, max 2 series, max 60 pontos, footer
+    obrigatorio — Cleveland & McGill 1984; Few 2004), grava JSON, registra no PG."""
+    import logging
+    logger = logging.getLogger("uvicorn.error")
+    try:
+        title = tool_input.get("title", "Grafico EBD")
+        artifact_id, file_path, filename, size_bytes = build_chart(tool_input)
+        from gateway.app import db as gw_db
+        row = await gw_db.create_artifact(
+            conversation_id=_conv_id_ctx.get(),
+            user_oid=str(user_id),
+            kind="chart",
+            filename=filename,
+            title=title,
+            file_path=str(file_path),
+            size_bytes=size_bytes,
+            metadata={
+                "chart_type": tool_input.get("chart_type", ""),
+                "points": len(tool_input.get("data", [])),
+                "series": len(tool_input.get("series", [])),
+                "footer": tool_input.get("footer", ""),
+            },
+        )
+        return (
+            f"ARTEFATO_CRIADO type=chart id={row['id']} "
+            f'filename="{filename}" size_bytes={size_bytes}'
+        )
+    except ValueError as e:
+        return f"ERRO na spec do grafico: {e}"
+    except Exception as e:
+        logger.exception("Erro ao gerar grafico")
+        return f"ERRO ao gerar grafico: {type(e).__name__}: {str(e)[:200]}"
 
 
 async def _run_create_pdf(tool_input: dict, user_id: str) -> str:
