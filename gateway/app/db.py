@@ -68,6 +68,32 @@ def _pool_or_raise():
     return _pool
 
 
+import os
+
+MAX_CONVERSATIONS_PER_USER = int(os.getenv("MAX_CONVERSATIONS_PER_USER", "5"))
+
+
+async def _enforce_conversation_cap(conn, user_oid: str) -> int:
+    """Mantém as N conversas mais recentes (updated_at) do usuário; deleta o resto.
+
+    messages caem via ON DELETE CASCADE; artifacts sobrevivem via ON DELETE SET NULL
+    (rotacionar chat não destrói entregável — ele segue na Biblioteca).
+    Usa idx_conv_user_updated (user_oid, updated_at DESC): index scan, custo ~zero.
+    """
+    result = await conn.execute(
+        """DELETE FROM conversations
+           WHERE user_oid = $1
+             AND id NOT IN (
+                 SELECT id FROM conversations
+                 WHERE user_oid = $1
+                 ORDER BY updated_at DESC
+                 LIMIT $2
+             )""",
+        user_oid, MAX_CONVERSATIONS_PER_USER,
+    )
+    return int(result.split()[-1]) if result else 0
+
+
 async def create_conversation(user_oid: str, title: str, model: str) -> dict:
     row = await _pool_or_raise().fetchrow(
         """INSERT INTO conversations (user_oid, title, model)
@@ -75,6 +101,8 @@ async def create_conversation(user_oid: str, title: str, model: str) -> dict:
            RETURNING id, title, model, created_at, updated_at""",
         user_oid, title, model,
     )
+    # rotação: mantém as N mais recentes do usuário (a recém-criada conta)
+    await _enforce_conversation_cap(_pool_or_raise(), user_oid)
     return dict(row)
 
 
