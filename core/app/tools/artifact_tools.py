@@ -186,3 +186,41 @@ CREATE_PPTX_TOOL = {
         "required": ["title", "subtitle", "slides"]
     }
 }
+
+
+CREATE_CHART_TOOL = {
+    "name": "create_chart",
+    "description": (
+        "Gera grafico interativo renderizado NA CONVERSA (nao e download). "
+        "Chamar quando o usuario pedir grafico/visualizacao/evolucao/tendencia, "
+        "OU quando serie temporal ou comparacao visual comunicar melhor que tabela. "
+        "REGRAS (nao violar): 'line' SO para serie temporal; 'bar' SO para comparacao "
+        "de magnitude entre categorias; ranking onde o usuario precisa do VALOR EXATO "
+        "continua TABELA (nao chame esta tool); pizza NAO existe; maximo 2 series. "
+        "footer e OBRIGATORIO: a regra do dado em linguagem de negocio "
+        "(bruto/liquido, periodo, agrupamento), como no rodape das respostas. "
+        "REUTILIZE rows que oracle_query acabou de retornar nesta rodada — "
+        "NAO rode oracle_query de novo so para o grafico."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "chart_type": {"type": "string", "enum": ["line", "bar"],
+                           "description": "line = serie temporal; bar = comparacao entre categorias"},
+            "title": {"type": "string", "description": "Ex: 'Faturamento Liquido — ultimos 7 dias'"},
+            "x_key": {"type": "string", "description": "Chave do eixo X em data. Ex: 'dia'"},
+            "series": {"type": "array", "maxItems": 2,
+                       "items": {"type": "object", "properties": {
+                           "key": {"type": "string"}, "label": {"type": "string"}},
+                           "required": ["key", "label"]},
+                       "description": "1 a 2 series numericas"},
+            "data": {"type": "array", "maxItems": 60,
+                     "items": {"type": "object"},
+                     "description": "Pontos. Cada item tem x_key + as keys das series (numericos)"},
+            "y_format": {"type": "string", "enum": ["money", "int", "percent"]},
+            "footer": {"type": "string",
+                       "description": "OBRIGATORIO. Rodape de fonte em linguagem de negocio"},
+        },
+        "required": ["chart_type", "title", "x_key", "series", "data", "footer"],
+    },
+}
