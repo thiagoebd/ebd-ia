@@ -121,9 +121,11 @@ services:
     networks:
       - ebdia_net
     healthcheck:
-      test: ["CMD", "python", "-m", "app.scripts.health_check"]
-      interval: 60s
-      timeout: 30s
+      # /health agora executa SELECT 1 FROM DUAL (call_timeout 5s) e retorna 503 se Oracle nao responde.
+      # urlopen levanta excecao em 503 -> exit != 0 -> unhealthy.
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8989/health', timeout=12)"]
+      interval: 30s
+      timeout: 15s
       retries: 3
       start_period: 30s
     logging:

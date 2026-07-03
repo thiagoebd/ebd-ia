@@ -14,6 +14,9 @@ Uso (host):
 
 from __future__ import annotations
 
+import asyncio
+import oracledb
+
 import json
 import logging
 import os
@@ -268,12 +271,33 @@ async def oracle_query(
 
     # 4. Executar
     pool = get_pool()
-    try:
-        with pool.acquire() as conn:
+    call_timeout_ms = get_config().query_timeout_ms  # agora APLICADO de verdade
+
+    def _run_query() -> tuple[list, list]:
+        conn = pool.acquire()
+        try:
+            conn.call_timeout = call_timeout_ms  # estourou -> break no SERVIDOR (DPY-4024)
             with conn.cursor() as cur:
                 cur.execute(final_sql, bind_vars)
-                cols = [d[0] for d in cur.description] if cur.description else []
-                rows = cur.fetchall()
+                _cols = [d[0] for d in cur.description] if cur.description else []
+                _rows = cur.fetchall()
+            conn.call_timeout = 0
+            pool.release(conn)
+            return _cols, _rows
+        except Exception:
+            try:
+                conn.call_timeout = 0
+                conn.ping()
+                pool.release(conn)   # sã: volta ao pool
+            except Exception:
+                try:
+                    pool.drop(conn)  # quebrada: descarta (pool repõe)
+                except Exception:
+                    pass
+            raise
+
+    try:
+        cols, rows = await asyncio.to_thread(_run_query)  # event loop LIVRE durante a query
         elapsed = (time.perf_counter() - start) * 1000
 
         # Serializa rows como list[dict]
@@ -304,6 +328,34 @@ async def oracle_query(
             truncated=truncated,
         ).model_dump()
 
+    except oracledb.Error as e:
+        elapsed = (time.perf_counter() - start) * 1000
+        _err = e.args[0] if e.args else None
+        full_code = getattr(_err, "full_code", "") or ""
+        if full_code in ("DPY-4024", "DPY-4011"):
+            log.warning("oracle_query_timeout", user_id=user.user_id,
+                        full_code=full_code, elapsed_ms=round(elapsed, 1),
+                        sql_prefix=final_sql[:200])
+            return ToolResponse.failure(
+                tool="oracle_query",
+                code="ORACLE_TIMEOUT",
+                message=(f"Consulta excedeu o tempo limite ({call_timeout_ms // 1000}s) "
+                         "e foi cancelada no banco. Refine o período, filial ou agrupamento."),
+                elapsed_ms=elapsed,
+                user_context=user,
+                details={"sql_executed": final_sql},
+            ).model_dump()
+        log.error("oracle_query_error", user_id=user.user_id, error=str(e)[:300],
+                  full_code=full_code, sql_prefix=final_sql[:200])
+        return ToolResponse.failure(
+            tool="oracle_query",
+            code="ORACLE_ERROR",
+            message=str(e)[:500],
+            elapsed_ms=elapsed,
+            user_context=user,
+            details={"sql_executed": final_sql},
+        ).model_dump()
+
     except Exception as e:
         elapsed = (time.perf_counter() - start) * 1000
         err_str = str(e)
@@ -324,8 +376,31 @@ async def oracle_query(
 
 @mcp.custom_route("/health", methods=["GET"])
 async def health(_request: Request) -> JSONResponse:
-    """Health check público."""
-    return JSONResponse({"status": "healthy", "service": "mcp-oracle"})
+    """Health check real: SELECT 1 FROM DUAL com timeout curto."""
+    def _ping_oracle():
+        pool = get_pool()
+        conn = pool.acquire()
+        try:
+            conn.call_timeout = 5000
+            with conn.cursor() as cur:
+                cur.execute("SELECT 1 FROM DUAL")
+                cur.fetchone()
+            conn.call_timeout = 0
+            pool.release(conn)
+        except Exception:
+            try:
+                pool.drop(conn)
+            except Exception:
+                pass
+            raise
+    try:
+        await asyncio.wait_for(asyncio.to_thread(_ping_oracle), timeout=8)
+        return JSONResponse({"status": "healthy", "service": "mcp-oracle", "oracle": "ok"})
+    except Exception as e:
+        return JSONResponse(
+            {"status": "unhealthy", "service": "mcp-oracle", "error": str(e)[:200]},
+            status_code=503,
+        )
 
 
 # ============================================================

@@ -35,6 +35,13 @@ def get_pool() -> oracledb.ConnectionPool:
         min=_config.pool_min,
         max=_config.pool_max,
         increment=_config.pool_increment,
+        # RESILIÊNCIA (03/07/2026):
+        # - TIMEDWAIT: acquire em pool esgotado falha com DPY-4005 após wait_timeout,
+        #   em vez de esperar pra sempre (default WAIT).
+        # - ping_interval: valida conexão ociosa >30s no acquire (descarta morta).
+        getmode=oracledb.POOL_GETMODE_TIMEDWAIT,
+        wait_timeout=5000,   # ms
+        ping_interval=30,    # segundos
         # Sessão read-only por padrão (defensive — usuário já deve ser RO no Oracle)
         session_callback=_session_init,
     )
