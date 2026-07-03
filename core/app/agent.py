@@ -1,4 +1,28 @@
 import re
+
+
+def _classify_sql_subject(sql: str) -> str:
+    """SQL -> assunto em linguagem de negocio (status vivo, sem cozinha tecnica)."""
+    s = (sql or "").upper()
+    if "FORNEC" in s:
+        return "Analisando fornecedores (consulta detalhada)"
+    if "REGIONAL" in s:
+        return "Consolidando visao regional"
+    if "ESTOQUE" in s or "PCEST" in s:
+        return "Verificando estoque"
+    if "CONTASRECEBER" in s or "PCPREST" in s or "INADIMPL" in s:
+        return "Analisando carteira e inadimplencia"
+    if "RUPTURA" in s:
+        return "Analisando ruptura"
+    if "META" in s:
+        return "Cruzando com metas"
+    if "VISITA" in s:
+        return "Verificando visitas"
+    if "POSITIV" in s:
+        return "Analisando positivacao"
+    if "FATURAMENTO" in s or "VLATEND" in s or "VENDA" in s:
+        return "Consultando faturamento"
+    return "Consultando dados comerciais"
 """Loop principal do agente EBD.ia.
 
 Otimizacoes:
@@ -359,10 +383,9 @@ async def run_turn_stream(
                 # status amigavel por tipo de tool
                 if block.name == "oracle_query":
                     sql = (block.input or {}).get("sql", "")
-                    # detecta menção a Txxx no SQL ou na conversa pra dar status melhor
-                    m = re.search(r"\bT(\d{3})\b", sql + " " + user_message)
-                    label = f"T{m.group(1)}" if m else "consulta personalizada"
-                    yield {"type": "status", "text": f"Consultando Winthor ({label}) — pode levar até 90s..."}
+                    _assunto = _classify_sql_subject(sql)
+                    _passo = len([t for t in tool_calls_log if t["name"] == "oracle_query"])
+                    yield {"type": "status", "text": f"Passo {_passo} — {_assunto}..."}
                     yield {"type": "tool", "name": block.name, "input": block.input}
                     # roda em modo streaming pra emitir progresso
                     final_payload = None
@@ -373,8 +396,9 @@ async def run_turn_stream(
                         canal="web",
                     ):
                         if ev["type"] == "progress":
+                            _extra = " · consulta detalhada, pode levar ate 1 min" if ev["elapsed"] >= 20 else ""
                             yield {"type": "status",
-                                   "text": f"Ainda processando — {ev['elapsed']}s decorridos. Aguarde..."}
+                                   "text": f"Passo {_passo} — {_assunto}... {ev['elapsed']}s{_extra}"}
                         else:
                             final_payload = ev["payload"]
                     result_str = format_result_for_claude(final_payload)
