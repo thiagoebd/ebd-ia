@@ -10,8 +10,6 @@ router = APIRouter()
 async def get_me(claims: dict = Depends(verify_token)):
     oid = claims.get("oid")
     _email = claims.get("preferred_username") or claims.get("upn") or claims.get("unique_name") or claims.get("email")
-        claims.get("name"), claims.get("oid"), claims.get("sub"),
-        claims.get("preferred_username") or claims.get("upn"))
     return {
         "oid": oid,
         "name": claims.get("name"),
