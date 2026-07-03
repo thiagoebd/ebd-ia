@@ -9,6 +9,7 @@ import remarkGfm from "remark-gfm";
 import { loginRequest, apiRequest } from "./auth/authConfig";
 import "./App.css";
 import { ArtifactCard, type ArtifactRef } from "./ArtifactCard";
+import { ChartCard } from "./ChartCard";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL;
 
@@ -404,7 +405,9 @@ function App() {
                         {m.role === "assistant" && m.artifacts && m.artifacts.length > 0 && (
                           <div className="artifacts">
                             {m.artifacts.map((a) => (
-                              <ArtifactCard key={a.id} artifact={a} getToken={token} />
+                              a.kind === "chart"
+                                ? <ChartCard key={a.id} artifact={a} getToken={token} />
+                                : <ArtifactCard key={a.id} artifact={a} getToken={token} />
                             ))}
                           </div>
                         )}
