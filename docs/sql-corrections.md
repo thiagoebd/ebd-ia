@@ -946,3 +946,62 @@ FROM (
 | Último dia útil | Explosivo (R$60M–R$89M) |
 
 
+
+
+<!-- AUTO-APPEND PROP-2D5EAF8D aprovado por Thiago -->
+
+
+## Filtro correto para excluir supervisores da base de RCAs
+
+> Confirmado por Thiago (admin) em 06/07/2026.
+
+### Problema
+Ao contar RCAs de campo, supervisores eram incluídos no denominador porque
+estão cadastrados em `PCUSUARI` como qualquer outro usuário. Isso inflava
+o total de RCAs ativos e distorcia métricas de checkin, cobertura e efetividade.
+
+### Query correta — excluir supervisores de PCUSUARI
+
+```sql
+SELECT * FROM EBD.PCUSUARI
+WHERE CODUSUR NOT IN (
+    SELECT CODUSUR FROM EBD.PCUSUARI
+    WHERE PCUSUARI.CODUSUR IN (
+        SELECT COD_CADRCA FROM EBD.PCSUPERV
+    )
+)
+```
+
+### Explicação
+
+| Tabela | Campo | Papel |
+|---|---|---|
+| `PCUSUARI` | `CODUSUR` | Todos os usuários (RCAs + supervisores + outros) |
+| `PCSUPERV` | `COD_CADRCA` | Código do usuário que É supervisor (vínculo supervisor→PCUSUARI) |
+
+O campo `PCSUPERV.COD_CADRCA` aponta para o `CODUSUR` do supervisor em `PCUSUARI`.
+Excluindo esses CODUSURs, ficamos apenas com RCAs de campo puros.
+
+### Anti-padrão evitado
+
+❌ Filtrar por `TIPOVEND` ('E','I','R') não é suficiente — supervisores também
+têm esses tipos e continuam aparecendo no resultado.
+
+❌ Filtrar por `CODSUPERVISOR IS NULL` em `PCUSUARI` não funciona — campo
+se refere ao supervisor DO RCA, não se o usuário é um supervisor.
+
+### Aplicação obrigatória
+
+Usar este filtro em **toda métrica que conta "RCAs de campo"**:
+- Checkin / cobertura de rota
+- Efetividade de mix
+- Positivação por RCA
+- Qualquer denominador que represente "força de vendas ativa"
+
+### Impacto medido (06/07/2026)
+
+| | Sem filtro | Com filtro correto |
+|---|---:|---:|
+| Total RCAs BR | 1.465 | 1.362 |
+| Supervisores removidos | — | ~103 |
+
