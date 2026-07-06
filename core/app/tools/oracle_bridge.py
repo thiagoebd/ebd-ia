@@ -89,6 +89,11 @@ def format_result_for_claude(payload: dict) -> str:
     _log.info("oracle_query OK rows=%d elapsed=%.0fms truncated=%s", len(rows), elapsed, truncated)
     cols = list(rows[0].keys())
     lines = [f"OK ({len(rows)} linhas, {elapsed:.0f}ms){' [TRUNCATED]' if truncated else ''}"]
+    if len(rows) > 50:
+        lines.append(f"[PREVIEW: voce esta vendo 50 de {len(rows)} linhas — as demais "
+                     f"NAO estao no seu contexto. Para gerar Excel/artefato com TODAS "
+                     f"as linhas, chame create_excel com use_last_result=true "
+                     f"(NUNCA re-digite as linhas).]")
     lines.append(" | ".join(cols))
     lines.append("-" * 80)
     for r in rows[:50]:

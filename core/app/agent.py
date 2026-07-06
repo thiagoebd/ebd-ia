@@ -1,6 +1,33 @@
 import re
 
 
+# ============================================================
+# Cache do ultimo resultado Oracle por conversa (passagem por REFERENCIA).
+# Motivo (bug 06/07): format_result_for_claude mostra so 50 linhas ao modelo;
+# re-emitir N linhas como tokens na tool call estoura max_tokens (~50-70k tokens
+# para 1.200 linhas). Aqui o dado flui handler->handler sem passar pelo modelo:
+# integridade byte a byte + custo ~200 tokens em vez de dezenas de milhares.
+# ============================================================
+_LAST_RESULT_CACHE: dict[str, dict] = {}
+
+
+def _store_last_result(payload: dict | None) -> None:
+    try:
+        if not payload or payload.get("status") != "ok":
+            return
+        rows = (payload.get("result") or {}).get("rows") or []
+        if not rows:
+            return
+        if len(_LAST_RESULT_CACHE) > 100:  # bound de memoria; rotacao simples
+            _LAST_RESULT_CACHE.clear()
+        _LAST_RESULT_CACHE[_conv_id_ctx.get() or "_"] = {
+            "rows": rows,
+            "count": len(rows),
+        }
+    except Exception:
+        pass  # cache e best-effort; nunca derruba o turno
+
+
 def _classify_sql_subject(sql: str) -> str:
     """SQL -> assunto em linguagem de negocio (status vivo, sem cozinha tecnica)."""
     s = (sql or "").upper()
@@ -43,6 +70,9 @@ from app.tools.oracle_bridge import (
 )
 from app.tools.artifact_tools import CREATE_EXCEL_TOOL, CREATE_PDF_TOOL, CREATE_PPTX_TOOL, CREATE_CHART_TOOL
 from app.tools.chart_builder import build_chart
+from app.tools.template_catalog import (
+    LIST_TEMPLATES_TOOL, GET_TEMPLATE_TOOL, tool_list_templates, tool_get_template,
+)
 from app.tools.excel_builder import build_excel
 from app.tools.pdf_builder import build_pdf
 from app.tools.pptx_builder import build_pptx
@@ -58,7 +88,7 @@ from app.tools.knowledge_append import (
 
 _client = AsyncAnthropic(api_key=settings.anthropic_api_key)
 _system_prompt = build_system_prompt()
-_tools = [ORACLE_QUERY_TOOL, KNOWLEDGE_APPEND_TOOL, LIST_PROPOSALS_TOOL, CREATE_EXCEL_TOOL, CREATE_PDF_TOOL, CREATE_PPTX_TOOL, CREATE_CHART_TOOL]
+_tools = [ORACLE_QUERY_TOOL, KNOWLEDGE_APPEND_TOOL, LIST_PROPOSALS_TOOL, CREATE_EXCEL_TOOL, CREATE_PDF_TOOL, CREATE_PPTX_TOOL, CREATE_CHART_TOOL, LIST_TEMPLATES_TOOL, GET_TEMPLATE_TOOL]
 
 
 def reload_system_prompt() -> int:
@@ -110,6 +140,10 @@ async def _run_tool(tool_name: str, tool_input: dict, user_id: str, user_role: s
         return await _run_create_pptx(tool_input, user_id)
     if tool_name == "create_chart":
         return await _run_create_chart(tool_input, user_id)
+    if tool_name == "list_templates":
+        return tool_list_templates(familia=tool_input.get("familia"))
+    if tool_name == "get_template":
+        return tool_get_template(code=tool_input.get("code", ""))
     return f"ERRO: tool '{tool_name}' nao implementada"
 
 
@@ -405,6 +439,7 @@ async def run_turn_stream(
                                    "text": f"Passo {_passo} — {_assunto}... {ev['elapsed']}s{_extra}"}
                         else:
                             final_payload = ev["payload"]
+                    _store_last_result(final_payload)
                     result_str = format_result_for_claude(final_payload)
                     import logging as _fl
                     _fl.getLogger("uvicorn.error").info("ORACLE_FORENSE sql=%r >>> result=%r", sql[:300], result_str[:400])
@@ -424,6 +459,8 @@ async def run_turn_stream(
                         yield {"type": "status", "text": "Montando a apresentação..."}
                     elif block.name == "create_chart":
                         yield {"type": "status", "text": "Montando o gráfico..."}
+                    elif block.name in ("list_templates", "get_template"):
+                        yield {"type": "status", "text": "Selecionando a consulta padrão..."}
                     else:
                         yield {"type": "status", "text": f"Executando {block.name}..."}
                     yield {"type": "tool", "name": block.name, "input": block.input}
@@ -497,6 +534,19 @@ async def _run_create_excel(tool_input: dict, user_id: str) -> str:
 
         if not sheets:
             return "ERRO: nenhuma aba fornecida (parâmetro 'sheets' vazio)"
+
+        # PASSAGEM POR REFERENCIA: injeta as rows completas da ultima oracle_query
+        if tool_input.get("use_last_result"):
+            _cached = _LAST_RESULT_CACHE.get(_conv_id_ctx.get() or "_")
+            if not _cached:
+                return ("ERRO: use_last_result=true mas nao ha resultado de "
+                        "oracle_query nesta conversa. Rode a consulta primeiro.")
+            if len(sheets) != 1:
+                return ("ERRO: use_last_result suporta exatamente 1 aba nesta "
+                        "versao. Envie 1 aba (as colunas mapeiam o resultado).")
+            sheets[0]["rows"] = _cached["rows"]
+            logger.info("create_excel use_last_result: %d linhas injetadas do cache",
+                        _cached["count"])
 
         # Gera o arquivo
         artifact_id, file_path, filename, size_bytes = build_excel(

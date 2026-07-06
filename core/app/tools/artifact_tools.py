@@ -13,10 +13,20 @@ CREATE_EXCEL_TOOL = {
         "NUNCA gere espontaneamente (só quando pedido). REUTILIZE rows que oracle_query "
         "acabou de retornar nesta mesma rodada — NÃO rode oracle_query duas vezes. "
         "Se oracle_query falhar, ajuste o SQL e tente de novo — não desista da planilha."
+        " DADOS GRANDES (>50 linhas): voce so ve um PREVIEW de 50 linhas — use "
+        "use_last_result=true para a planilha conter TODAS as linhas da ultima "
+        "consulta (o sistema injeta os dados; NAO re-digite linhas no parametro rows)."
     ),
     "input_schema": {
         "type": "object",
         "properties": {
+            "use_last_result": {
+                "type": "boolean",
+                "description": ("true = o sistema injeta TODAS as linhas da ultima "
+                                "oracle_query desta conversa na (unica) aba. "
+                                "OBRIGATORIO quando o resultado tem >50 linhas. "
+                                "Envie a aba com name+columns e SEM rows."),
+            },
             "title": {
                 "type": "string",
                 "description": "Título da planilha — vira nome do arquivo e cabeçalho. Ex: 'Top 10 Filiais — Faturamento Líquido MTD'",

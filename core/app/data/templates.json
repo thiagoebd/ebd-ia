@@ -1,0 +1,326 @@
+{
+ "generated_at": "2026-07-06T14:11:24.400618+00:00",
+ "source": "docs/query_templates.md",
+ "source_sha256": "61c73cb129427217",
+ "count": 25,
+ "templates": [
+  {
+   "code": "T100",
+   "version": null,
+   "title": "Faturamento Bruto Filial ( ERP centavo)",
+   "familia": "faturamento",
+   "validated": true,
+   "validation_note": "filial 06, 01-19/05/2026: MCP R$ 11.444.947,76 = ERP Winthor R$ 11.444.947,76 (centavo). Latência: 13s warm.",
+   "latency_note": "13s warm.",
+   "binds": [
+    "codFilial",
+    "dtFim",
+    "dtInicio"
+   ],
+   "sql": "-- Faturamento Bruto consolidado da filial no periodo\nSELECT\n    :codFilial                                   AS CODFILIAL,\n    SUM(vf.VALORTOTAL)                           AS FATURAMENTO_BRUTO,\n    COUNT(DISTINCT vf.NUMEROTRANSVENDA)          AS QTD_NOTAS,\n    COUNT(DISTINCT vf.CODIGOCLIENTE)             AS QTD_CLIENTES,\n    COUNT(DISTINCT vf.CODIGOPRODUTO)             AS QTD_SKUS\nFROM EBD.GD_FATO_VENDAFATURAMENTO vf\nWHERE vf.CODIGOFILIAL = :codFilial\n  AND vf.DATAFATURAMENTO BETWEEN TO_CHAR(:dtInicio,'YYYYMMDD')\n                            AND TO_CHAR(:dtFim,'YYYYMMDD')"
+  },
+  {
+   "code": "T101",
+   "version": "T101 v2",
+   "title": "Top N Fornecedores Filial ( via fórmula universal)",
+   "familia": "fornecedores",
+   "validated": true,
+   "validation_note": "filial 06, mês corrente até agora. Kraft Heinz #1 Manaus 71,7% meta. Latência: 1,3s warm.",
+   "latency_note": "1,3s warm.",
+   "binds": [
+    "codFilial",
+    "dtFim",
+    "dtInicio",
+    "topN"
+   ],
+   "sql": "WITH fornec_principal AS (\n    SELECT CODFORNEC, NVL(CODFORNECPRINC, CODFORNEC) AS COD_RAIZ\n    FROM EBD.PCFORNEC\n),\nreal_forn AS (\n    SELECT fp.COD_RAIZ, SUM(v.VLATEND) AS REAL_FATURADO\n    FROM EBD.VIEW_VENDAS_RESUMO_FATURAMENTO v\n    JOIN EBD.PCPRODUT p  ON p.CODPROD  = v.CODPROD\n    JOIN fornec_principal fp ON fp.CODFORNEC = p.CODFORNEC\n    WHERE v.DTSAIDA BETWEEN :dtInicio AND :dtFim\n      AND v.CONDVENDA = 1\n      AND v.CODFILIAL = :codFilial\n    GROUP BY fp.COD_RAIZ\n),\ndev_vinc AS (\n    SELECT fp.COD_RAIZ, SUM(d.VLDEVOLUCAO) AS DEV\n    FROM EBD.VIEW_DEVOL_RESUMO_FATURAMENTO d\n    JOIN EBD.PCPRODUT p  ON p.CODPROD  = d.CODPROD\n    JOIN fornec_principal fp ON fp.CODFORNEC = p.CODFORNEC\n    WHERE d.DTENT BETWEEN :dtInicio AND :dtFim\n      AND d.CONDVENDA = 1\n      AND d.CODFILIAL = :codFilial\n    GROUP BY fp.COD_RAIZ\n),\ndev_avul AS (\n    SELECT fp.COD_RAIZ, SUM(d.VLDEVOLUCAO) AS DEV\n    FROM EBD.VIEW_DEVOL_RESUMO_FATURAVULSA d\n    JOIN EBD.PCPRODUT p  ON p.CODPROD  = d.CODPROD\n    JOIN fornec_principal fp ON fp.CODFORNEC = p.CODFORNEC\n    WHERE d.DTENT BETWEEN :dtInicio AND :dtFim\n      AND d.CODFILIAL = :codFilial\n    GROUP BY fp.COD_RAIZ\n),\nmeta_forn AS (\n    SELECT CODIGO AS COD_RAIZ, SUM(VLVENDAPREV) AS META\n    FROM EBD.PCMETA\n    WHERE TIPOMETA = 'F'\n      AND TRUNC(DATA,'MM') = TRUNC(SYSDATE,'MM')\n      AND CODFILIAL = :codFilial\n    GROUP BY CODIGO\n)\nSELECT\n    rf.COD_RAIZ,\n    SUBSTR(NVL(f.FORNECEDOR,'?'),1,32)  AS FORNECEDOR,\n    rf.REAL_FATURADO,\n    NVL(dv.DEV,0) + NVL(da.DEV,0)        AS DEV_TOTAL,\n    rf.REAL_FATURADO - NVL(dv.DEV,0) - NVL(da.DEV,0)   AS REAL_LIQUIDO,\n    NVL(m.META,0)                        AS META,\n    CASE WHEN NVL(m.META,0) > 0\n         THEN ROUND((rf.REAL_FATURADO - NVL(dv.DEV,0) - NVL(da.DEV,0))/m.META*100,2)\n         ELSE NULL END                   AS PCT_META\nFROM real_forn rf\nLEFT JOIN dev_vinc dv ON dv.COD_RAIZ = rf.COD_RAIZ\nLEFT JOIN dev_avul da ON da.COD_RAIZ = rf.COD_RAIZ\nLEFT JOIN EBD.PCFORNEC f ON f.CODFORNEC = rf.COD_RAIZ\nLEFT JOIN meta_forn m ON m.COD_RAIZ = rf.COD_RAIZ\nORDER BY REAL_LIQUIDO DESC NULLS LAST\nFETCH FIRST :topN ROWS ONLY"
+  },
+  {
+   "code": "T102",
+   "version": null,
+   "title": "Faturamento por Ramo de Atividade",
+   "familia": "faturamento",
+   "validated": true,
+   "validation_note": "top 15 ramos concentram 89,9% filial 06.",
+   "latency_note": null,
+   "binds": [
+    "codFilial",
+    "dtFim",
+    "dtInicio",
+    "topN"
+   ],
+   "sql": "SELECT\n    SUBSTR(NVL(dc.RAMOATIVIDADE,'(sem ramo)'),1,30) AS RAMO,\n    COUNT(DISTINCT vf.CODIGOCLIENTE)                AS QTD_CLIENTES,\n    SUM(vf.VALORTOTAL)                              AS FATURAMENTO\nFROM EBD.GD_FATO_VENDAFATURAMENTO vf\nJOIN EBD.GD_DIM_CLIENTE dc ON dc.CODIGOCLIENTE = vf.CODIGOCLIENTE\nWHERE vf.CODIGOFILIAL = :codFilial\n  AND vf.DATAFATURAMENTO BETWEEN TO_CHAR(:dtInicio,'YYYYMMDD')\n                            AND TO_CHAR(:dtFim,'YYYYMMDD')\nGROUP BY dc.RAMOATIVIDADE\nORDER BY FATURAMENTO DESC NULLS LAST\nFETCH FIRST :topN ROWS ONLY"
+  },
+  {
+   "code": "T103",
+   "version": null,
+   "title": "Top N RCAs Filial (validado vs ERP)",
+   "familia": "equipe_campo",
+   "validated": true,
+   "validation_note": "Michelly Keytiane #1 Manaus R$ 2.130.804 = ERP centavo.",
+   "latency_note": null,
+   "binds": [
+    "codFilial",
+    "dtFim",
+    "dtInicio",
+    "topN"
+   ],
+   "sql": "SELECT\n    vf.CODIGORCA,\n    SUBSTR(NVL(dr.RCA,'?'),1,32)    AS RCA,\n    SUBSTR(NVL(dr.SUPERVISOR,'-'),1,25) AS SUPERVISOR,\n    SUM(vf.VALORTOTAL)                AS REAL,\n    COUNT(DISTINCT vf.CODIGOCLIENTE)  AS POSITIVACAO,\n    COUNT(DISTINCT vf.NUMEROPEDIDO)   AS PEDIDOS\nFROM EBD.GD_FATO_VENDAFATURAMENTO vf\nJOIN EBD.GD_DIM_RCA dr ON dr.CODIGORCA = vf.CODIGORCA\nWHERE vf.CODIGOFILIAL = :codFilial\n  AND vf.DATAFATURAMENTO BETWEEN TO_CHAR(:dtInicio,'YYYYMMDD')\n                            AND TO_CHAR(:dtFim,'YYYYMMDD')\nGROUP BY vf.CODIGORCA, dr.RCA, dr.SUPERVISOR\nORDER BY REAL DESC NULLS LAST\nFETCH FIRST :topN ROWS ONLY"
+  },
+  {
+   "code": "T104",
+   "version": null,
+   "title": "Inadimplência por Filial (rápido)",
+   "familia": "inadimplencia",
+   "validated": true,
+   "validation_note": "Manaus 9,3% inadimplência sobre R$ 21M carteira. Latência: 3,6s.",
+   "latency_note": "3,6s.",
+   "binds": [
+    "codFilial"
+   ],
+   "sql": "SELECT\n    :codFilial                                                  AS CODFILIAL,\n    COUNT(*)                                                    AS QTD_TITULOS,\n    COUNT(DISTINCT CODIGOCLIENTE)                               AS QTD_CLIENTES,\n    SUM(VALORTITULO)                                            AS CARTEIRA_ABERTA,\n    SUM(CASE WHEN INADIMPLENCIA = 1 THEN VALORTITULO ELSE 0 END) AS VALOR_INAD,\n    ROUND(SUM(CASE WHEN INADIMPLENCIA=1 THEN VALORTITULO ELSE 0 END)\n          / NULLIF(SUM(VALORTITULO),0) * 100, 2)                AS PCT_INAD\nFROM EBD.GD_FATO_CONTASRECEBER\nWHERE CODIGOFILIAL = :codFilial\n  AND DATAPAGAMENTO IS NULL"
+  },
+  {
+   "code": "T105",
+   "version": null,
+   "title": "Estoque + Cobertura por Produto",
+   "familia": "estoque",
+   "validated": true,
+   "validation_note": "Nissin Lamen top em Manaus. Latência: 0,6s.",
+   "latency_note": "0,6s.",
+   "binds": [
+    "codFilial",
+    "topN"
+   ],
+   "sql": "SELECT\n    dp.CODIGOPRODUTO,\n    SUBSTR(dp.PRODUTO,1,40)        AS PRODUTO,\n    SUBSTR(dp.FORNECEDOR,1,25)     AS FORNECEDOR,\n    ea.QUANTIDADELIVRE             AS ESTOQUE,\n    ea.VALORCMC                    AS VALORCMC_UNIT,\n    ea.QUANTIDADELIVRE * ea.VALORCMC AS VALOR_ESTOQUE,\n    -- Cobertura em dias (estoque / venda media diaria)\n    ROUND(ea.QUANTIDADELIVRE / NULLIF(\n        (SELECT SUM(vf.QUANTIDADE)\n         FROM EBD.GD_FATO_VENDAFATURAMENTO vf\n         WHERE vf.CODIGOPRODUTO = dp.CODIGOPRODUTO\n           AND vf.CODIGOFILIAL = ea.CODIGOFILIAL\n           AND vf.DATAFATURAMENTO BETWEEN\n               TO_CHAR(SYSDATE-30,'YYYYMMDD')\n               AND TO_CHAR(SYSDATE,'YYYYMMDD')) / 30, 0), 0) AS DIAS_COBERTURA\nFROM EBD.GD_FATO_ESTOQUEATUAL ea\nJOIN EBD.GD_DIM_PRODUTO dp ON dp.CODIGOPRODUTO = ea.CODIGOPRODUTO\nWHERE ea.CODIGOFILIAL = :codFilial\n  AND ea.QUANTIDADELIVRE > 0\nORDER BY VALOR_ESTOQUE DESC NULLS LAST\nFETCH FIRST :topN ROWS ONLY"
+  },
+  {
+   "code": "T106",
+   "version": null,
+   "title": "Clientes Ativos por Filial",
+   "familia": "clientes",
+   "validated": true,
+   "validation_note": "1.970 clientes ativos filial 06.",
+   "latency_note": null,
+   "binds": [
+    "codFilial"
+   ],
+   "sql": "SELECT\n    dc.SITUACAO,\n    COUNT(*) AS QTD_CLIENTES,\n    SUM(vf.VALORTOTAL) AS FATURAMENTO_MES\nFROM EBD.GD_DIM_CLIENTE dc\nLEFT JOIN EBD.GD_FATO_VENDAFATURAMENTO vf\n    ON vf.CODIGOCLIENTE = dc.CODIGOCLIENTE\n   AND vf.CODIGOFILIAL = :codFilial\n   AND vf.DATAFATURAMENTO BETWEEN TO_CHAR(TRUNC(SYSDATE,'MM'),'YYYYMMDD')\n                              AND TO_CHAR(SYSDATE,'YYYYMMDD')\nWHERE dc.CODIGOFILIAL = :codFilial\nGROUP BY dc.SITUACAO\nORDER BY QTD_CLIENTES DESC"
+  },
+  {
+   "code": "T107",
+   "version": null,
+   "title": "Positivação por RCA",
+   "familia": "equipe_campo",
+   "validated": true,
+   "validation_note": "Rosangela #1 positivação Manaus (139 clientes/260 pedidos).",
+   "latency_note": null,
+   "binds": [
+    "codFilial",
+    "dtFim",
+    "dtInicio",
+    "topN"
+   ],
+   "sql": "SELECT\n    vf.CODIGORCA,\n    SUBSTR(NVL(dr.RCA,'?'),1,32)             AS RCA,\n    COUNT(DISTINCT vf.CODIGOCLIENTE)         AS POSITIVACAO,\n    COUNT(DISTINCT vf.NUMEROPEDIDO)          AS PEDIDOS,\n    SUM(vf.VALORTOTAL)                       AS REAL\nFROM EBD.GD_FATO_VENDAFATURAMENTO vf\nJOIN EBD.GD_DIM_RCA dr ON dr.CODIGORCA = vf.CODIGORCA\nWHERE vf.CODIGOFILIAL = :codFilial\n  AND vf.DATAFATURAMENTO BETWEEN TO_CHAR(:dtInicio,'YYYYMMDD')\n                            AND TO_CHAR(:dtFim,'YYYYMMDD')\nGROUP BY vf.CODIGORCA, dr.RCA\nORDER BY POSITIVACAO DESC NULLS LAST\nFETCH FIRST :topN ROWS ONLY"
+  },
+  {
+   "code": "T110",
+   "version": null,
+   "title": "Pedidos abertos por POSICAO (single-filial)",
+   "familia": "pedidos",
+   "validated": false,
+   "validation_note": null,
+   "latency_note": "25ms.",
+   "binds": [
+    "codFilial"
+   ],
+   "sql": "SELECT POSICAO,\n       COUNT(*) AS QTD_PEDIDOS,\n       SUM(NVL(VLTOTAL,0)) AS VL_TOTAL,\n       ROUND(AVG(SYSDATE - DATA), 1) AS DIAS_MEDIO\nFROM EBD.PCPEDC\nWHERE CODFILIAL = :codFilial\n  AND DATA BETWEEN TRUNC(SYSDATE,'MM') AND SYSDATE\n  AND POSICAO IN ('L','B','M','P')\nGROUP BY POSICAO\nORDER BY VL_TOTAL DESC NULLS LAST"
+  },
+  {
+   "code": "T111",
+   "version": null,
+   "title": "Top 10 pedidos travados FINANCEIRO (single-filial)",
+   "familia": "pedidos",
+   "validated": false,
+   "validation_note": null,
+   "latency_note": "208ms.",
+   "binds": [
+    "codFilial"
+   ],
+   "sql": "SELECT ped.NUMPED,\n       SUBSTR(NVL(dc.CLIENTE,'?'),1,30) AS CLIENTE,\n       SUBSTR(NVL(dr.RCA,'?'),1,22)     AS RCA,\n       TO_CHAR(ped.DATA,'DD/MM') AS DT,\n       ROUND(SYSDATE - ped.DATA, 0) AS DIAS,\n       NVL(ped.VLTOTAL,0) AS VL,\n       SUBSTR(NVL(m.DESCRICAO,'(s/motivo)'),1,32) AS MOTIVO,\n       m.ORIGEM\nFROM EBD.PCPEDC ped\nLEFT JOIN EBD.GD_DIM_CLIENTE dc ON dc.CODIGOCLIENTE = ped.CODCLI\nLEFT JOIN EBD.GD_DIM_RCA dr ON dr.CODIGORCA = ped.CODUSUR\nLEFT JOIN EBD.PCMOTBLOQUEIO m ON m.CODMOTIVO = ped.CODMOTBLOQUEIO\nWHERE ped.CODFILIAL = :codFilial\n  AND ped.POSICAO = 'B'\n  AND ped.DATA BETWEEN TRUNC(SYSDATE,'MM') AND SYSDATE\n  AND m.TIPO = 1   -- bloqueio FINANCEIRO/CREDITO\nORDER BY ped.VLTOTAL DESC NULLS LAST\nFETCH FIRST 10 ROWS ONLY"
+  },
+  {
+   "code": "T112",
+   "version": null,
+   "title": "Top 10 pedidos travados COMERCIAL/OPER (single-filial)",
+   "familia": "pedidos",
+   "validated": false,
+   "validation_note": null,
+   "latency_note": "5ms.",
+   "binds": [],
+   "sql": "-- Idêntica a T111 com:  AND m.TIPO = 2"
+  },
+  {
+   "code": "T113",
+   "version": null,
+   "title": "Top 10 RCAs com pipeline POS='L' (single-filial)",
+   "familia": "equipe_campo",
+   "validated": false,
+   "validation_note": null,
+   "latency_note": "32ms.",
+   "binds": [
+    "codFilial"
+   ],
+   "sql": "SELECT ped.CODUSUR,\n       SUBSTR(NVL(dr.RCA,'?'),1,30) AS RCA,\n       SUBSTR(NVL(dr.SUPERVISOR,'-'),1,25) AS SUPERVISOR,\n       COUNT(*) AS QTD_PEDIDOS,\n       COUNT(DISTINCT ped.CODCLI) AS QTD_CLIENTES,\n       SUM(NVL(ped.VLTOTAL,0)) AS VL_PIPELINE,\n       ROUND(AVG(NVL(ped.VLTOTAL,0)),2) AS TICKET_MEDIO\nFROM EBD.PCPEDC ped\nLEFT JOIN EBD.GD_DIM_RCA dr ON dr.CODIGORCA = ped.CODUSUR\nWHERE ped.CODFILIAL = :codFilial\n  AND ped.POSICAO = 'L'\n  AND ped.DATA BETWEEN TRUNC(SYSDATE,'MM') AND SYSDATE\nGROUP BY ped.CODUSUR, dr.RCA, dr.SUPERVISOR\nORDER BY VL_PIPELINE DESC NULLS LAST\nFETCH FIRST 10 ROWS ONLY"
+  },
+  {
+   "code": "T114",
+   "version": null,
+   "title": "Top 10 clientes com pedido em aberto (single-filial)",
+   "familia": "pedidos",
+   "validated": false,
+   "validation_note": null,
+   "latency_note": "552ms.",
+   "binds": [
+    "codFilial"
+   ],
+   "sql": "SELECT ped.CODCLI,\n       SUBSTR(NVL(dc.CLIENTE,'?'),1,32) AS CLIENTE,\n       SUBSTR(NVL(dc.RAMOATIVIDADE,'-'),1,20) AS RAMO,\n       COUNT(*) AS QTD_PEDIDOS,\n       SUM(CASE WHEN ped.POSICAO='L' THEN NVL(ped.VLTOTAL,0) ELSE 0 END) AS VL_LIBERADO,\n       SUM(CASE WHEN ped.POSICAO='B' THEN NVL(ped.VLTOTAL,0) ELSE 0 END) AS VL_BLOQ,\n       SUM(CASE WHEN ped.POSICAO IN ('M','P') THEN NVL(ped.VLTOTAL,0) ELSE 0 END) AS VL_PROC,\n       SUM(NVL(ped.VLTOTAL,0)) AS VL_TOTAL_ABERTO\nFROM EBD.PCPEDC ped\nLEFT JOIN EBD.GD_DIM_CLIENTE dc ON dc.CODIGOCLIENTE = ped.CODCLI\nWHERE ped.CODFILIAL = :codFilial\n  AND ped.POSICAO IN ('L','B','M','P')\n  AND ped.DATA BETWEEN TRUNC(SYSDATE,'MM') AND SYSDATE\nGROUP BY ped.CODCLI, dc.CLIENTE, dc.RAMOATIVIDADE\nORDER BY VL_TOTAL_ABERTO DESC NULLS LAST\nFETCH FIRST 10 ROWS ONLY"
+  },
+  {
+   "code": "T180",
+   "version": null,
+   "title": "Aproveitamento de Rota por Filial  Validado",
+   "familia": "faturamento",
+   "validated": true,
+   "validation_note": null,
+   "latency_note": "0,6s",
+   "binds": [
+    "codFilial"
+   ],
+   "sql": "WITH dia_ref AS (\n    SELECT TRUNC(SYSDATE) AS DT,\n           CASE TO_CHAR(TRUNC(SYSDATE),'D')\n             WHEN '1' THEN 'DOMINGO' WHEN '2' THEN 'SEGUNDA'\n             WHEN '3' THEN 'TERCA'   WHEN '4' THEN 'QUARTA'\n             WHEN '5' THEN 'QUINTA'  WHEN '6' THEN 'SEXTA'\n             WHEN '7' THEN 'SABADO' END AS NOME\n    FROM DUAL\n),\nrota_filial AS (\n    SELECT DISTINCT r.CODIGOCLIENTE\n    FROM EBD.GD_FATO_ROTACLIENTE r\n    JOIN EBD.GD_DIM_RCA dr ON dr.CODIGORCA = r.CODIGORCA\n    JOIN EBD.PCCLIENT cli ON cli.CODCLI = r.CODIGOCLIENTE\n    , dia_ref d\n    WHERE UPPER(r.DIASEMANA) IN (d.NOME, REPLACE(d.NOME,'C','Ç'))\n      AND UPPER(NVL(dr.RCA,'')) NOT LIKE 'ORFAO%'\n      AND UPPER(NVL(dr.RCA,'')) NOT LIKE 'RCA VAGO%'\n      AND cli.CODFILIALNF = :codFilial\n)\nSELECT (SELECT COUNT(*) FROM rota_filial) AS NA_ROTA,\n       (SELECT COUNT(DISTINCT ped.CODCLI) FROM EBD.PCPEDC ped, dia_ref d\n        WHERE TRUNC(ped.DATA) = d.DT AND ped.POSICAO != 'C'\n          AND ped.CODFILIAL = :codFilial\n          AND ped.CODCLI IN (SELECT CODIGOCLIENTE FROM rota_filial)) AS VISITADOS,\n       (SELECT COUNT(DISTINCT v.CODCLI) FROM EBD.VIEW_VENDAS_RESUMO_FATURAMENTO v, dia_ref d\n        WHERE TRUNC(v.DTSAIDA) = d.DT AND v.CONDVENDA = 1\n          AND v.CODFILIAL = :codFilial\n          AND v.CODCLI IN (SELECT CODIGOCLIENTE FROM rota_filial)) AS FATURADOS\nFROM DUAL"
+  },
+  {
+   "code": "T200",
+   "version": null,
+   "title": "Faturamento Brasil consolidado",
+   "familia": "faturamento",
+   "validated": true,
+   "validation_note": "R$ 120.699.647 líquido / 36,23% meta R$ 333.173.015 (até 20/05 16:31). Latência: 24,6s.",
+   "latency_note": "24,6s.",
+   "binds": [],
+   "sql": "WITH liq_por_filial AS (\n    -- bloco líquido oficial (sem WHERE CODFILIAL)\n    -- ... (ver bloco acima) ...\n)\nSELECT\n    SUM(BRUTO)       AS FATURADO_BR,\n    SUM(DEV_TOTAL)   AS DEVOLUCAO_BR,\n    SUM(LIQUIDO)     AS LIQUIDO_BR,\n    (SELECT SUM(VLVENDAPREV) FROM EBD.PCMETA\n     WHERE TIPOMETA='FL' AND TRUNC(DATA,'MM')=TRUNC(SYSDATE,'MM')) AS META_BR\nFROM liq_por_filial"
+  },
+  {
+   "code": "T201",
+   "version": null,
+   "title": "Pedidos Pendentes (Carteira) — Query oficial BI EBD",
+   "familia": "inadimplencia",
+   "validated": false,
+   "validation_note": null,
+   "latency_note": null,
+   "binds": [],
+   "sql": "TRUNC(CASE \n  WHEN TO_CHAR(PCPEDC.DATA, 'YYYY-MM') < TO_CHAR(TRUNC(SYSDATE), 'YYYY-MM') \n  THEN TRUNC(SYSDATE) \n  ELSE PCPEDC.DATA \nEND) AS NOVADATAVENDA"
+  },
+  {
+   "code": "T203",
+   "version": null,
+   "title": "Top GCs (Gerentes Comerciais) BR",
+   "familia": "equipe_campo",
+   "validated": true,
+   "validation_note": "Marcus Vinicius #1 R$ 15,5M / 40,6% meta.",
+   "latency_note": null,
+   "binds": [],
+   "sql": "WITH vendas_gc AS (\n    SELECT dr.CODIGOGERENTE, MAX(dr.GERENTE) AS GERENTE,\n           SUM(vf.VALORTOTAL) AS REAL\n    FROM EBD.GD_FATO_VENDAFATURAMENTO vf\n    JOIN EBD.GD_DIM_RCA dr ON vf.CODIGORCA = dr.CODIGORCA\n    WHERE vf.DATAFATURAMENTO BETWEEN TO_CHAR(TRUNC(SYSDATE,'MM'),'YYYYMMDD')\n                                 AND TO_CHAR(SYSDATE,'YYYYMMDD')\n      AND dr.CODIGOGERENTE IS NOT NULL\n    GROUP BY dr.CODIGOGERENTE\n),\nmeta_gc AS (\n    SELECT CODIGO AS CODIGOGERENTE, SUM(VLVENDAPREV) AS META\n    FROM EBD.PCMETA\n    WHERE TIPOMETA='GC' AND TRUNC(DATA,'MM')=TRUNC(SYSDATE,'MM')\n    GROUP BY CODIGO\n)\nSELECT vg.CODIGOGERENTE, SUBSTR(vg.GERENTE,1,35) AS GERENTE,\n       vg.REAL, NVL(mg.META,0) AS META,\n       ROUND(vg.REAL/NULLIF(mg.META,0)*100,2) AS PCT_META\nFROM vendas_gc vg LEFT JOIN meta_gc mg ON mg.CODIGOGERENTE=vg.CODIGOGERENTE\nORDER BY vg.REAL DESC NULLS LAST FETCH FIRST 10 ROWS ONLY"
+  },
+  {
+   "code": "T205",
+   "version": null,
+   "title": "Top RCAs BR",
+   "familia": "equipe_campo",
+   "validated": true,
+   "validation_note": "Michelly Keytiane #1 BR (também #1 Manaus — bate cruzado).",
+   "latency_note": null,
+   "binds": [],
+   "sql": "SELECT vf.CODIGORCA, SUBSTR(dr.RCA,1,35) AS NOME_RCA,\n       SUBSTR(dr.SUPERVISOR,1,25) AS SUPERVISOR,\n       SUM(vf.VALORTOTAL) AS REAL,\n       COUNT(DISTINCT vf.CODIGOCLIENTE) AS POSITIVACAO,\n       COUNT(DISTINCT vf.NUMEROPEDIDO) AS PEDIDOS\nFROM EBD.GD_FATO_VENDAFATURAMENTO vf\nJOIN EBD.GD_DIM_RCA dr ON dr.CODIGORCA = vf.CODIGORCA\nWHERE vf.DATAFATURAMENTO BETWEEN TO_CHAR(TRUNC(SYSDATE,'MM'),'YYYYMMDD')\n                             AND TO_CHAR(SYSDATE,'YYYYMMDD')\nGROUP BY vf.CODIGORCA, dr.RCA, dr.SUPERVISOR\nORDER BY REAL DESC NULLS LAST FETCH FIRST 10 ROWS ONLY"
+  },
+  {
+   "code": "T206",
+   "version": "T206 v2",
+   "title": "Top Fornecedores BR ( Pandurata bate BI)",
+   "familia": "fornecedores",
+   "validated": true,
+   "validation_note": "Nissin #1 R$ 16,5M / 31,2% meta. Top 10 = 74% do BR.",
+   "latency_note": null,
+   "binds": [
+    "codFilial"
+   ],
+   "sql": "-- Identica ao T101 v2, SEM \"AND v.CODFILIAL = :codFilial\"\n-- e SEM \"AND CODFILIAL = :codFilial\" na meta_forn\n-- (ver T101 v2 acima como template-base)"
+  },
+  {
+   "code": "T207",
+   "version": null,
+   "title": "Top Clientes BR",
+   "familia": "clientes",
+   "validated": true,
+   "validation_note": "SERVI SUPERMERCADOS #1 R$ 1,63M. Top 10 = 7% BR (atacado MUITO pulverizado).",
+   "latency_note": null,
+   "binds": [],
+   "sql": "WITH vendas_cli AS (\n    SELECT vf.CODIGOCLIENTE,\n           SUM(vf.VALORTOTAL) AS REAL,\n           COUNT(DISTINCT vf.NUMEROTRANSVENDA) AS QTD_NOTAS,\n           COUNT(DISTINCT vf.CODIGOFILIAL) AS QTD_FILIAIS\n    FROM EBD.GD_FATO_VENDAFATURAMENTO vf\n    WHERE vf.DATAFATURAMENTO BETWEEN TO_CHAR(TRUNC(SYSDATE,'MM'),'YYYYMMDD')\n                                 AND TO_CHAR(SYSDATE,'YYYYMMDD')\n    GROUP BY vf.CODIGOCLIENTE\n)\nSELECT vc.CODIGOCLIENTE, SUBSTR(NVL(dc.CLIENTE,'?'),1,40) AS CLIENTE,\n       SUBSTR(NVL(dc.RAMOATIVIDADE,'-'),1,25) AS RAMO,\n       NVL(dc.CIDADE,'-') AS CIDADE, NVL(dc.UF,'?') AS UF,\n       vc.QTD_NOTAS, vc.QTD_FILIAIS, vc.REAL\nFROM vendas_cli vc\nLEFT JOIN EBD.GD_DIM_CLIENTE dc ON dc.CODIGOCLIENTE = vc.CODIGOCLIENTE\nORDER BY vc.REAL DESC NULLS LAST FETCH FIRST 10 ROWS ONLY"
+  },
+  {
+   "code": "T208",
+   "version": null,
+   "title": "Inadimplência BR (Top 10 Filiais)",
+   "familia": "inadimplencia",
+   "validated": true,
+   "validation_note": "EBD FORTALEZA #1 R$ 6,8M (26,6%!) — alerta crítico. Boa Vista 25,4%.",
+   "latency_note": null,
+   "binds": [],
+   "sql": "WITH inad_filial AS (\n    SELECT CODIGOFILIAL,\n           COUNT(*) AS QTD_TITULOS,\n           COUNT(DISTINCT CODIGOCLIENTE) AS QTD_CLIENTES,\n           SUM(VALORTITULO) AS CARTEIRA_ABERTA,\n           SUM(CASE WHEN INADIMPLENCIA=1 THEN VALORTITULO ELSE 0 END) AS INAD\n    FROM EBD.GD_FATO_CONTASRECEBER\n    WHERE DATAPAGAMENTO IS NULL\n    GROUP BY CODIGOFILIAL\n)\nSELECT ip.CODIGOFILIAL, SUBSTR(NVL(pf.FANTASIA,'?'),1,28) AS FILIAL,\n       ip.QTD_TITULOS, ip.QTD_CLIENTES,\n       ip.CARTEIRA_ABERTA, ip.INAD,\n       ROUND(ip.INAD / NULLIF(ip.CARTEIRA_ABERTA,0) * 100, 2) AS PCT_INAD\nFROM inad_filial ip\nLEFT JOIN EBD.PCFILIAL pf ON pf.CODIGO = ip.CODIGOFILIAL\nORDER BY ip.INAD DESC NULLS LAST FETCH FIRST 10 ROWS ONLY"
+  },
+  {
+   "code": "T209",
+   "version": null,
+   "title": "Top Produtos BR",
+   "familia": "faturamento",
+   "validated": true,
+   "validation_note": "NISSIN LAMEN GALINHA 85GR #1 R$ 4,8M (4.830 clientes BR).",
+   "latency_note": null,
+   "binds": [],
+   "sql": "WITH dim_prod_dedup AS (\n    SELECT CODIGOPRODUTO, MAX(PRODUTO) AS PRODUTO, MAX(FORNECEDOR) AS FORNECEDOR\n    FROM EBD.GD_DIM_PRODUTO GROUP BY CODIGOPRODUTO\n),\nvendas_prod AS (\n    SELECT vf.CODIGOPRODUTO, SUM(vf.VALORTOTAL) AS REAL,\n           SUM(vf.QUANTIDADE) AS QTD,\n           COUNT(DISTINCT vf.CODIGOFILIAL) AS QTD_FILIAIS,\n           COUNT(DISTINCT vf.CODIGOCLIENTE) AS QTD_CLIENTES\n    FROM EBD.GD_FATO_VENDAFATURAMENTO vf\n    WHERE vf.DATAFATURAMENTO BETWEEN TO_CHAR(TRUNC(SYSDATE,'MM'),'YYYYMMDD')\n                                 AND TO_CHAR(SYSDATE,'YYYYMMDD')\n    GROUP BY vf.CODIGOPRODUTO\n)\nSELECT vp.CODIGOPRODUTO, SUBSTR(NVL(dp.PRODUTO,'?'),1,40) AS PRODUTO,\n       SUBSTR(NVL(dp.FORNECEDOR,'?'),1,25) AS FORNECEDOR,\n       vp.QTD, vp.REAL, vp.QTD_FILIAIS, vp.QTD_CLIENTES\nFROM vendas_prod vp\nLEFT JOIN dim_prod_dedup dp ON dp.CODIGOPRODUTO = vp.CODIGOPRODUTO\nORDER BY vp.REAL DESC NULLS LAST FETCH FIRST 10 ROWS ONLY"
+  },
+  {
+   "code": "T210",
+   "version": null,
+   "title": "Real + Pedidos por Filial BR  Validado vs BI",
+   "familia": "pedidos",
+   "validated": true,
+   "validation_note": "TOTAL BR Real R$ 120.817.519 (+R$ 87K vs BI 16:54), Pedidos",
+   "latency_note": "44s.",
+   "binds": [],
+   "sql": "WITH regional_map AS (\n    SELECT '01' AS CODFILIAL, 'NO2' AS REGIONAL FROM DUAL UNION ALL\n    SELECT '02','SP1' FROM DUAL UNION ALL SELECT '03','NE2' FROM DUAL UNION ALL\n    SELECT '04','NE1' FROM DUAL UNION ALL SELECT '05','RJ2' FROM DUAL UNION ALL\n    SELECT '06','NO1' FROM DUAL UNION ALL SELECT '07','NO2' FROM DUAL UNION ALL\n    SELECT '08','NO1' FROM DUAL UNION ALL SELECT '09','NE2' FROM DUAL UNION ALL\n    SELECT '10','RJ1' FROM DUAL UNION ALL SELECT '11','NO1' FROM DUAL UNION ALL\n    SELECT '12','NE1' FROM DUAL UNION ALL SELECT '13','RJ1' FROM DUAL UNION ALL\n    SELECT '14','RJ2' FROM DUAL UNION ALL SELECT '15','SP2' FROM DUAL UNION ALL\n    SELECT '16','SP1' FROM DUAL UNION ALL SELECT '18','SP2' FROM DUAL UNION ALL\n    SELECT '21','NE2' FROM DUAL UNION ALL SELECT '22','NO2' FROM DUAL UNION ALL\n    SELECT '52','NE3' FROM DUAL UNION ALL SELECT '53','NE3' FROM DUAL\n),\nfaturamento AS (\n    SELECT CODFILIAL, SUM(VLATEND) AS BRUTO\n    FROM EBD.VIEW_VENDAS_RESUMO_FATURAMENTO\n    WHERE DTSAIDA BETWEEN TRUNC(SYSDATE,'MM') AND SYSDATE AND CONDVENDA = 1\n    GROUP BY CODFILIAL\n),\ndev_vinc AS (\n    SELECT CODFILIAL, SUM(VLDEVOLUCAO) AS DEV\n    FROM EBD.VIEW_DEVOL_RESUMO_FATURAMENTO\n    WHERE DTENT BETWEEN TRUNC(SYSDATE,'MM') AND SYSDATE AND CONDVENDA = 1\n    GROUP BY CODFILIAL\n),\ndev_avul AS (\n    SELECT CODFILIAL, SUM(VLDEVOLUCAO) AS DEV\n    FROM EBD.VIEW_DEVOL_RESUMO_FATURAVULSA\n    WHERE DTENT BETWEEN TRUNC(SYSDATE,'MM') AND SYSDATE\n    GROUP BY CODFILIAL\n),\npedidos_liberados AS (\n    SELECT CODFILIAL, SUM(VLTOTAL) AS PEDIDOS\n    FROM EBD.PCPEDC\n    WHERE DATA BETWEEN TRUNC(SYSDATE,'MM') AND SYSDATE AND POSICAO = 'L'\n    GROUP BY CODFILIAL\n),\nmeta_filial AS (\n    SELECT CODIGO AS CODFILIAL, SUM(VLVENDAPREV) AS META\n    FROM EBD.PCMETA\n    WHERE TIPOMETA = 'FL' AND TRUNC(DATA, 'MM') = TRUNC(SYSDATE, 'MM')\n    GROUP BY CODIGO\n)\nSELECT fa.CODFILIAL, SUBSTR(NVL(pf.FANTASIA,'?'),1,22) AS FILIAL,\n       NVL(rm.REGIONAL,'?') AS REGIONAL, NVL(mf.META,0) AS META,\n       fa.BRUTO - NVL(dv.DEV,0) - NVL(da.DEV,0) AS REAL_LIQUIDO,\n       NVL(pl.PEDIDOS,0) AS PEDIDOS,\n       fa.BRUTO - NVL(dv.DEV,0) - NVL(da.DEV,0) + NVL(pl.PEDIDOS,0) AS REAL_MAIS_PED,\n       CASE WHEN NVL(mf.META,0) > 0\n            THEN ROUND((fa.BRUTO-NVL(dv.DEV,0)-NVL(da.DEV,0))/mf.META*100,2)\n            ELSE NULL END AS PCT_REAL,\n       CASE WHEN NVL(mf.META,0) > 0\n            THEN ROUND((fa.BRUTO-NVL(dv.DEV,0)-NVL(da.DEV,0)+NVL(pl.PEDIDOS,0))/mf.META*100,2)\n            ELSE NULL END AS PCT_RP\nFROM faturamento fa\nLEFT JOIN dev_vinc dv ON dv.CODFILIAL = fa.CODFILIAL\nLEFT JOIN dev_avul da ON da.CODFILIAL = fa.CODFILIAL\nLEFT JOIN pedidos_liberados pl ON pl.CODFILIAL = fa.CODFILIAL\nLEFT JOIN meta_filial mf ON mf.CODFILIAL = fa.CODFILIAL\nLEFT JOIN regional_map rm ON rm.CODFILIAL = fa.CODFILIAL\nLEFT JOIN EBD.PCFILIAL pf ON pf.CODIGO = fa.CODFILIAL\nORDER BY REAL_LIQUIDO DESC NULLS LAST"
+  },
+  {
+   "code": "T211",
+   "version": null,
+   "title": "Real + Pedidos por Fornecedor BR  Bate Pandurata centavo",
+   "familia": "fornecedores",
+   "validated": true,
+   "validation_note": "Pandurata Real R$ 7.449.924 / Ped R$ 1.326.726 / R+P R$ 8.776.650 / 56,3% meta. Bate BI EBD centavo. Latência: 18s.",
+   "latency_note": "18s.",
+   "binds": [],
+   "sql": "WITH fornec_principal AS (\n    SELECT CODFORNEC, NVL(CODFORNECPRINC, CODFORNEC) AS COD_RAIZ FROM EBD.PCFORNEC\n),\nreal_forn AS (\n    SELECT fp.COD_RAIZ, SUM(v.VLATEND) AS REAL_FATURADO\n    FROM EBD.VIEW_VENDAS_RESUMO_FATURAMENTO v\n    JOIN EBD.PCPRODUT p ON p.CODPROD = v.CODPROD\n    JOIN fornec_principal fp ON fp.CODFORNEC = p.CODFORNEC\n    WHERE v.DTSAIDA BETWEEN TRUNC(SYSDATE,'MM') AND SYSDATE AND v.CONDVENDA = 1\n    GROUP BY fp.COD_RAIZ\n),\n-- dev_vinc_forn, dev_avul_forn idênticas estrutura (ver T206 v2)\npedidos_forn AS (\n    SELECT fp.COD_RAIZ, SUM(NVL(ite.PVENDA,0) * NVL(ite.QT,0)) AS PEDIDOS\n    FROM EBD.PCPEDC ped\n    JOIN EBD.PCPEDI ite ON ite.NUMPED = ped.NUMPED\n    JOIN EBD.PCPRODUT p ON p.CODPROD = ite.CODPROD\n    JOIN fornec_principal fp ON fp.CODFORNEC = p.CODFORNEC\n    WHERE ped.DATA BETWEEN TRUNC(SYSDATE,'MM') AND SYSDATE AND ped.POSICAO = 'L'\n    GROUP BY fp.COD_RAIZ\n),\nmeta_forn AS (\n    SELECT CODIGO AS COD_RAIZ, SUM(VLVENDAPREV) AS META\n    FROM EBD.PCMETA\n    WHERE TIPOMETA = 'F' AND TRUNC(DATA,'MM') = TRUNC(SYSDATE,'MM')\n    GROUP BY CODIGO\n)\nSELECT rf.COD_RAIZ, SUBSTR(NVL(f.FORNECEDOR,'?'),1,30) AS FORNECEDOR,\n       NVL(m.META,0) AS META,\n       rf.REAL_FATURADO - NVL(dv.DEV,0) - NVL(da.DEV,0) AS REAL_LIQUIDO,\n       NVL(pf.PEDIDOS,0) AS PEDIDOS,\n       rf.REAL_FATURADO - NVL(dv.DEV,0) - NVL(da.DEV,0) + NVL(pf.PEDIDOS,0) AS REAL_MAIS_PED,\n       -- + PCT_REAL e PCT_RP\n       ROUND((rf.REAL_FATURADO-NVL(dv.DEV,0)-NVL(da.DEV,0))/NULLIF(m.META,0)*100,2) AS PCT_REAL,\n       ROUND((rf.REAL_FATURADO-NVL(dv.DEV,0)-NVL(da.DEV,0)+NVL(pf.PEDIDOS,0))/NULLIF(m.META,0)*100,2) AS PCT_RP\nFROM real_forn rf\nLEFT JOIN dev_vinc_forn dv ON dv.COD_RAIZ = rf.COD_RAIZ\nLEFT JOIN dev_avul_forn da ON da.COD_RAIZ = rf.COD_RAIZ\nLEFT JOIN pedidos_forn pf ON pf.COD_RAIZ = rf.COD_RAIZ\nLEFT JOIN meta_forn m ON m.COD_RAIZ = rf.COD_RAIZ\nLEFT JOIN EBD.PCFORNEC f ON f.CODFORNEC = rf.COD_RAIZ\nORDER BY REAL_LIQUIDO DESC NULLS LAST FETCH FIRST 15 ROWS ONLY"
+  },
+  {
+   "code": "T212",
+   "version": null,
+   "title": "Top Pedidos Travados BR com motivo legível",
+   "familia": "pedidos",
+   "validated": true,
+   "validation_note": null,
+   "latency_note": "0,3s (rápido).",
+   "binds": [],
+   "sql": "SELECT ped.NUMPED,\n       SUBSTR(NVL(pf.FANTASIA,'?'),1,16) AS FILIAL,\n       SUBSTR(NVL(dc.CLIENTE,'?'),1,24) AS CLIENTE,\n       SUBSTR(NVL(dr.RCA,'?'),1,18) AS RCA,\n       TO_CHAR(ped.DATA,'DD/MM') AS DT,\n       ROUND(SYSDATE - ped.DATA, 0) AS DIAS,\n       NVL(ped.VLTOTAL,0) AS VL,\n       NVL(ped.CODMOTBLOQUEIO,-1) AS COD_MOT,\n       NVL(m.TIPO,0) AS TIPO,    -- 1=FIN, 2=COM/OPER\n       NVL(m.ORIGEM,0) AS ORIGEM, -- 1=AUTO, 2=MANUAL\n       SUBSTR(NVL(m.DESCRICAO,'(s/motivo)'),1,30) AS MOTIVO\nFROM EBD.PCPEDC ped\nLEFT JOIN EBD.PCFILIAL pf ON pf.CODIGO = ped.CODFILIAL\nLEFT JOIN EBD.GD_DIM_CLIENTE dc ON dc.CODIGOCLIENTE = ped.CODCLI\nLEFT JOIN EBD.GD_DIM_RCA dr ON dr.CODIGORCA = ped.CODUSUR\nLEFT JOIN EBD.PCMOTBLOQUEIO m ON m.CODMOTIVO = ped.CODMOTBLOQUEIO\nWHERE ped.POSICAO='B'\n  AND ped.DATA BETWEEN TRUNC(SYSDATE,'MM') AND SYSDATE\nORDER BY ped.VLTOTAL DESC NULLS LAST\nFETCH FIRST 15 ROWS ONLY"
+  }
+ ]
+}
