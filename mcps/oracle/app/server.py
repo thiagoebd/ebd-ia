@@ -340,7 +340,7 @@ async def oracle_query(
                 tool="oracle_query",
                 code="ORACLE_TIMEOUT",
                 message=(f"Consulta excedeu o tempo limite ({call_timeout_ms // 1000}s) "
-                         "e foi cancelada no banco. Refine o período, filial ou agrupamento."),
+                         "e foi cancelada no banco. Use a consulta padrao validada para este assunto (template canonico) ou refine periodo/filial/agrupamento."),
                 elapsed_ms=elapsed,
                 user_context=user,
                 details={"sql_executed": final_sql},

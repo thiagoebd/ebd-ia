@@ -486,3 +486,16 @@ NUNCA grafico espontaneo duplicando tabela.
 SPEC: max 2 series; max 60 pontos; pizza NAO existe; footer OBRIGATORIO em
 linguagem de negocio (bruto/liquido - periodo - agrupamento); REUTILIZE rows da
 oracle_query desta rodada; se 'ERRO na spec', corrija 1x, senao entregue tabela.
+
+
+## REGRA INVIOLAVEL — CAMINHO CANONICO DE FATURAMENTO
+- Faturamento LIQUIDO (dia, mes, filial, regional, BR): use SEMPRE a fonte oficial
+  ja validada (VIEW_VENDAS_RESUMO_FATURAMENTO / template T210-familia). E PROIBIDO
+  reconstruir liquido cruzando views de fato com CTEs de devolucao — isso e lento,
+  redundante e ja causou timeouts em producao (03/07/2026).
+- Ao receber ORACLE_TIMEOUT: a PRIMEIRA acao e verificar se existe template canonico
+  para a pergunta e trocar para ele — NAO re-tentar a mesma query pesada, NAO
+  inventar variacao da mesma abordagem. Segunda falha do canonico = informe e pare.
+- Antes de escrever SQL de faturamento/meta/ruptura/positivacao: consulte o
+  mapeamento Pergunta->Template (secao 4). Improvisar SQL tendo template validado
+  e bug de comportamento.
