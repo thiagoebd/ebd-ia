@@ -1005,3 +1005,83 @@ Usar este filtro em **toda métrica que conta "RCAs de campo"**:
 | Total RCAs BR | 1.465 | 1.362 |
 | Supervisores removidos | — | ~103 |
 
+
+
+<!-- AUTO-APPEND PROP-B306AB16 aprovado por Thiago -->
+
+
+## Cicatriz: Filtro canônico de RCA ativo em PCUSUARI (corrigido 06/07/2026)
+
+### Problema
+Queries de força de vendas (checkin, cobertura, efetividade, positivação) estavam contando:
+1. **Supervisores** como RCAs de campo — identificados via `PCSUPERV.COD_CADRCA`
+2. **RCAs desligados** — com `DTTERMINO` preenchido e no passado
+
+Impacto: base inflada de 1.362 → real de **1.205 RCAs ativos** (-157 desligados, -103 supervisores removidos em etapa anterior).
+
+### Investigação de campos de atividade em PCUSUARI
+
+| Campo | Comportamento | Serve como filtro? |
+|---|---|---|
+| `DTEXCLUSAO` | 100% NULL para RCAs | ❌ Não |
+| `DTTERMINO` | NULL = ativo, data passada = desligado | ✅ Sim |
+
+### Filtro canônico FINAL de RCA ativo
+
+```sql
+WHERE CODUSUR NOT IN (
+    SELECT COD_CADRCA FROM EBD.PCSUPERV WHERE COD_CADRCA IS NOT NULL
+)
+AND (DTTERMINO IS NULL OR DTTERMINO >= TRUNC(SYSDATE))
+```
+
+### Por que `NOT IN` precisa do `WHERE COD_CADRCA IS NOT NULL`
+
+Oracle: `NOT IN` com qualquer NULL no subselect retorna **zero linhas** (comportamento silencioso).
+Sempre filtrar NULLs no subselect de `NOT IN`.
+
+### Distribuição confirmada (06/07/2026)
+
+| Grupo | Qtd |
+|---|---:|
+| `DTTERMINO IS NULL` (ativos sem prazo) | 1.203 |
+| `DTTERMINO >= SYSDATE` (contrato vigente) | — |
+| `DTTERMINO < SYSDATE` (desligados) | 2.095 |
+| `DTEXCLUSAO` preenchido | 0 |
+
+### Números de referência validados (06/07/2026)
+
+| Métrica | Valor |
+|---|---:|
+| RCAs ativos BR (filtro correto) | 1.205 |
+| Com checkin hoje (9h segunda) | 483 (40,1%) |
+| Sem checkin | 722 (59,9%) |
+
+### Aplicação obrigatória
+
+Em **todas** as queries de força de vendas que usam `PCUSUARI` como base de RCAs:
+- Checkin / cobertura de rota
+- Positivação por RCA
+- Efetividade de mix
+- Aproveitamento de rota
+- Ranking de vendedores
+
+### Anti-padrões a evitar
+
+```sql
+-- ❌ ERRADO: DTEXCLUSAO é sempre NULL, não filtra nada
+WHERE DTEXCLUSAO IS NULL
+
+-- ❌ ERRADO: NOT IN com NULL no subselect retorna zero linhas silenciosamente
+WHERE CODUSUR NOT IN (SELECT COD_CADRCA FROM EBD.PCSUPERV)
+
+-- ❌ ERRADO: filtra desligados mas não exclui supervisores
+WHERE DTTERMINO IS NULL
+
+-- ✅ CORRETO: exclui supervisores (sem NULL no subselect) + exclui desligados
+WHERE CODUSUR NOT IN (
+    SELECT COD_CADRCA FROM EBD.PCSUPERV WHERE COD_CADRCA IS NOT NULL
+)
+AND (DTTERMINO IS NULL OR DTTERMINO >= TRUNC(SYSDATE))
+```
+
