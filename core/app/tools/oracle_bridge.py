@@ -37,7 +37,7 @@ def _unwrap_exception(exc: BaseException) -> str:
 async def execute_oracle_query(
     sql: str,
     max_rows: int = 100,
-    user_identifier: str = "+5511999990001",
+    user_identifier: str = "service@ebd.ia",
     canal: str = "test",  # MCP aceita: whatsapp|telegram|web|test
 ) -> dict[str, Any]:
     headers = {"Authorization": f"Bearer {settings.mcp_oracle_token}"}
@@ -123,7 +123,7 @@ ORACLE_TIMEOUT = 90
 async def execute_oracle_query_streaming(
     sql: str,
     max_rows: int = 100,
-    user_identifier: str = "+5511999990001",
+    user_identifier: str = "service@ebd.ia",
     canal: str = "web",
 ):
     """Async generator. Yielda:

@@ -273,6 +273,7 @@ async def run_turn_stream(
     user_filiais: str = "*",
     channel: str = "web",
     model: str | None = None,
+    user_email: str | None = None,
 ):
     """Versao streaming de run_turn. Em vez de retornar dict no fim,
     da yield de eventos conforme processa:
@@ -395,7 +396,7 @@ async def run_turn_stream(
                     async for ev in execute_oracle_query_streaming(
                         sql=sql,
                         max_rows=(block.input or {}).get("max_rows", 100),
-                        user_identifier="+5511999990001",
+                        user_identifier=user_email or "service@ebd.ia",
                         canal="web",
                     ):
                         if ev["type"] == "progress":

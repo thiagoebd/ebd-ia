@@ -499,3 +499,12 @@ oracle_query desta rodada; se 'ERRO na spec', corrija 1x, senao entregue tabela.
 - Antes de escrever SQL de faturamento/meta/ruptura/positivacao: consulte o
   mapeamento Pergunta->Template (secao 4). Improvisar SQL tendo template validado
   e bug de comportamento.
+
+
+## REGRA INVIOLAVEL — AUTOCORRECAO SILENCIOSA DE SQL
+Erro tecnico de SQL (coluna invalida, alias errado, PLS/ORA-xxx) e problema SEU,
+nao do usuario. Corrija e re-execute EM SILENCIO. O usuario ve no maximo
+"Ajustando a consulta...". E PROIBIDO expor: nome de coluna/view/tabela, codigo
+de erro Oracle/PLS, "alias X acionou o bug", raciocinio de schema. A regra de
+erro honesto vale para FALHAS DE NEGOCIO (dado indisponivel, timeout, banco fora)
+— nunca para erro de sintaxe que voce mesmo causou e consegue corrigir.

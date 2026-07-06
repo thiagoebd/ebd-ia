@@ -68,56 +68,32 @@ def resolve_allowed_filiais(
 # ============================================================
 
 TEST_USERS_RAW: list[dict] = [
-    {
-        "user_id": 1,
-        "celular": "+5511999990001",
-        "email": "thiago.parreira@ebdgrupo.com.br",
-        "nome": "Thiago Parreira",
-        "role": "admin",
-        "codusur": None,
-        "filiais": "*",
-        "regionais": None,
-    },
-    {
-        "user_id": 2,
-        "celular": "+5521988887777",
-        "email": "ramon@ebdgrupo.com.br",
-        "nome": "Ramon Tenório",
-        "role": "diretor",
-        "codusur": None,
-        "filiais": "*",
-        "regionais": None,
-    },
-    {
-        "user_id": 3,
-        "celular": "+5511900000001",
-        "email": "vendedor.sp@ebdgrupo.com.br",
-        "nome": "Vendedor Teste SP",
-        "role": "vendedor",
-        "codusur": 124,
-        "filiais": "02",
-        "regionais": None,
-    },
-    {
-        "user_id": 4,
-        "celular": "+5521900000001",
-        "email": "gerente.rj@ebdgrupo.com.br",
-        "nome": "Gerente Teste RJ1",
-        "role": "gerente",
-        "codusur": None,
-        "filiais": None,
-        "regionais": "RJ1",
-    },
-    {
-        "user_id": 5,
-        "celular": "+5585900000001",
-        "email": "supervisor.ne@ebdgrupo.com.br",
-        "nome": "Supervisor Teste NE",
-        "role": "supervisor",
-        "codusur": None,
-        "filiais": None,
-        "regionais": "NE1,NE2,NE3",
-    },
+    # ============================================================
+    # IDENTIDADE POR EMAIL (03->06/07/2026). Email = chave unica,
+    # verificado criptograficamente pelo Entra (claim do JWT).
+    # ============================================================
+    {"user_id": 1, "celular": None, "email": "thiago.parreira@ebdgrupo.com.br",
+     "nome": "Thiago Parreira", "role": "admin", "codusur": None, "filiais": "*", "regionais": None},
+    {"user_id": 2, "celular": None, "email": "smoraes@ebdgrupo.com.br",
+     "nome": "S. Moraes", "role": "admin", "codusur": None, "filiais": "*", "regionais": None},
+    {"user_id": 3, "celular": None, "email": "rosana.cesario@ebdgrupo.com.br",
+     "nome": "Rosana Cesario", "role": "admin", "codusur": None, "filiais": "*", "regionais": None},
+    {"user_id": 4, "celular": None, "email": "filipe@ebdgrupo.com.br",
+     "nome": "Filipe", "role": "admin", "codusur": None, "filiais": "*", "regionais": None},
+    {"user_id": 5, "celular": None, "email": "enrico.montini@ebdgrupo.com.br",
+     "nome": "Enrico Montini", "role": "admin", "codusur": None, "filiais": "*", "regionais": None},
+    {"user_id": 6, "celular": None, "email": "andre@ebdgrupo.com.br",
+     "nome": "Andre", "role": "admin", "codusur": None, "filiais": "*", "regionais": None},
+    # Identidade de SERVICO (canal Telegram / fallback interno).
+    # LEGACY: celular mantido como alias de transicao — bot em producao tem o
+    # default antigo em memoria. REMOVER quando o bot migrar pra systemd.
+    {"user_id": 99, "celular": "+5511999990001", "email": "service@ebd.ia",
+     "nome": "EBD.ia Servico", "role": "admin", "codusur": None, "filiais": "*", "regionais": None},
+    # Usuarios de TESTE de escopo (Opcao B / enforcement futuro) — email-only
+    {"user_id": 104, "celular": None, "email": "gerente.rj@ebdgrupo.com.br",
+     "nome": "Gerente Teste RJ1", "role": "gerente", "codusur": None, "filiais": None, "regionais": "RJ1"},
+    {"user_id": 105, "celular": None, "email": "supervisor.ne@ebdgrupo.com.br",
+     "nome": "Supervisor Teste NE", "role": "supervisor", "codusur": None, "filiais": None, "regionais": "NE1,NE2,NE3"},
 ]
 
 

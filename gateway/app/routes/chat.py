@@ -109,6 +109,7 @@ async def chat(body: ChatRequest, claims: dict = Depends(verify_token)):
                     user_role=user_role,
                     user_filiais=user_filiais,
                     channel="web",
+                    user_email=_email,
                     model=model_used,
                 ):
                     etype = ev.get("type")
