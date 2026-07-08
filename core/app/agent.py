@@ -216,7 +216,7 @@ async def run_turn(
     user_role: str = "admin",
     user_filiais: str = "*",
     channel: str = "cli",
-) -> dict:
+ model: str | None = None) -> dict:
     messages = list(conversation_history or [])
     messages = _trim_history(messages)
     messages.append({"role": "user", "content": user_message})
@@ -252,7 +252,7 @@ async def run_turn(
     while iterations < settings.max_iterations:
         iterations += 1
         response = await _client.messages.create(
-            model=settings.claude_model,
+            model=model or settings.claude_model,
             max_tokens=settings.max_tokens,
             system=system_blocks,
             tools=_tools,
@@ -268,6 +268,7 @@ async def run_turn(
                 "iterations": iterations,
                 "history": messages,
                 "stop_reason": response.stop_reason,
+                "model": getattr(response, "model", ""),
                 "usage": {
                     "input_tokens": response.usage.input_tokens,
                     "output_tokens": response.usage.output_tokens,

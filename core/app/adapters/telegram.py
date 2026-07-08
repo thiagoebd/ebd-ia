@@ -135,6 +135,7 @@ async def handle_message(chat_id: int, user_first_name: str, text: str) -> list[
     # Mensagem normal — chama o agent
     historico = _history.get(chat_id) or load_history(chat_id)
     logger.info(f"🔍 [{chat_id}] hist_len={len(historico)} msgs, mem={chat_id in _history}")
+    _llm_t0 = __import__('time').perf_counter()
     result = await run_turn(
         text,
         conversation_history=historico,
@@ -142,7 +143,46 @@ async def handle_message(chat_id: int, user_first_name: str, text: str) -> list[
         user_role=role,
         user_filiais="*",  # futuro: vir da ACL
         channel="telegram",
-    )
+     model=__import__('os').getenv('TELEGRAM_MODEL', 'claude-haiku-4-5'))
+    # -- LLM EVENT (obs Fase 2): canal telegram --
+    try:
+        import json as _j, os as _o, time as _t
+        from datetime import datetime as _dt, timezone as _tz
+        from pathlib import Path as _P
+        _u = (result.get('usage') if isinstance(result, dict) else None) or dict()
+        _pr = lambda k, d: float(_o.getenv(k, d))
+        _in  = int(_u.get('input_tokens', 0) or 0)
+        _out = int(_u.get('output_tokens', 0) or 0)
+        _cr  = int(_u.get('cache_read_input_tokens', 0) or 0)
+        _cw  = int(_u.get('cache_creation_input_tokens', 0) or 0)
+        _mstr = str(((result.get('model') if isinstance(result, dict) else '') or '')).lower()
+        if 'haiku' in _mstr:
+            _pin, _pout, _prd, _pwr = 1.0, 5.0, 0.10, 2.0
+        elif 'opus' in _mstr:
+            _pin, _pout, _prd, _pwr = 5.0, 25.0, 0.50, 10.0
+        else:
+            _pin, _pout, _prd, _pwr = 3.0, 15.0, 0.30, 6.0
+        _usd = (_in*_pr('LLM_PRICE_IN', _pin) + _out*_pr('LLM_PRICE_OUT', _pout)
+                + _cr*_pr('LLM_PRICE_CACHE_READ', _prd)
+                + _cw*_pr('LLM_PRICE_CACHE_WRITE', _pwr)) / 1000000.0
+        _rec = dict(
+            ts=_dt.now(_tz.utc).isoformat().replace('+00:00','Z'),
+            user_email='service@ebd.ia', user_nome='telegram', canal='telegram',
+            model=(result.get('model') if isinstance(result, dict) else None) or 'desconhecido',
+            conversation_id='telegram',
+            input_tokens=_in, output_tokens=_out,
+            cache_read_tokens=_cr, cache_creation_tokens=_cw,
+            custo_brl=round(_usd * _pr('USD_BRL','5.40'), 6),
+            ttft_ms=0.0,
+            total_ms=round((_t.perf_counter()-_llm_t0)*1000.0, 1),
+            tools_executadas=len((result.get('tool_calls') if isinstance(result, dict) else None) or []),
+            pergunta=str(text)[:120],
+        )
+        _lf = _P(__file__).resolve().parents[3] / 'logs' / 'gateway' / 'llm_events.jsonl'
+        with open(_lf, 'a', encoding='utf-8') as _f:
+            _f.write(_j.dumps(_rec, ensure_ascii=False) + chr(10))
+    except Exception:
+        pass
     _history[chat_id] = result["history"]
     try:
         save_history(chat_id, result["history"])

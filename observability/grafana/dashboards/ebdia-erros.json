@@ -1,0 +1,586 @@
+{
+  "title": "EBD.ia — Erros & Otimização",
+  "tags": [
+    "ebdia",
+    "erros"
+  ],
+  "timezone": "America/Sao_Paulo",
+  "time": {
+    "from": "now-30d",
+    "to": "now"
+  },
+  "refresh": "1m",
+  "schemaVersion": 39,
+  "editable": true,
+  "panels": [
+    {
+      "type": "text",
+      "title": "",
+      "gridPos": {
+        "h": 5,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "options": {
+        "mode": "markdown",
+        "content": "### Como usar este painel para evoluir o EBD.ia — sinal → ação\n| Sinal no painel | Diagnóstico | Ação de engenharia |\n|---|---|---|\n| **ORA-00904 subindo** | IA alucinou coluna/schema | Criar/consertar template + cicatriz (resgate T160-163 é o topo do backlog) |\n| **Timeouts / queries >60s** | Padrão anti-canônico (JOIN pesado, regional_map inline) | Reforçar TEMPLATE PRIMEIRO; medir adoção p/ Fase B |\n| **Adoção canônica <70%** | Modelo ignora a VIEW oficial | Fase B do catálogo segue bloqueada — investigar prompts que fogem |\n| **Tools/turn p95 alto** | Discovery queimando iterações (retrabalho) | Ampliar catálogo get_template; revisar max_iterations |\n| **Cache hit caindo** | Prefixo do prompt mudou ou TTL vencendo | Revisar prompt caching (CLAUDE.md estável no início) |\n| **Erros de API LLM** | *(painel vazio = instrumentação pendente)* | Backlog **(f)** eventos de falha + **(e)** retry/backoff e tradução de negócio |\n"
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Taxa de erro Oracle",
+      "gridPos": {
+        "h": 4,
+        "w": 5,
+        "x": 0,
+        "y": 5
+      },
+      "datasource": {
+        "type": "loki",
+        "uid": "P8E80F9AEF21F6940"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "#C8102E"
+          },
+          "unit": "percentunit",
+          "decimals": 1
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "P8E80F9AEF21F6940"
+          },
+          "queryType": "instant",
+          "expr": "sum(count_over_time({job=\"queries\", event=~\"oracle_query_error|oracle_query_timeout\"}[$__range])) / sum(count_over_time({job=\"queries\"}[$__range]))"
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Timeouts",
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 5,
+        "y": 5
+      },
+      "datasource": {
+        "type": "loki",
+        "uid": "P8E80F9AEF21F6940"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "#9a6b00"
+          },
+          "unit": "short"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "P8E80F9AEF21F6940"
+          },
+          "queryType": "instant",
+          "expr": "sum(count_over_time({job=\"queries\", event=\"oracle_query_timeout\"}[$__range]))"
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "ORA-00904 (schema alucinado)",
+      "gridPos": {
+        "h": 4,
+        "w": 5,
+        "x": 9,
+        "y": 5
+      },
+      "datasource": {
+        "type": "loki",
+        "uid": "P8E80F9AEF21F6940"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "#C8102E"
+          },
+          "unit": "short"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "P8E80F9AEF21F6940"
+          },
+          "queryType": "instant",
+          "expr": "sum(count_over_time({job=\"queries\"} |= \"ORA-00904\" [$__range]))"
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Acessos negados (ACL)",
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 14,
+        "y": 5
+      },
+      "datasource": {
+        "type": "loki",
+        "uid": "P8E80F9AEF21F6940"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "#9a6b00"
+          },
+          "unit": "short"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "P8E80F9AEF21F6940"
+          },
+          "queryType": "instant",
+          "expr": "sum(count_over_time({job=\"queries\", event=\"acl_denied\"}[$__range]))"
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Adoção canônica (proxy)",
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 18,
+        "y": 5
+      },
+      "datasource": {
+        "type": "loki",
+        "uid": "P8E80F9AEF21F6940"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "#2e6b34"
+          },
+          "unit": "percentunit",
+          "decimals": 1
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "P8E80F9AEF21F6940"
+          },
+          "queryType": "instant",
+          "expr": "sum(count_over_time({job=\"queries\"} |= \"VIEW_VENDAS_RESUMO_FATURAMENTO\"[$__range])) / (sum(count_over_time({job=\"queries\"} |= \"VIEW_VENDAS_RESUMO_FATURAMENTO\"[$__range])) + sum(count_over_time({job=\"queries\"} |= \"GD_FATO_VENDAFATURAMENTO\"[$__range])))"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Erros por dia (por tipo)",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 9
+      },
+      "datasource": {
+        "type": "loki",
+        "uid": "P8E80F9AEF21F6940"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "showPoints": "always",
+            "pointSize": 5,
+            "spanNulls": true
+          }
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "P8E80F9AEF21F6940"
+          },
+          "expr": "sum(count_over_time({job=\"queries\", event=\"oracle_query_error\"}[1d]))",
+          "legendFormat": "erro SQL"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "loki",
+            "uid": "P8E80F9AEF21F6940"
+          },
+          "expr": "sum(count_over_time({job=\"queries\", event=\"oracle_query_timeout\"}[1d]))",
+          "legendFormat": "timeout"
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "loki",
+            "uid": "P8E80F9AEF21F6940"
+          },
+          "expr": "sum(count_over_time({job=\"queries\", event=\"acl_denied\"}[1d]))",
+          "legendFormat": "ACL negado"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Taxa de erro por dia (%)",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 9
+      },
+      "datasource": {
+        "type": "loki",
+        "uid": "P8E80F9AEF21F6940"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "custom": {
+            "showPoints": "always",
+            "pointSize": 5,
+            "spanNulls": true
+          }
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "P8E80F9AEF21F6940"
+          },
+          "expr": "sum(count_over_time({job=\"queries\", event=~\"oracle_query_error|oracle_query_timeout\"}[1d])) / sum(count_over_time({job=\"queries\"}[1d]))",
+          "legendFormat": "taxa"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Códigos de erro por dia (assinatura do problema)",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 17
+      },
+      "datasource": {
+        "type": "loki",
+        "uid": "P8E80F9AEF21F6940"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "showPoints": "always",
+            "pointSize": 5,
+            "spanNulls": true
+          }
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "P8E80F9AEF21F6940"
+          },
+          "expr": "sum(count_over_time({job=\"queries\"} |= \"ORA-00904\" [1d]))",
+          "legendFormat": "ORA-00904 · coluna inexistente"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "loki",
+            "uid": "P8E80F9AEF21F6940"
+          },
+          "expr": "sum(count_over_time({job=\"queries\"} |= \"ORA-00918\" [1d]))",
+          "legendFormat": "ORA-00918 · coluna ambígua"
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "loki",
+            "uid": "P8E80F9AEF21F6940"
+          },
+          "expr": "sum(count_over_time({job=\"queries\"} |= \"ORA-06553\" [1d]))",
+          "legendFormat": "ORA-06553 · função/PLS"
+        },
+        {
+          "refId": "D",
+          "datasource": {
+            "type": "loki",
+            "uid": "P8E80F9AEF21F6940"
+          },
+          "expr": "sum(count_over_time({job=\"queries\"} |= \"DPY-4024\" [1d]))",
+          "legendFormat": "DPY-4024 · timeout driver"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Adoção do caminho canônico por dia (proxy VIEW vs fato bruto)",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 17
+      },
+      "datasource": {
+        "type": "loki",
+        "uid": "P8E80F9AEF21F6940"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "custom": {
+            "showPoints": "always",
+            "pointSize": 5,
+            "spanNulls": true
+          }
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "P8E80F9AEF21F6940"
+          },
+          "expr": "sum(count_over_time({job=\"queries\"} |= \"VIEW_VENDAS_RESUMO_FATURAMENTO\"[1d])) / (sum(count_over_time({job=\"queries\"} |= \"VIEW_VENDAS_RESUMO_FATURAMENTO\"[1d])) + sum(count_over_time({job=\"queries\"} |= \"GD_FATO_VENDAFATURAMENTO\"[1d])))",
+          "legendFormat": "adoção"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Custo médio por turn (R$/dia)",
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 25
+      },
+      "datasource": {
+        "type": "loki",
+        "uid": "P8E80F9AEF21F6940"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyBRL",
+          "custom": {
+            "showPoints": "always",
+            "pointSize": 5,
+            "spanNulls": true
+          }
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "P8E80F9AEF21F6940"
+          },
+          "expr": "sum(sum_over_time({job=\"llm\"} | json custo_brl=\"custo_brl\" | unwrap custo_brl [1d])) / sum(count_over_time({job=\"llm\"}[1d]))",
+          "legendFormat": "R$/turn"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Tools por turn (retrabalho)",
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 25
+      },
+      "datasource": {
+        "type": "loki",
+        "uid": "P8E80F9AEF21F6940"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "showPoints": "always",
+            "pointSize": 5,
+            "spanNulls": true
+          }
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "P8E80F9AEF21F6940"
+          },
+          "expr": "sum(sum_over_time({job=\"llm\"} | json tools_executadas=\"tools_executadas\" | unwrap tools_executadas [1d])) / sum(count_over_time({job=\"llm\"}[1d]))",
+          "legendFormat": "média"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "loki",
+            "uid": "P8E80F9AEF21F6940"
+          },
+          "expr": "quantile_over_time(0.95, {job=\"llm\"} | json tools_executadas=\"tools_executadas\" | unwrap tools_executadas [1d]) by ()",
+          "legendFormat": "95% menor que"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Cache hit por dia (queda = desperdício)",
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 25
+      },
+      "datasource": {
+        "type": "loki",
+        "uid": "P8E80F9AEF21F6940"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "custom": {
+            "showPoints": "always",
+            "pointSize": 5,
+            "spanNulls": true
+          }
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "P8E80F9AEF21F6940"
+          },
+          "expr": "sum(sum_over_time({job=\"llm\"} | json cache_read_tokens=\"cache_read_tokens\" | unwrap cache_read_tokens [1d])) / (sum(sum_over_time({job=\"llm\"} | json cache_read_tokens=\"cache_read_tokens\" | unwrap cache_read_tokens [1d])) + sum(sum_over_time({job=\"llm\"} | json input_tokens=\"input_tokens\" | unwrap input_tokens [1d])))",
+          "legendFormat": "hit ratio"
+        }
+      ]
+    },
+    {
+      "type": "logs",
+      "title": "Erros Oracle — auditoria (o SQL que falhou)",
+      "gridPos": {
+        "h": 9,
+        "w": 24,
+        "x": 0,
+        "y": 33
+      },
+      "datasource": {
+        "type": "loki",
+        "uid": "P8E80F9AEF21F6940"
+      },
+      "options": {
+        "sortOrder": "Descending",
+        "wrapLogMessage": true
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "P8E80F9AEF21F6940"
+          },
+          "expr": "{job=\"queries\", event=~\"oracle_query_error|oracle_query_timeout\"} | json | line_format \"{{.user_nome}} · {{.event}} · {{.sql_prefix}}\""
+        }
+      ]
+    },
+    {
+      "type": "logs",
+      "title": "Turns LLM com retrabalho (> 5 tools)",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 42
+      },
+      "datasource": {
+        "type": "loki",
+        "uid": "P8E80F9AEF21F6940"
+      },
+      "options": {
+        "sortOrder": "Descending",
+        "wrapLogMessage": true
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "P8E80F9AEF21F6940"
+          },
+          "expr": "{job=\"llm\"} | json | tools_executadas > 5 | line_format \"{{.user_nome}} · {{.tools_executadas}} tools · R$ {{.custo_brl}} · {{.pergunta}}\""
+        }
+      ]
+    },
+    {
+      "type": "logs",
+      "title": "Erros de gateway/API LLM (melhor esforço até backlog f)",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 42
+      },
+      "datasource": {
+        "type": "loki",
+        "uid": "P8E80F9AEF21F6940"
+      },
+      "options": {
+        "sortOrder": "Descending",
+        "wrapLogMessage": true
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "P8E80F9AEF21F6940"
+          },
+          "expr": "{job=\"gateway\"} |~ \"(?i)(error|exception|overloaded|529)\""
+        }
+      ]
+    }
+  ]
+}

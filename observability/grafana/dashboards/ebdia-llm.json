@@ -401,15 +401,12 @@
             "type": "loki",
             "uid": "P8E80F9AEF21F6940"
           },
-          "queryType": "instant",
           "expr": "sum by (user_nome) (sum_over_time({job=\"llm\"} | json custo_brl=\"custo_brl\" | unwrap custo_brl [$__range]))",
           "legendFormat": "{{user_nome}}"
         }
       ],
       "fieldConfig": {
-        "defaults": {
-          "displayName": "${__field.labels.user_nome}"
-        }
+        "defaults": {}
       },
       "options": {
         "reduceOptions": {
@@ -418,6 +415,10 @@
           ],
           "fields": "",
           "values": false
+        },
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
         }
       }
     },
@@ -441,15 +442,12 @@
             "type": "loki",
             "uid": "P8E80F9AEF21F6940"
           },
-          "queryType": "instant",
           "expr": "sum by (model) (count_over_time({job=\"llm\"}[$__range]))",
           "legendFormat": "{{model}}"
         }
       ],
       "fieldConfig": {
-        "defaults": {
-          "displayName": "${__field.labels.model}"
-        }
+        "defaults": {}
       },
       "options": {
         "reduceOptions": {
@@ -458,6 +456,10 @@
           ],
           "fields": "",
           "values": false
+        },
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
         }
       }
     },
@@ -481,15 +483,12 @@
             "type": "loki",
             "uid": "P8E80F9AEF21F6940"
           },
-          "queryType": "instant",
           "expr": "sum by (canal) (count_over_time({job=\"llm\"}[$__range]))",
           "legendFormat": "{{canal}}"
         }
       ],
       "fieldConfig": {
-        "defaults": {
-          "displayName": "${__field.labels.canal}"
-        }
+        "defaults": {}
       },
       "options": {
         "reduceOptions": {
@@ -498,6 +497,10 @@
           ],
           "fields": "",
           "values": false
+        },
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
         }
       }
     },
@@ -556,7 +559,7 @@
             "type": "loki",
             "uid": "P8E80F9AEF21F6940"
           },
-          "expr": "{job=\"llm\"} | json | custo_brl > 0.25 | line_format \"R$ {{.custo_brl}} · {{.user_nome}} · in {{.input_tokens}} / out {{.output_tokens}} / cache {{.cache_read_tokens}} · {{.pergunta}}\""
+          "expr": "{job=\"llm\"} | json | custo_brl > 0.25 | line_format \"R$ {{.custo_brl}} · {{.user_nome}} · in {{.input_tokens}} / out {{.output_tokens}} / cacheR {{.cache_read_tokens}} / cacheW {{.cache_creation_tokens}} · {{.pergunta}}\""
         }
       ],
       "fieldConfig": {

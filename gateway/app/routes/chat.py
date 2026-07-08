@@ -143,9 +143,16 @@ async def chat(body: ChatRequest, claims: dict = Depends(verify_token)):
                             _out = int(_u.get("output_tokens", 0) or 0)
                             _cr  = int(_u.get("cache_read_input_tokens", 0) or 0)
                             _cw  = int(_u.get("cache_creation_input_tokens", 0) or 0)
-                            _usd = (_in*_pr("LLM_PRICE_IN","3.0") + _out*_pr("LLM_PRICE_OUT","15.0")
-                                    + _cr*_pr("LLM_PRICE_CACHE_READ","0.30")
-                                    + _cw*_pr("LLM_PRICE_CACHE_WRITE","6.0")) / 1000000.0
+                            _mstr = str(model_used).lower()
+                            if 'haiku' in _mstr:
+                                _pin, _pout, _prd, _pwr = 1.0, 5.0, 0.10, 2.0
+                            elif 'opus' in _mstr:
+                                _pin, _pout, _prd, _pwr = 5.0, 25.0, 0.50, 10.0
+                            else:
+                                _pin, _pout, _prd, _pwr = 3.0, 15.0, 0.30, 6.0
+                            _usd = (_in*_pr('LLM_PRICE_IN', _pin) + _out*_pr('LLM_PRICE_OUT', _pout)
+                                    + _cr*_pr('LLM_PRICE_CACHE_READ', _prd)
+                                    + _cw*_pr('LLM_PRICE_CACHE_WRITE', _pwr)) / 1000000.0
                             _rec = {
                                 "ts": _dt.now(_tz.utc).isoformat().replace("+00:00","Z"),
                                 "user_email": _email,
