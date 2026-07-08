@@ -84,3 +84,6 @@ core/[0-9a-f]*-[0-9a-f]*-[0-9a-f]*-[0-9a-f]*-[0-9a-f]*
 
 # observabilidade
 observability/.env
+
+# observabilidade
+observability/.env
