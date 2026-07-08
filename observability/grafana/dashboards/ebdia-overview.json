@@ -1,0 +1,280 @@
+{
+  "annotations": {
+    "list": []
+  },
+  "editable": true,
+  "title": "EBD.ia — Visão Geral",
+  "tags": [
+    "ebdia"
+  ],
+  "timezone": "America/Sao_Paulo",
+  "time": {
+    "from": "now-50d",
+    "to": "now"
+  },
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "panels": [
+    {
+      "type": "stat",
+      "title": "Total de queries (período)",
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 0,
+        "y": 0
+      },
+      "datasource": {
+        "type": "loki",
+        "uid": "P8E80F9AEF21F6940"
+      },
+      "targets": [
+        {
+          "expr": "sum(count_over_time({job=\"queries\"} [$__range]))",
+          "queryType": "instant"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "#1c2c5e"
+          }
+        }
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Erros (período)",
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 6,
+        "y": 0
+      },
+      "datasource": {
+        "type": "loki",
+        "uid": "P8E80F9AEF21F6940"
+      },
+      "targets": [
+        {
+          "expr": "sum(count_over_time({job=\"queries\", event=~\".*error.*|.*timeout.*\"} [$__range]))",
+          "queryType": "instant"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "#C8102E"
+          }
+        }
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Usuários distintos",
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 12,
+        "y": 0
+      },
+      "datasource": {
+        "type": "loki",
+        "uid": "P8E80F9AEF21F6940"
+      },
+      "targets": [
+        {
+          "expr": "count(sum by (user_nome) (count_over_time({job=\"queries\"} | json | __error__=\"\" [$__range])))",
+          "queryType": "instant"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "#2e6b34"
+          }
+        }
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Queries > 20s",
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 18,
+        "y": 0
+      },
+      "datasource": {
+        "type": "loki",
+        "uid": "P8E80F9AEF21F6940"
+      },
+      "targets": [
+        {
+          "expr": "sum(count_over_time({job=\"queries\"} | json | elapsed_ms > 20000 [$__range]))",
+          "queryType": "instant"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "#9a6b00"
+          }
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Volume de queries por dia",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 4
+      },
+      "datasource": {
+        "type": "loki",
+        "uid": "P8E80F9AEF21F6940"
+      },
+      "targets": [
+        {
+          "expr": "sum(count_over_time({job=\"queries\"} [1d]))",
+          "legendFormat": "queries/dia"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Erros por dia",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 4
+      },
+      "datasource": {
+        "type": "loki",
+        "uid": "P8E80F9AEF21F6940"
+      },
+      "targets": [
+        {
+          "expr": "sum(count_over_time({job=\"queries\", event=~\".*error.*|.*timeout.*\"} [1d]))",
+          "legendFormat": "erros/dia"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "#C8102E"
+          }
+        }
+      }
+    },
+    {
+      "type": "piechart",
+      "title": "Queries por usuário",
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 12
+      },
+      "datasource": {
+        "type": "loki",
+        "uid": "P8E80F9AEF21F6940"
+      },
+      "targets": [
+        {
+          "expr": "sum by (user_nome) (count_over_time({job=\"queries\"}[$__range]))",
+          "legendFormat": "{{user_nome}}",
+          "datasource": {
+            "type": "loki",
+            "uid": "P8E80F9AEF21F6940"
+          }
+        }
+      ]
+    },
+    {
+      "type": "piechart",
+      "title": "Eventos (ok / erro / timeout)",
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 12
+      },
+      "datasource": {
+        "type": "loki",
+        "uid": "P8E80F9AEF21F6940"
+      },
+      "targets": [
+        {
+          "expr": "sum by (event) (count_over_time({job=\"queries\"}[$__range]))",
+          "legendFormat": "{{event}}",
+          "datasource": {
+            "type": "loki",
+            "uid": "P8E80F9AEF21F6940"
+          }
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Latência das queries (ms) — X% terminam em menos que:",
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 12
+      },
+      "datasource": {
+        "type": "loki",
+        "uid": "P8E80F9AEF21F6940"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "P8E80F9AEF21F6940"
+          },
+          "legendFormat": "50% menor que",
+          "expr": "quantile_over_time(0.5, {job=\"queries\", event=\"oracle_query_ok\"} | json elapsed_ms=\"elapsed_ms\" | unwrap elapsed_ms [$__range]) by ()"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "loki",
+            "uid": "P8E80F9AEF21F6940"
+          },
+          "legendFormat": "95% menor que",
+          "expr": "quantile_over_time(0.95, {job=\"queries\", event=\"oracle_query_ok\"} | json elapsed_ms=\"elapsed_ms\" | unwrap elapsed_ms [$__range]) by ()"
+        }
+      ]
+    },
+    {
+      "type": "logs",
+      "title": "Queries lentas (> 20s) — auditoria",
+      "gridPos": {
+        "h": 10,
+        "w": 24,
+        "x": 0,
+        "y": 20
+      },
+      "datasource": {
+        "type": "loki",
+        "uid": "P8E80F9AEF21F6940"
+      },
+      "targets": [
+        {
+          "expr": "{job=\"queries\"} | json | elapsed_ms > 20000 | line_format \"{{.user_nome}} · {{.elapsed_ms}}ms · {{.event}} · {{.sql_prefix}}\""
+        }
+      ]
+    }
+  ]
+}

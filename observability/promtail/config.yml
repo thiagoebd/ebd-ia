@@ -1,0 +1,73 @@
+server:
+  http_listen_port: 9080
+positions:
+  filename: /positions/positions.yaml
+clients:
+  - url: http://loki:3100/loki/api/v1/push
+scrape_configs:
+  # auditoria de queries (JSON estruturado)
+  - job_name: ebdia_queries
+    static_configs:
+      - targets: [localhost]
+        labels:
+          job: queries
+          service: mcp-oracle
+          __path__: /logs/mcp-oracle/queries.jsonl
+    pipeline_stages:
+      - json:
+          expressions:
+            user_nome: user_nome
+            user_role: user_role
+            event: event
+            elapsed_ms: elapsed_ms
+            rows: rows
+            truncated: truncated
+            level: level
+            ts: timestamp
+      - timestamp:
+          source: ts
+          format: RFC3339Nano
+      - labels:
+          event:
+          user_role:
+          level:
+          user_nome:
+      - template:
+          source: elapsed_ms
+          template: '{{ .elapsed_ms }}'
+      - metrics:
+          query_elapsed_ms:
+            type: Histogram
+            description: "latencia das queries oracle"
+            source: elapsed_ms
+            config:
+              buckets: [50,100,500,1000,5000,20000,60000,90000]
+  # log do gateway (texto, inclui [PERF])
+  - job_name: ebdia_gateway
+    static_configs:
+      - targets: [localhost]
+        labels:
+          job: gateway
+          service: gateway
+          __path__: /logs/gateway/gateway.log
+  - job_name: ebdia_llm
+    static_configs:
+      - targets: [localhost]
+        labels:
+          job: llm
+          service: gateway
+          __path__: /logs/gateway/llm_events.jsonl
+    pipeline_stages:
+      - json:
+          expressions:
+            model: model
+            canal: canal
+            user_nome: user_nome
+            ts: ts
+      - timestamp:
+          source: ts
+          format: RFC3339Nano
+      - labels:
+          model:
+          canal:
+          user_nome:

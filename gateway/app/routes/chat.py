@@ -114,7 +114,7 @@ async def chat(body: ChatRequest, claims: dict = Depends(verify_token)):
                 ):
                     etype = ev.get("type")
                     if etype == "token":
-                        if not assistant_text: _lap('PRIMEIRO TOKEN do agent')
+                        if not assistant_text: _lap('PRIMEIRO TOKEN do agent'); event_stream._ttft_ms = (time.perf_counter()-_t0)*1000.0
                         assistant_text += ev.get("text", "")
                     elif etype == "tool" or etype == "tool_use":
                         if not getattr(event_stream, "_tool_marked", False):
@@ -132,6 +132,40 @@ async def chat(body: ChatRequest, claims: dict = Depends(verify_token)):
                     elif etype == "done":
                         tool_outcomes = ev.get("tool_outcomes", [])
                         any_ok = any(ok for (_n, ok) in tool_outcomes)
+                        # -- LLM EVENT (obs Fase 2): usage/custo em llm_events.jsonl --
+                        try:
+                            import json as _j, os as _o, time as _t
+                            from datetime import datetime as _dt, timezone as _tz
+                            from pathlib import Path as _P
+                            _u = ev.get("usage") or {}
+                            _pr = lambda k, d: float(_o.getenv(k, d))
+                            _in  = int(_u.get("input_tokens", 0) or 0)
+                            _out = int(_u.get("output_tokens", 0) or 0)
+                            _cr  = int(_u.get("cache_read_input_tokens", 0) or 0)
+                            _cw  = int(_u.get("cache_creation_input_tokens", 0) or 0)
+                            _usd = (_in*_pr("LLM_PRICE_IN","3.0") + _out*_pr("LLM_PRICE_OUT","15.0")
+                                    + _cr*_pr("LLM_PRICE_CACHE_READ","0.30")
+                                    + _cw*_pr("LLM_PRICE_CACHE_WRITE","6.0")) / 1000000.0
+                            _rec = {
+                                "ts": _dt.now(_tz.utc).isoformat().replace("+00:00","Z"),
+                                "user_email": _email,
+                                "user_nome": (_email or "?").split("@")[0],
+                                "canal": "web",
+                                "model": model_used,
+                                "conversation_id": str(conv_id),
+                                "input_tokens": _in, "output_tokens": _out,
+                                "cache_read_tokens": _cr, "cache_creation_tokens": _cw,
+                                "custo_brl": round(_usd * _pr("USD_BRL","5.40"), 6),
+                                "ttft_ms": round(getattr(event_stream, "_ttft_ms", 0.0), 1),
+                                "total_ms": round((_t.perf_counter()-_t0)*1000.0, 1),
+                                "tools_executadas": len(tool_outcomes),
+                                "pergunta": (body.message or "")[:120],
+                            }
+                            _lf = _P(__file__).resolve().parents[3] / "logs" / "gateway" / "llm_events.jsonl"
+                            with open(_lf, "a", encoding="utf-8") as _f:
+                                _f.write(_j.dumps(_rec, ensure_ascii=False) + "\n")
+                        except Exception:
+                            pass
                         # ── TRAVA ANTI-FABULACAO ──────────────────────────────
                         # Se a resposta apresenta dados (numeros/R$/tabela) mas
                         # NENHUMA tool teve sucesso nesta turn -> os numeros foram

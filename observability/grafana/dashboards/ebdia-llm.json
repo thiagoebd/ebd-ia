@@ -1,0 +1,567 @@
+{
+  "title": "EBD.ia — LLM (custo · tokens · cache · latência)",
+  "tags": [
+    "ebdia",
+    "llm"
+  ],
+  "timezone": "America/Sao_Paulo",
+  "time": {
+    "from": "now-7d",
+    "to": "now"
+  },
+  "refresh": "1m",
+  "schemaVersion": 39,
+  "editable": true,
+  "panels": [
+    {
+      "type": "stat",
+      "title": "Custo total (R$) — período",
+      "gridPos": {
+        "h": 4,
+        "w": 5,
+        "x": 0,
+        "y": 0
+      },
+      "datasource": {
+        "type": "loki",
+        "uid": "P8E80F9AEF21F6940"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "#C8102E"
+          },
+          "unit": "currencyBRL",
+          "decimals": 2
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "P8E80F9AEF21F6940"
+          },
+          "queryType": "instant",
+          "expr": "sum(sum_over_time({job=\"llm\"} | json custo_brl=\"custo_brl\" | unwrap custo_brl [$__range]))"
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Custo médio por turn (R$)",
+      "gridPos": {
+        "h": 4,
+        "w": 5,
+        "x": 5,
+        "y": 0
+      },
+      "datasource": {
+        "type": "loki",
+        "uid": "P8E80F9AEF21F6940"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "#9a6b00"
+          },
+          "unit": "currencyBRL",
+          "decimals": 3
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "P8E80F9AEF21F6940"
+          },
+          "queryType": "instant",
+          "expr": "sum(sum_over_time({job=\"llm\"} | json custo_brl=\"custo_brl\" | unwrap custo_brl [$__range])) / sum(count_over_time({job=\"llm\"}[$__range]))"
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Turns (período)",
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 10,
+        "y": 0
+      },
+      "datasource": {
+        "type": "loki",
+        "uid": "P8E80F9AEF21F6940"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "#1c2c5e"
+          },
+          "unit": "short"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "P8E80F9AEF21F6940"
+          },
+          "queryType": "instant",
+          "expr": "sum(count_over_time({job=\"llm\"}[$__range]))"
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Cache hit ratio",
+      "gridPos": {
+        "h": 4,
+        "w": 5,
+        "x": 14,
+        "y": 0
+      },
+      "datasource": {
+        "type": "loki",
+        "uid": "P8E80F9AEF21F6940"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "#2e6b34"
+          },
+          "unit": "percentunit",
+          "decimals": 1
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "P8E80F9AEF21F6940"
+          },
+          "queryType": "instant",
+          "expr": "sum(sum_over_time({job=\"llm\"} | json cache_read_tokens=\"cache_read_tokens\" | unwrap cache_read_tokens [$__range])) / (sum(sum_over_time({job=\"llm\"} | json cache_read_tokens=\"cache_read_tokens\" | unwrap cache_read_tokens [$__range])) + sum(sum_over_time({job=\"llm\"} | json input_tokens=\"input_tokens\" | unwrap input_tokens [$__range])))"
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Tokens gerados (saída)",
+      "gridPos": {
+        "h": 4,
+        "w": 5,
+        "x": 19,
+        "y": 0
+      },
+      "datasource": {
+        "type": "loki",
+        "uid": "P8E80F9AEF21F6940"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "#1c2c5e"
+          },
+          "unit": "short"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "P8E80F9AEF21F6940"
+          },
+          "queryType": "instant",
+          "expr": "sum(sum_over_time({job=\"llm\"} | json output_tokens=\"output_tokens\" | unwrap output_tokens [$__range]))"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Custo por dia (R$)",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 4
+      },
+      "datasource": {
+        "type": "loki",
+        "uid": "P8E80F9AEF21F6940"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyBRL",
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 70,
+            "barAlignment": 0
+          }
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "P8E80F9AEF21F6940"
+          },
+          "expr": "sum(sum_over_time({job=\"llm\"} | json custo_brl=\"custo_brl\" | unwrap custo_brl [1d]))",
+          "legendFormat": "R$/dia"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Tokens por dia (por tipo)",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 4
+      },
+      "datasource": {
+        "type": "loki",
+        "uid": "P8E80F9AEF21F6940"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 70,
+            "barAlignment": 0
+          }
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "P8E80F9AEF21F6940"
+          },
+          "expr": "sum(sum_over_time({job=\"llm\"} | json input_tokens=\"input_tokens\" | unwrap input_tokens [1d]))",
+          "legendFormat": "entrada"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "loki",
+            "uid": "P8E80F9AEF21F6940"
+          },
+          "expr": "sum(sum_over_time({job=\"llm\"} | json output_tokens=\"output_tokens\" | unwrap output_tokens [1d]))",
+          "legendFormat": "saída"
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "loki",
+            "uid": "P8E80F9AEF21F6940"
+          },
+          "expr": "sum(sum_over_time({job=\"llm\"} | json cache_read_tokens=\"cache_read_tokens\" | unwrap cache_read_tokens [1d]))",
+          "legendFormat": "cache lido"
+        },
+        {
+          "refId": "D",
+          "datasource": {
+            "type": "loki",
+            "uid": "P8E80F9AEF21F6940"
+          },
+          "expr": "sum(sum_over_time({job=\"llm\"} | json cache_creation_tokens=\"cache_creation_tokens\" | unwrap cache_creation_tokens [1d]))",
+          "legendFormat": "cache gravado"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Cache hit ratio por dia",
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 12
+      },
+      "datasource": {
+        "type": "loki",
+        "uid": "P8E80F9AEF21F6940"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 70,
+            "barAlignment": 0
+          }
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "P8E80F9AEF21F6940"
+          },
+          "expr": "sum(sum_over_time({job=\"llm\"} | json cache_read_tokens=\"cache_read_tokens\" | unwrap cache_read_tokens [1d])) / (sum(sum_over_time({job=\"llm\"} | json cache_read_tokens=\"cache_read_tokens\" | unwrap cache_read_tokens [1d])) + sum(sum_over_time({job=\"llm\"} | json input_tokens=\"input_tokens\" | unwrap input_tokens [1d])))",
+          "legendFormat": "ratio"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Latência do turno (ms) — X% terminam em menos que:",
+      "gridPos": {
+        "h": 8,
+        "w": 16,
+        "x": 8,
+        "y": 12
+      },
+      "datasource": {
+        "type": "loki",
+        "uid": "P8E80F9AEF21F6940"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "custom": {
+            "drawStyle": "line",
+            "showPoints": "always",
+            "pointSize": 7,
+            "spanNulls": true
+          }
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "P8E80F9AEF21F6940"
+          },
+          "expr": "quantile_over_time(0.5, {job=\"llm\"} | json ttft_ms=\"ttft_ms\" | unwrap ttft_ms [1d]) by ()",
+          "legendFormat": "1º token · 50% menor que"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "loki",
+            "uid": "P8E80F9AEF21F6940"
+          },
+          "expr": "quantile_over_time(0.95, {job=\"llm\"} | json ttft_ms=\"ttft_ms\" | unwrap ttft_ms [1d]) by ()",
+          "legendFormat": "1º token · 95% menor que"
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "loki",
+            "uid": "P8E80F9AEF21F6940"
+          },
+          "expr": "quantile_over_time(0.5, {job=\"llm\"} | json total_ms=\"total_ms\" | unwrap total_ms [1d]) by ()",
+          "legendFormat": "turno total · 50% menor que"
+        },
+        {
+          "refId": "D",
+          "datasource": {
+            "type": "loki",
+            "uid": "P8E80F9AEF21F6940"
+          },
+          "expr": "quantile_over_time(0.95, {job=\"llm\"} | json total_ms=\"total_ms\" | unwrap total_ms [1d]) by ()",
+          "legendFormat": "turno total · 95% menor que"
+        }
+      ]
+    },
+    {
+      "type": "piechart",
+      "title": "Custo por usuário (R$)",
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 20
+      },
+      "datasource": {
+        "type": "loki",
+        "uid": "P8E80F9AEF21F6940"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "P8E80F9AEF21F6940"
+          },
+          "queryType": "instant",
+          "expr": "sum by (user_nome) (sum_over_time({job=\"llm\"} | json custo_brl=\"custo_brl\" | unwrap custo_brl [$__range]))",
+          "legendFormat": "{{user_nome}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "displayName": "${__field.labels.user_nome}"
+        }
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      }
+    },
+    {
+      "type": "piechart",
+      "title": "Turns por modelo",
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 20
+      },
+      "datasource": {
+        "type": "loki",
+        "uid": "P8E80F9AEF21F6940"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "P8E80F9AEF21F6940"
+          },
+          "queryType": "instant",
+          "expr": "sum by (model) (count_over_time({job=\"llm\"}[$__range]))",
+          "legendFormat": "{{model}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "displayName": "${__field.labels.model}"
+        }
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      }
+    },
+    {
+      "type": "piechart",
+      "title": "Turns por canal",
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 20
+      },
+      "datasource": {
+        "type": "loki",
+        "uid": "P8E80F9AEF21F6940"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "P8E80F9AEF21F6940"
+          },
+          "queryType": "instant",
+          "expr": "sum by (canal) (count_over_time({job=\"llm\"}[$__range]))",
+          "legendFormat": "{{canal}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "displayName": "${__field.labels.canal}"
+        }
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      }
+    },
+    {
+      "type": "logs",
+      "title": "Últimas perguntas dos usuários",
+      "gridPos": {
+        "h": 9,
+        "w": 24,
+        "x": 0,
+        "y": 28
+      },
+      "datasource": {
+        "type": "loki",
+        "uid": "P8E80F9AEF21F6940"
+      },
+      "options": {
+        "sortOrder": "Descending",
+        "wrapLogMessage": true
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "P8E80F9AEF21F6940"
+          },
+          "expr": "{job=\"llm\"} | json | line_format \"{{.user_nome}} · {{.model}} · R$ {{.custo_brl}} · {{.ttft_ms}}ms 1º token · {{.pergunta}}\""
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {}
+      }
+    },
+    {
+      "type": "logs",
+      "title": "Turns mais caros (> R$ 0,25) — auditoria",
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 37
+      },
+      "datasource": {
+        "type": "loki",
+        "uid": "P8E80F9AEF21F6940"
+      },
+      "options": {
+        "sortOrder": "Descending",
+        "wrapLogMessage": true
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "P8E80F9AEF21F6940"
+          },
+          "expr": "{job=\"llm\"} | json | custo_brl > 0.25 | line_format \"R$ {{.custo_brl}} · {{.user_nome}} · in {{.input_tokens}} / out {{.output_tokens}} / cache {{.cache_read_tokens}} · {{.pergunta}}\""
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {}
+      }
+    }
+  ]
+}

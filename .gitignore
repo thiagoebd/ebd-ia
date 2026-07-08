@@ -81,3 +81,6 @@ gateway/.env
 core/[0-9a-f]*-[0-9a-f]*-[0-9a-f]*-[0-9a-f]*-[0-9a-f]*
 *.bak*
 .env.bak*
+
+# observabilidade
+observability/.env

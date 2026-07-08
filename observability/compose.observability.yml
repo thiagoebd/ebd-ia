@@ -1,0 +1,81 @@
+name: ebdia-observability
+services:
+  loki:
+    image: grafana/loki:3.2.0
+    command: -config.file=/etc/loki/config.yml
+    volumes:
+      - ./loki/config.yml:/etc/loki/config.yml:ro
+      - loki_data:/loki
+    networks: [obs_net]
+    restart: unless-stopped
+
+  promtail:
+    image: grafana/promtail:3.2.0
+    command: -config.file=/etc/promtail/config.yml
+    volumes:
+      - ./promtail/config.yml:/etc/promtail/config.yml:ro
+      - /home/thiago/projects/ebd-ia/logs:/logs:ro
+      - promtail_pos:/positions
+    networks: [obs_net]
+    depends_on: [loki]
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:v2.55.0
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.retention.time=90d
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prom_data:/prometheus
+    networks: [obs_net]
+    restart: unless-stopped
+
+  tempo:
+    image: grafana/tempo:2.6.0
+    command: -config.file=/etc/tempo/config.yml
+    volumes:
+      - ./tempo/config.yml:/etc/tempo/config.yml:ro
+      - tempo_data:/var/tempo
+    networks: [obs_net]
+    restart: unless-stopped
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.113.0
+    command: --config=/etc/otel/config.yml
+    volumes:
+      - ./otel/config.yml:/etc/otel/config.yml:ro
+    ports:
+      - "127.0.0.1:4317:4317"   # OTLP gRPC (o gateway manda spans/métricas aqui na Fase 2)
+      - "127.0.0.1:4318:4318"   # OTLP HTTP
+    networks: [obs_net]
+    depends_on: [tempo, prometheus]
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:11.3.0
+    ports:
+      - "127.0.0.1:3000:3000"   # acesso via SSH tunnel; nunca exposto direto
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD}
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_ANALYTICS_REPORTING_ENABLED=false
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana_data:/var/lib/grafana
+    networks: [obs_net]
+    depends_on: [loki, prometheus, tempo]
+    restart: unless-stopped
+
+networks:
+  obs_net:
+    name: ebdia_obs_net
+
+volumes:
+  loki_data: {}
+  promtail_pos: {}
+  prom_data: {}
+  tempo_data: {}
+  grafana_data: {}
