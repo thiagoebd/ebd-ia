@@ -1085,3 +1085,52 @@ WHERE CODUSUR NOT IN (
 AND (DTTERMINO IS NULL OR DTTERMINO >= TRUNC(SYSDATE))
 ```
 
+
+
+<!-- AUTO-APPEND PROP-2A1C061D aprovado por Thiago -->
+
+## Cicatriz: Contagem de vendedores deve excluir supervisores e cadastros de sistema
+
+> Confirmado por usuário admin em 14/07/2026.
+> Erro detectado: resumo retornou 12 "vendedores sem pedido" em Itapevi, detalhe retornou apenas 6 — divergência causada por inclusão de cadastros não-vendedores no resumo.
+
+### Problema
+Ao contar ou listar vendedores (com/sem pedido, em campo, em rota etc.), cadastros de sistema e supervisores eram incluídos no numerador/denominador, gerando números inconsistentes entre resumo e detalhe.
+
+### Filtro canônico OBRIGATÓRIO para "vendedores de campo"
+
+```sql
+-- Exclui supervisores (via PCSUPERV.COD_CADRCA)
+AND u.CODUSUR NOT IN (
+    SELECT COD_CADRCA FROM EBD.PCSUPERV WHERE COD_CADRCA IS NOT NULL
+)
+-- Exclui desligados
+AND (u.DTTERMINO IS NULL OR u.DTTERMINO >= TRUNC(SYSDATE))
+-- Exclui cadastros operacionais/sistema (e-commerce, GM-RM, fantasmas)
+AND UPPER(NVL(u.NOME, '')) NOT LIKE '%ECOMMERCE%'
+AND UPPER(NVL(u.NOME, '')) NOT LIKE '%GM-RM%'
+AND UPPER(NVL(u.NOME, '')) NOT LIKE 'ORFAO%'
+AND UPPER(NVL(u.NOME, '')) NOT LIKE 'RCA VAGO%'
+AND UPPER(NVL(u.NOME, '')) NOT LIKE '%B2B%'
+AND UPPER(NVL(u.NOME, '')) NOT LIKE '%GERENTE%'
+```
+
+### Regra de consistência obrigatória
+
+> O **mesmo filtro** aplicado no resumo ("X vendedores sem pedido") DEVE ser aplicado no detalhe ("quais são esses X vendedores"). Resumo e detalhe **sempre** devem bater.
+
+### Anti-padrões a evitar
+
+- ❌ Usar `COUNT(DISTINCT CODUSUR)` sem filtrar supervisores e cadastros de sistema
+- ❌ Aplicar filtro rigoroso só no detalhe e filtro frouxo no resumo
+- ❌ Contar cadastros com nome `ECOMMERCE B2B LOJAEBD XX`, `GM-RM`, `ORFAO*`, `RCA VAGO*` como vendedores de campo
+
+### Aplicação obrigatória
+
+Em **todas** as perguntas do tipo:
+- "Quantos vendedores saíram em campo hoje?"
+- "Quantos vendedores sem pedido?"
+- "Lista os vendedores que não visitaram clientes"
+- "Ranking de vendedores por visitas/pedidos/faturamento"
+- Qualquer contagem ou listagem de força de vendas
+
