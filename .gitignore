@@ -21,7 +21,6 @@ env/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
-
 # ============== Node.js ==============
 node_modules/
 npm-debug.log*
@@ -31,49 +30,36 @@ yarn-error.log*
 .nuxt/
 dist/
 build/
-
 # ============== Docker ==============
 # Volumes e dados locais não vão pro Git
 .docker-data/
-
 # ============== Logs ==============
 *.log
 logs/
 *.log.*
-
 # ============== OS ==============
 .DS_Store
 Thumbs.db
 *.swp
 *.swo
 *~
-
 # ============== IDE ==============
 .vscode/
 .idea/
 *.sublime-*
-
 # ============== Artefatos gerados ==============
 *.xlsx
 *.pptx
 *.pdf
 !docs/**/*.pdf
-
 # ============== Backups e temporários ==============
 *.bak
 *.tmp
 tmp/
 temp/
 compose.yaml.bak
-*.bak
-*.bak
-*.bak
-
 # Logs do MCP
-logs/
 *.jsonl
-docs/sql-corrections.md.bak
-docs/sql-corrections.md.bak
 docs/sql-corrections.md.bak
 *.bak.*
 data/*.db
@@ -81,9 +67,8 @@ gateway/.env
 core/[0-9a-f]*-[0-9a-f]*-[0-9a-f]*-[0-9a-f]*-[0-9a-f]*
 *.bak*
 .env.bak*
-
 # observabilidade
 observability/.env
-
-# observabilidade
-observability/.env
+observability/reports/
+nohup_telegram.log
+core/.env
