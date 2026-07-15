@@ -83,7 +83,15 @@ TEST_USERS_RAW: list[dict] = [
     {"user_id": 5, "celular": None, "email": "enrico.montini@ebdgrupo.com.br",
      "nome": "Enrico Montini", "role": "admin", "codusur": None, "filiais": "*", "regionais": None},
     {"user_id": 6, "celular": None, "email": "andre@ebdgrupo.com.br",
-     "nome": "Andre", "role": "admin", "codusur": None, "filiais": "*", "regionais": None},
+     "nome": "Andre Andrade", "role": "admin", "codusur": None, "filiais": "*", "regionais": None},
+    {"user_id": 7, "celular": None, "email": "abel.nau@ebdgrupo.com.br",
+     "nome": "Abel Nau", "role": "admin", "codusur": None, "filiais": "*", "regionais": None},
+    {"user_id": 8, "celular": None, "email": "viviane.pedroso@ebdgrupo.com.br",
+     "nome": "Viviane Pedroso", "role": "admin", "codusur": None, "filiais": "*", "regionais": None},
+    {"user_id": 9, "celular": None, "email": "fernanda@ebdgrupo.com.br",
+     "nome": "Fernanda", "role": "admin", "codusur": None, "filiais": "*", "regionais": None},
+    {"user_id": 10, "celular": None, "email": "tercio.quatroni@ebdgrupo.com.br",
+     "nome": "Tercio Quatroni", "role": "admin", "codusur": None, "filiais": "*", "regionais": None},
     # Identidade de SERVICO (canal Telegram / fallback interno).
     # LEGACY: celular mantido como alias de transicao — bot em producao tem o
     # default antigo em memoria. REMOVER quando o bot migrar pra systemd.

@@ -1,8 +1,8 @@
 {
- "generated_at": "2026-07-06T14:11:24.400618+00:00",
+ "generated_at": "2026-07-15T19:50:10.006032+00:00",
  "source": "docs/query_templates.md",
- "source_sha256": "61c73cb129427217",
- "count": 25,
+ "source_sha256": "539b3d17a3a01318",
+ "count": 34,
  "templates": [
   {
    "code": "T100",
@@ -187,6 +187,68 @@
    "sql": "SELECT ped.CODCLI,\n       SUBSTR(NVL(dc.CLIENTE,'?'),1,32) AS CLIENTE,\n       SUBSTR(NVL(dc.RAMOATIVIDADE,'-'),1,20) AS RAMO,\n       COUNT(*) AS QTD_PEDIDOS,\n       SUM(CASE WHEN ped.POSICAO='L' THEN NVL(ped.VLTOTAL,0) ELSE 0 END) AS VL_LIBERADO,\n       SUM(CASE WHEN ped.POSICAO='B' THEN NVL(ped.VLTOTAL,0) ELSE 0 END) AS VL_BLOQ,\n       SUM(CASE WHEN ped.POSICAO IN ('M','P') THEN NVL(ped.VLTOTAL,0) ELSE 0 END) AS VL_PROC,\n       SUM(NVL(ped.VLTOTAL,0)) AS VL_TOTAL_ABERTO\nFROM EBD.PCPEDC ped\nLEFT JOIN EBD.GD_DIM_CLIENTE dc ON dc.CODIGOCLIENTE = ped.CODCLI\nWHERE ped.CODFILIAL = :codFilial\n  AND ped.POSICAO IN ('L','B','M','P')\n  AND ped.DATA BETWEEN TRUNC(SYSDATE,'MM') AND SYSDATE\nGROUP BY ped.CODCLI, dc.CLIENTE, dc.RAMOATIVIDADE\nORDER BY VL_TOTAL_ABERTO DESC NULLS LAST\nFETCH FIRST 10 ROWS ONLY"
   },
   {
+   "code": "T170",
+   "version": null,
+   "title": "Equipe: cadastro de RCAs por filial (reconstruído 08/07 — validar 1ª execução)",
+   "familia": "equipe_campo",
+   "validated": false,
+   "validation_note": null,
+   "latency_note": null,
+   "binds": [
+    "codFilial"
+   ],
+   "sql": "SELECT u.CODUSUR,\n       SUBSTR(NVL(u.NOME,'?'),1,40)        AS NOME,\n       u.TIPOVEND,\n       u.CODFILIAL,\n       SUBSTR(NVL(pf.FANTASIA,'?'),1,30)   AS FILIAL\nFROM EBD.PCUSUARI u\nLEFT JOIN EBD.PCFILIAL pf ON pf.CODIGO = u.CODFILIAL\nWHERE u.CODFILIAL = :codFilial\n  AND UPPER(u.NOME) NOT LIKE '%ORFAO%'\n  AND UPPER(u.NOME) NOT LIKE '%VAGO%'\n  AND UPPER(u.NOME) NOT LIKE '%ECOMMERCE%'\nORDER BY u.NOME"
+  },
+  {
+   "code": "T171",
+   "version": null,
+   "title": "Equipe em campo hoje, por filial (reconstruído 08/07 — validar 1ª execução)",
+   "familia": "faturamento",
+   "validated": false,
+   "validation_note": null,
+   "latency_note": null,
+   "binds": [],
+   "sql": "SELECT u.CODFILIAL,\n       SUBSTR(NVL(pf.FANTASIA,'?'),1,25) AS FILIAL,\n       COUNT(DISTINCT v.CODUSUR)         AS EM_CAMPO_HOJE\nFROM EBD.PCVISITAFV v\nJOIN EBD.PCUSUARI u  ON u.CODUSUR = v.CODUSUR\nLEFT JOIN EBD.PCFILIAL pf ON pf.CODIGO = u.CODFILIAL\nWHERE v.DATA >= TRUNC(SYSDATE) AND v.DATA < TRUNC(SYSDATE) + 1\nGROUP BY u.CODFILIAL, SUBSTR(NVL(pf.FANTASIA,'?'),1,25)\nORDER BY EM_CAMPO_HOJE DESC"
+  },
+  {
+   "code": "T172",
+   "version": null,
+   "title": "Cobertura de visitas no período, por filial (reconstruído 08/07 — validar 1ª execução)",
+   "familia": "equipe_campo",
+   "validated": false,
+   "validation_note": null,
+   "latency_note": null,
+   "binds": [
+    "dataFim",
+    "dataIni"
+   ],
+   "sql": "SELECT u.CODFILIAL,\n       SUBSTR(NVL(pf.FANTASIA,'?'),1,30) AS FILIAL,\n       COUNT(DISTINCT v.CODUSUR)         AS RCAS_COM_VISITA,\n       COUNT(*)                          AS TOTAL_VISITAS\nFROM EBD.PCVISITAFV v\nJOIN EBD.PCUSUARI u  ON u.CODUSUR = v.CODUSUR\nLEFT JOIN EBD.PCFILIAL pf ON pf.CODIGO = u.CODFILIAL\nWHERE v.DATA >= TO_DATE(:dataIni,'YYYY-MM-DD')\n  AND v.DATA <  TO_DATE(:dataFim,'YYYY-MM-DD') + 1\nGROUP BY u.CODFILIAL, SUBSTR(NVL(pf.FANTASIA,'?'),1,30)\nORDER BY RCAS_COM_VISITA DESC"
+  },
+  {
+   "code": "T173",
+   "version": null,
+   "title": "Vendedores SEM check-in no dia, por filial (reconstruído 08/07 — validar 1ª execução)",
+   "familia": "equipe_campo",
+   "validated": false,
+   "validation_note": null,
+   "latency_note": null,
+   "binds": [
+    "codFilial"
+   ],
+   "sql": "WITH visitas_dia AS (\n    SELECT DISTINCT v.CODUSUR\n    FROM EBD.PCVISITAFV v\n    WHERE v.DATA >= TRUNC(SYSDATE) AND v.DATA < TRUNC(SYSDATE) + 1\n)\nSELECT u.CODUSUR,\n       SUBSTR(NVL(u.NOME,'?'),1,40)      AS NOME,\n       u.TIPOVEND,\n       SUBSTR(NVL(pf.FANTASIA,'?'),1,25) AS FILIAL\nFROM EBD.PCUSUARI u\nLEFT JOIN EBD.PCFILIAL pf ON pf.CODIGO = u.CODFILIAL\nWHERE u.CODFILIAL = :codFilial\n  AND UPPER(u.NOME) NOT LIKE '%ORFAO%'\n  AND UPPER(u.NOME) NOT LIKE '%VAGO%'\n  AND UPPER(u.NOME) NOT LIKE '%ECOMMERCE%'\n  AND u.CODUSUR NOT IN (SELECT CODUSUR FROM visitas_dia)\nORDER BY u.NOME"
+  },
+  {
+   "code": "T174",
+   "version": null,
+   "title": "Aderência check-in × rota planejada, dia anterior (ESQUELETO — completar na validação)",
+   "familia": "outros",
+   "validated": false,
+   "validation_note": null,
+   "latency_note": null,
+   "binds": [],
+   "sql": "SELECT (SELECT COUNT(DISTINCT CODUSUR)\n          FROM EBD.PCVISITAFV\n         WHERE DATA = TRUNC(SYSDATE) - 1)      AS RCAS_APP,\n       (SELECT COUNT(DISTINCT r.CODIGORCA)\n          FROM EBD.GD_FATO_ROTACLIENTE r)      AS RCAS_ROTA\nFROM DUAL"
+  },
+  {
    "code": "T180",
    "version": null,
    "title": "Aproveitamento de Rota por Filial  Validado",
@@ -198,6 +260,60 @@
     "codFilial"
    ],
    "sql": "WITH dia_ref AS (\n    SELECT TRUNC(SYSDATE) AS DT,\n           CASE TO_CHAR(TRUNC(SYSDATE),'D')\n             WHEN '1' THEN 'DOMINGO' WHEN '2' THEN 'SEGUNDA'\n             WHEN '3' THEN 'TERCA'   WHEN '4' THEN 'QUARTA'\n             WHEN '5' THEN 'QUINTA'  WHEN '6' THEN 'SEXTA'\n             WHEN '7' THEN 'SABADO' END AS NOME\n    FROM DUAL\n),\nrota_filial AS (\n    SELECT DISTINCT r.CODIGOCLIENTE\n    FROM EBD.GD_FATO_ROTACLIENTE r\n    JOIN EBD.GD_DIM_RCA dr ON dr.CODIGORCA = r.CODIGORCA\n    JOIN EBD.PCCLIENT cli ON cli.CODCLI = r.CODIGOCLIENTE\n    , dia_ref d\n    WHERE UPPER(r.DIASEMANA) IN (d.NOME, REPLACE(d.NOME,'C','Ç'))\n      AND UPPER(NVL(dr.RCA,'')) NOT LIKE 'ORFAO%'\n      AND UPPER(NVL(dr.RCA,'')) NOT LIKE 'RCA VAGO%'\n      AND cli.CODFILIALNF = :codFilial\n)\nSELECT (SELECT COUNT(*) FROM rota_filial) AS NA_ROTA,\n       (SELECT COUNT(DISTINCT ped.CODCLI) FROM EBD.PCPEDC ped, dia_ref d\n        WHERE TRUNC(ped.DATA) = d.DT AND ped.POSICAO != 'C'\n          AND ped.CODFILIAL = :codFilial\n          AND ped.CODCLI IN (SELECT CODIGOCLIENTE FROM rota_filial)) AS VISITADOS,\n       (SELECT COUNT(DISTINCT v.CODCLI) FROM EBD.VIEW_VENDAS_RESUMO_FATURAMENTO v, dia_ref d\n        WHERE TRUNC(v.DTSAIDA) = d.DT AND v.CONDVENDA = 1\n          AND v.CODFILIAL = :codFilial\n          AND v.CODCLI IN (SELECT CODIGOCLIENTE FROM rota_filial)) AS FATURADOS\nFROM DUAL"
+  },
+  {
+   "code": "T190",
+   "version": null,
+   "title": "Catálogo de produtos com EAN, fornecedor e departamento (minerado de padrão ok=4)",
+   "familia": "fornecedores",
+   "validated": false,
+   "validation_note": null,
+   "latency_note": null,
+   "binds": [
+    "codFornecRaiz"
+   ],
+   "sql": "SELECT p.CODPROD,\n       SUBSTR(NVL(p.DESCRICAO,'?'),1,60)                        AS PRODUTO,\n       p.CODAUXILIAR                                            AS EAN,\n       SUBSTR(NVL(f.FORNECEDOR,'?'),1,50)                       AS FORNECEDOR,\n       SUBSTR(NVL(d.CODEPTO||' - '||d.DESCRICAO,'?'),1,50)      AS DEPARTAMENTO\nFROM EBD.PCPRODUT p\nJOIN EBD.PCFORNEC f ON f.CODFORNEC = p.CODFORNEC\nLEFT JOIN EBD.PCDEPTO d ON d.CODEPTO = p.CODEPTO\nWHERE NVL(f.CODFORNECPRINC, f.CODFORNEC) = :codFornecRaiz\n  AND p.DTEXCLUSAO IS NULL\nORDER BY p.CODPROD"
+  },
+  {
+   "code": "T191",
+   "version": null,
+   "title": "Produtos ATIVOS/disponíveis por filial (fórmula universal #5 — validar 1ª execução)",
+   "familia": "faturamento",
+   "validated": false,
+   "validation_note": null,
+   "latency_note": null,
+   "binds": [
+    "codFilial"
+   ],
+   "sql": "SELECT p.CODPROD,\n       SUBSTR(NVL(p.DESCRICAO,'?'),1,60) AS PRODUTO,\n       p.CODAUXILIAR                     AS EAN,\n       pf.CODFILIAL\nFROM EBD.PCPRODUT p\nJOIN EBD.PCPRODFILIAL pf ON pf.CODPROD = p.CODPROD\nWHERE pf.CODFILIAL     = :codFilial\n  AND pf.REVENDA       = 'S'\n  AND pf.ATIVO         = 'S'\n  AND pf.PROIBIDAVENDA = 'N'\n  AND pf.FORALINHA     = 'N'\n  AND p.DTEXCLUSAO IS NULL\nORDER BY p.CODPROD"
+  },
+  {
+   "code": "T192",
+   "version": null,
+   "title": "Produtos vendidos no período (minerado de padrão ok=2 · fonte FATO)",
+   "familia": "faturamento",
+   "validated": false,
+   "validation_note": null,
+   "latency_note": null,
+   "binds": [
+    "dataFim",
+    "dataIni"
+   ],
+   "sql": "SELECT vf.CODIGOPRODUTO                        AS CODPROD,\n       SUBSTR(NVL(pr.DESCRICAO,'?'),1,50)      AS PRODUTO,\n       pr.CODAUXILIAR                          AS EAN,\n       SUM(vf.QUANTIDADE)                      AS QT_VENDIDA,\n       SUM(vf.VALORTOTAL)                      AS BRUTO,\n       MAX(vf.DATAFATURAMENTO)                 AS ULTIMA_VENDA\nFROM EBD.GD_FATO_VENDAFATURAMENTO vf\nJOIN EBD.PCPRODUT pr ON pr.CODPROD = vf.CODIGOPRODUTO\nWHERE vf.DATAFATURAMENTO BETWEEN :dataIni AND :dataFim\nGROUP BY vf.CODIGOPRODUTO, SUBSTR(NVL(pr.DESCRICAO,'?'),1,50), pr.CODAUXILIAR\nORDER BY BRUTO DESC"
+  },
+  {
+   "code": "T193",
+   "version": null,
+   "title": "Vendas por marca e filial (minerado de padrão ok=2)",
+   "familia": "equipe_campo",
+   "validated": false,
+   "validation_note": null,
+   "latency_note": null,
+   "binds": [
+    "dataFim",
+    "dataIni"
+   ],
+   "sql": "SELECT vf.CODIGOFILIAL,\n       pp.CODMARCA,\n       COUNT(DISTINCT vf.CODIGOCLIENTE) AS CLIENTES,\n       SUM(vf.VALORTOTAL)               AS BRUTO\nFROM EBD.GD_FATO_VENDAFATURAMENTO vf\nJOIN EBD.PCPRODUT pp ON pp.CODPROD = vf.CODIGOPRODUTO\nWHERE vf.DATAFATURAMENTO BETWEEN :dataIni AND :dataFim\nGROUP BY vf.CODIGOFILIAL, pp.CODMARCA\nORDER BY BRUTO DESC"
   },
   {
    "code": "T200",

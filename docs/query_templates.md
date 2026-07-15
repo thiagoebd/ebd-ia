@@ -1387,3 +1387,207 @@ SELECT PCPEDC.CODFILIAL,
 - Esta query equivale ao "Em Pedido" / "Carteira" do BI EBD
 - SEMPRE adicionar `AND PCPEDC.CODFILIAL = :userFilial` (obrigatório por regra #9)
 
+
+**Cicatriz #46:** PCUSUARI NÃO tem coluna FUNCAO (ORA-00904 — "FUNCAO": invalid identifier, 15/07). Para função/cargo/tipo do vendedor usar TIPOVEND (validada 31x em produção). DTTERMINO EXISTE e está validada (31x ok) — usar `(DTTERMINO IS NULL OR DTTERMINO >= TRUNC(SYSDATE))` para "equipe ativa". Colunas de PCUSUARI validadas em prod: CODUSUR, NOME, CODFILIAL, TIPOVEND, DTTERMINO.
+
+# Parte 12 — Família Equipe em Campo / Check-in (T170-T174) — 08/07/2026
+Origem: mineração do queries.jsonl (177 queries; padrões ok=7/3/3/2/2). SQLs reconstruídos de
+prefixos validados em produção — confirmar cada um na 1ª execução. Não confundir com a
+Parte 11 (T160-T163 = Funil/Motivos de Não-Venda): aqui é PRESENÇA/CHECK-IN da equipe.
+
+**Cicatriz #41:** PCVISITAFV NÃO tem CODFILIAL. A filial vem SEMPRE via JOIN:
+`PCVISITAFV v JOIN PCUSUARI u ON u.CODUSUR = v.CODUSUR` → `u.CODFILIAL`.
+Usar `v.CODFILIAL` = ORA-00904 (causa real dos erros do relatório de 08/07).
+
+**Cicatriz #42:** a coluna de data da PCVISITAFV é `DATA` (tipo DATE) — confirmada ok em
+produção (`vf.DATA >=`, `DATA = TRUNC(SYSDATE)-1`). Não usar DTVISITA/DTCHECKIN.
+
+**Cicatriz #43 (v2, provada pelo Oracle em 15/07):** PCUSUARI — colunas que EXISTEM:
+CODFILIAL, CODUSUR, NOME, DTTERMINO, TIPOVEND, CODSUPERVISOR.
+NAO EXISTEM: `ATIVO` (ORA-00904, 2x) e `FUNCAO` (ORA-00904) — para "equipe ativa" use
+`(DTTERMINO IS NULL OR DTTERMINO >= TRUNC(SYSDATE))`; para função/tipo use TIPOVEND;
+o supervisor é `CODSUPERVISOR` (não SUPERVISOR).
+Filial: `LEFT JOIN EBD.PCFILIAL pf ON pf.CODIGO = u.CODFILIAL`.
+
+**Cicatriz #44:** excluir cadastros fantasma da equipe (ORFAO / RCA VAGO / ECOMMERCE):
+`AND UPPER(u.NOME) NOT LIKE '%ORFAO%' AND UPPER(u.NOME) NOT LIKE '%VAGO%' AND UPPER(u.NOME) NOT LIKE '%ECOMMERCE%'`
+
+**Cicatriz #45:** NÃO misturar vocabulário VIEW × FATO (ORA-00904 dentro da fonte canônica):
+VIEW_VENDAS_RESUMO_FATURAMENTO → data=DTSAIDA, valor=VLATEND.
+GD_FATO_VENDAFATURAMENTO → data=DATAFATURAMENTO, valor=VALORTOTAL.
+Nunca usar o par de uma na outra.
+
+## T170 — Equipe: cadastro de RCAs por filial (reconstruído 08/07 — validar 1ª execução)
+Pergunta: "quais vendedores temos na filial X?" · padrão ok=7 no log
+```sql
+SELECT u.CODUSUR,
+       SUBSTR(NVL(u.NOME,'?'),1,40)        AS NOME,
+       u.TIPOVEND,
+       u.CODFILIAL,
+       SUBSTR(NVL(pf.FANTASIA,'?'),1,30)   AS FILIAL
+FROM EBD.PCUSUARI u
+LEFT JOIN EBD.PCFILIAL pf ON pf.CODIGO = u.CODFILIAL
+WHERE u.CODFILIAL = :codFilial
+  AND UPPER(u.NOME) NOT LIKE '%ORFAO%'
+  AND UPPER(u.NOME) NOT LIKE '%VAGO%'
+  AND UPPER(u.NOME) NOT LIKE '%ECOMMERCE%'
+ORDER BY u.NOME
+```
+Variante BR: remover o filtro :codFilial e ordenar por u.CODFILIAL, u.NOME.
+
+## T171 — Equipe em campo hoje, por filial (reconstruído 08/07 — validar 1ª execução)
+Pergunta: "quantos RCAs estão em campo hoje?" · padrão ok=3, mediana ~1s
+```sql
+SELECT u.CODFILIAL,
+       SUBSTR(NVL(pf.FANTASIA,'?'),1,25) AS FILIAL,
+       COUNT(DISTINCT v.CODUSUR)         AS EM_CAMPO_HOJE
+FROM EBD.PCVISITAFV v
+JOIN EBD.PCUSUARI u  ON u.CODUSUR = v.CODUSUR
+LEFT JOIN EBD.PCFILIAL pf ON pf.CODIGO = u.CODFILIAL
+WHERE v.DATA >= TRUNC(SYSDATE) AND v.DATA < TRUNC(SYSDATE) + 1
+GROUP BY u.CODFILIAL, SUBSTR(NVL(pf.FANTASIA,'?'),1,25)
+ORDER BY EM_CAMPO_HOJE DESC
+```
+
+## T172 — Cobertura de visitas no período, por filial (reconstruído 08/07 — validar 1ª execução)
+Pergunta: "quantos RCAs visitaram no período?" · padrão ok=2, ~2,2s
+```sql
+SELECT u.CODFILIAL,
+       SUBSTR(NVL(pf.FANTASIA,'?'),1,30) AS FILIAL,
+       COUNT(DISTINCT v.CODUSUR)         AS RCAS_COM_VISITA,
+       COUNT(*)                          AS TOTAL_VISITAS
+FROM EBD.PCVISITAFV v
+JOIN EBD.PCUSUARI u  ON u.CODUSUR = v.CODUSUR
+LEFT JOIN EBD.PCFILIAL pf ON pf.CODIGO = u.CODFILIAL
+WHERE v.DATA >= TO_DATE(:dataIni,'YYYY-MM-DD')
+  AND v.DATA <  TO_DATE(:dataFim,'YYYY-MM-DD') + 1
+GROUP BY u.CODFILIAL, SUBSTR(NVL(pf.FANTASIA,'?'),1,30)
+ORDER BY RCAS_COM_VISITA DESC
+```
+
+## T173 — Vendedores SEM check-in no dia, por filial (reconstruído 08/07 — validar 1ª execução)
+Pergunta: "quais vendedores estão sem checkin hoje (em Belém)?" · anti-join validado ok=3
+```sql
+WITH visitas_dia AS (
+    SELECT DISTINCT v.CODUSUR
+    FROM EBD.PCVISITAFV v
+    WHERE v.DATA >= TRUNC(SYSDATE) AND v.DATA < TRUNC(SYSDATE) + 1
+)
+SELECT u.CODUSUR,
+       SUBSTR(NVL(u.NOME,'?'),1,40)      AS NOME,
+       u.TIPOVEND,
+       SUBSTR(NVL(pf.FANTASIA,'?'),1,25) AS FILIAL
+FROM EBD.PCUSUARI u
+LEFT JOIN EBD.PCFILIAL pf ON pf.CODIGO = u.CODFILIAL
+WHERE u.CODFILIAL = :codFilial
+  AND UPPER(u.NOME) NOT LIKE '%ORFAO%'
+  AND UPPER(u.NOME) NOT LIKE '%VAGO%'
+  AND UPPER(u.NOME) NOT LIKE '%ECOMMERCE%'
+  AND u.CODUSUR NOT IN (SELECT CODUSUR FROM visitas_dia)
+ORDER BY u.NOME
+```
+Para "ontem": TRUNC(SYSDATE)-1 nas duas pontas do CTE.
+
+## T174 — Aderência check-in × rota planejada, dia anterior (ESQUELETO — completar na validação)
+Pergunta: "quantos usaram o app vs rota planejada ontem?" · padrão ok=2, subquery truncada no log
+```sql
+SELECT (SELECT COUNT(DISTINCT CODUSUR)
+          FROM EBD.PCVISITAFV
+         WHERE DATA = TRUNC(SYSDATE) - 1)      AS RCAS_APP,
+       (SELECT COUNT(DISTINCT r.CODIGORCA)
+          FROM EBD.GD_FATO_ROTACLIENTE r)      AS RCAS_ROTA
+FROM DUAL
+```
+Nota: a subquery de rota tinha um JOIN GD_* adicional cortado no log — estender no 1º uso.
+
+# Parte 13 — Família Produto / EAN / Catálogo (T190-T193) — 15/07/2026
+Origem: mineração do queries.jsonl (86 queries PCPRODUT, 52 padrões) + veredito de coluna com
+prova do Oracle (mine_cols.py). Motivo: família responsável pelo eixo dos ORA-00904 do ciclo 2
+e pelos turns mais caros (Excel de EAN: R$ 10,83 em 8 tools — discovery repetida de schema).
+
+**Cicatriz #47:** o EAN do produto é `PCPRODUT.CODAUXILIAR` (7+ usos ok). `CODEAN` NÃO EXISTE
+(ORA-00904 — alucinação recorrente). Variantes fiscais existentes: GTINCODAUXILIAR,
+GTINCODAUXILIAR2, GTINCODAUXILIARTRIB.
+
+**Cicatriz #48:** PCPRODUT é cadastro NACIONAL do produto — NÃO tem CODFILIAL, ATIVO nem
+FORALINHA (ORA-00904 provado). O status comercial por filial vive em `PCPRODFILIAL`
+(fórmula universal #5: REVENDA='S' + ATIVO='S' + PROIBIDAVENDA='N' + FORALINHA='N').
+Produto "ativo/disponível" = JOIN com PCPRODFILIAL por CODPROD+CODFILIAL, nunca filtro na PCPRODUT.
+
+**Cicatriz #49:** `DTULTENT` NÃO está em PCPRODUT (ORA-00904, 8x — campeão de erro da família).
+Última entrada vive em `PCEST` (confirma cicatriz #21).
+
+**Cicatriz #50:** `CODFORNECPRINC` NÃO está em PCPRODUT (ORA-00904, 2x) — é coluna de `PCFORNEC`.
+Fornecedor raiz: `PCPRODUT p JOIN PCFORNEC f ON f.CODFORNEC = p.CODFORNEC` e então
+`NVL(f.CODFORNECPRINC, f.CODFORNEC)`.
+
+**Cicatriz #51:** `QUANTIDADE` existe em GD_FATO_VENDAFATURAMENTO (`vf.QUANTIDADE`, ok) e NÃO na
+VIEW_VENDAS_RESUMO_FATURAMENTO (ORA-00904) — caso particular da cicatriz #45 (vocabulário VIEW×FATO).
+
+**Colunas de PCPRODUT validadas em produção:** CODPROD, DESCRICAO, CODAUXILIAR, CODFORNEC,
+CODMARCA, CODEPTO, REVENDA, DTEXCLUSAO, GTINCODAUXILIAR, GTINCODAUXILIAR2, GTINCODAUXILIARTRIB.
+
+## T190 — Catálogo de produtos com EAN, fornecedor e departamento (minerado de padrão ok=4)
+Pergunta: "lista de EANs por fornecedor / categoria" · a pergunta do Excel caro de 15/07
+```sql
+SELECT p.CODPROD,
+       SUBSTR(NVL(p.DESCRICAO,'?'),1,60)                        AS PRODUTO,
+       p.CODAUXILIAR                                            AS EAN,
+       SUBSTR(NVL(f.FORNECEDOR,'?'),1,50)                       AS FORNECEDOR,
+       SUBSTR(NVL(d.CODEPTO||' - '||d.DESCRICAO,'?'),1,50)      AS DEPARTAMENTO
+FROM EBD.PCPRODUT p
+JOIN EBD.PCFORNEC f ON f.CODFORNEC = p.CODFORNEC
+LEFT JOIN EBD.PCDEPTO d ON d.CODEPTO = p.CODEPTO
+WHERE NVL(f.CODFORNECPRINC, f.CODFORNEC) = :codFornecRaiz
+  AND p.DTEXCLUSAO IS NULL
+ORDER BY p.CODPROD
+```
+Variante "todos os fornecedores": remover o filtro :codFornecRaiz (usar max_rows alto — base grande).
+
+## T191 — Produtos ATIVOS/disponíveis por filial (fórmula universal #5 — validar 1ª execução)
+Pergunta: "produtos ativos / mix disponível da filial X" · status comercial vem de PCPRODFILIAL
+```sql
+SELECT p.CODPROD,
+       SUBSTR(NVL(p.DESCRICAO,'?'),1,60) AS PRODUTO,
+       p.CODAUXILIAR                     AS EAN,
+       pf.CODFILIAL
+FROM EBD.PCPRODUT p
+JOIN EBD.PCPRODFILIAL pf ON pf.CODPROD = p.CODPROD
+WHERE pf.CODFILIAL     = :codFilial
+  AND pf.REVENDA       = 'S'
+  AND pf.ATIVO         = 'S'
+  AND pf.PROIBIDAVENDA = 'N'
+  AND pf.FORALINHA     = 'N'
+  AND p.DTEXCLUSAO IS NULL
+ORDER BY p.CODPROD
+```
+
+## T192 — Produtos vendidos no período (minerado de padrão ok=2 · fonte FATO)
+Pergunta: "o que vendemos de tal produto/fornecedor no período" · QUANTIDADE só existe na FATO
+```sql
+SELECT vf.CODIGOPRODUTO                        AS CODPROD,
+       SUBSTR(NVL(pr.DESCRICAO,'?'),1,50)      AS PRODUTO,
+       pr.CODAUXILIAR                          AS EAN,
+       SUM(vf.QUANTIDADE)                      AS QT_VENDIDA,
+       SUM(vf.VALORTOTAL)                      AS BRUTO,
+       MAX(vf.DATAFATURAMENTO)                 AS ULTIMA_VENDA
+FROM EBD.GD_FATO_VENDAFATURAMENTO vf
+JOIN EBD.PCPRODUT pr ON pr.CODPROD = vf.CODIGOPRODUTO
+WHERE vf.DATAFATURAMENTO BETWEEN :dataIni AND :dataFim
+GROUP BY vf.CODIGOPRODUTO, SUBSTR(NVL(pr.DESCRICAO,'?'),1,50), pr.CODAUXILIAR
+ORDER BY BRUTO DESC
+```
+
+## T193 — Vendas por marca e filial (minerado de padrão ok=2)
+Pergunta: "faturamento por marca" · CODMARCA vive na PCPRODUT
+```sql
+SELECT vf.CODIGOFILIAL,
+       pp.CODMARCA,
+       COUNT(DISTINCT vf.CODIGOCLIENTE) AS CLIENTES,
+       SUM(vf.VALORTOTAL)               AS BRUTO
+FROM EBD.GD_FATO_VENDAFATURAMENTO vf
+JOIN EBD.PCPRODUT pp ON pp.CODPROD = vf.CODIGOPRODUTO
+WHERE vf.DATAFATURAMENTO BETWEEN :dataIni AND :dataFim
+GROUP BY vf.CODIGOFILIAL, pp.CODMARCA
+ORDER BY BRUTO DESC
+```

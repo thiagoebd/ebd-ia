@@ -55,12 +55,15 @@ services:
   grafana:
     image: grafana/grafana:11.3.0
     ports:
-      - "127.0.0.1:3000:3000"   # acesso via SSH tunnel; nunca exposto direto
+      - "127.0.0.1:3001:3000"   # nginx (host) termina TLS em 10.10.3.108:3000 -> aqui
     environment:
       - GF_SECURITY_ADMIN_USER=admin
       - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD}
       - GF_USERS_ALLOW_SIGN_UP=false
       - GF_ANALYTICS_REPORTING_ENABLED=false
+      - GF_SERVER_ROOT_URL=https://agente.ebd.ia.br:3000/
+      - GF_SERVER_DOMAIN=agente.ebd.ia.br
+      - GF_SERVER_ENFORCE_DOMAIN=false
     volumes:
       - ./grafana/provisioning:/etc/grafana/provisioning:ro
       - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
