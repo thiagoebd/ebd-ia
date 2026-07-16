@@ -1759,3 +1759,173 @@ ORDER BY VALOR_TOTAL DESC NULLS LAST
 > `GD_FATO_ROTACLIENTE` é válida apenas para visão de carteira total (quem pertence
 > à rota de quem), sem recorte por dia específico.
 
+
+
+<!-- AUTO-APPEND PROP-F111E330 aprovado por Thiago -->
+
+
+## T-ROTA-01 v2 — Produtividade em Rota do Dia (single / multi-filial / regional)
+
+**Validado em:** 16/07/2026
+**Performance:** 32ms (vs 26s da PCMOVROTACLI — 85x mais rápida)
+**Substitui:** qualquer referência anterior a PCMOVROTACLI para rota do dia
+
+---
+
+### ⚠️ CICATRIZ CRÍTICA — PCROTACLI vs PCMOVROTACLI
+
+| | `PCROTACLI` ✅ USAR | `PCMOVROTACLI` ❌ NUNCA para rota do dia |
+|---|---|---|
+| Registros | **144.624** | 34.374.110 |
+| O que é | **Rota ATUAL vigente** (snapshot) | Histórico completo desde 2003 |
+| Clientes distintos | 78.023 | 240.494 (inclui inativos) |
+| RCAs distintos | 1.533 | 6.084 (inclui desligados) |
+| Performance | ⚡ **32ms** | 🐢 26s+ |
+| Tem DTPROXVISITA | ✅ | ✅ |
+| Tem PERIODICIDADE | ✅ | ✅ |
+| Tem DIASEMANA | ✅ | ✅ |
+
+**Regra:** `PCROTACLI` = cadastro ativo da rota. `PCMOVROTACLI` = log histórico de movimentos.
+Para qualquer análise operacional de rota do dia, SEMPRE usar `PCROTACLI`.
+
+---
+
+### Campos-chave de PCROTACLI
+
+| Campo | Tipo | Significado |
+|---|---|---|
+| `CODUSUR` | NUMBER | RCA dono da rota |
+| `CODCLI` | NUMBER | Cliente na rota |
+| `DIASEMANA` | VARCHAR2(10) | Dia fixo da visita (SEGUNDA, TERCA, QUARTA...) |
+| `PERIODICIDADE` | VARCHAR2(10) | 7=Semanal, 14=Quinzenal, 28=Mensal |
+| `DTPROXVISITA` | DATE | Próxima visita agendada |
+| `DTULTVISITAPREV` | DATE | Última visita prevista |
+| `VLMETAVENDA` | NUMBER | Meta de venda para o cliente |
+| `NUMSEMANA` | NUMBER | Semana do ciclo (para quinzenal/mensal) |
+
+> ⚠️ `PCROTACLI` NÃO tem `CODFILIAL` — filial vem via `JOIN PCUSUARI u ON u.CODUSUR = r.CODUSUR` → `u.CODFILIAL`
+
+---
+
+### Filtro canônico de "rota do dia"
+
+```sql
+WHERE UPPER(r.DIASEMANA) IN (d.NOME, REPLACE(d.NOME,'C','Ç'))  -- inconsistência TERCA/TERÇA
+  AND TRUNC(r.DTPROXVISITA) BETWEEN TRUNC(SYSDATE) - 7 AND TRUNC(SYSDATE)
+```
+
+A janela de -7 dias captura clientes que não foram visitados na semana anterior (periodicidade quinzenal/mensal que "atrasou").
+
+---
+
+### Template completo — Variante A: Single-filial
+
+```sql
+WITH dia_ref AS (
+    SELECT TRUNC(SYSDATE) AS DT,
+           CASE TO_CHAR(TRUNC(SYSDATE),'D')
+             WHEN '1' THEN 'DOMINGO' WHEN '2' THEN 'SEGUNDA'
+             WHEN '3' THEN 'TERCA'   WHEN '4' THEN 'QUARTA'
+             WHEN '5' THEN 'QUINTA'  WHEN '6' THEN 'SEXTA'
+             WHEN '7' THEN 'SABADO' END AS NOME
+    FROM DUAL
+),
+rota_hoje AS (
+    SELECT r.CODUSUR, r.CODCLI, r.PERIODICIDADE, r.DTPROXVISITA
+    FROM EBD.PCROTACLI r
+    JOIN EBD.PCUSUARI u ON u.CODUSUR = r.CODUSUR
+    , dia_ref d
+    WHERE u.CODFILIAL = :codFilial
+      AND UPPER(r.DIASEMANA) IN (d.NOME, REPLACE(d.NOME,'C','Ç'))
+      AND TRUNC(r.DTPROXVISITA) BETWEEN TRUNC(SYSDATE) - 7 AND TRUNC(SYSDATE)
+      AND (u.DTTERMINO IS NULL OR u.DTTERMINO >= TRUNC(SYSDATE))
+      AND u.CODUSUR NOT IN (SELECT COD_CADRCA FROM EBD.PCSUPERV WHERE COD_CADRCA IS NOT NULL)
+      AND UPPER(NVL(u.NOME,'')) NOT LIKE '%ORFAO%'
+      AND UPPER(NVL(u.NOME,'')) NOT LIKE '%VAGO%'
+      AND UPPER(NVL(u.NOME,'')) NOT LIKE '%ECOMMERCE%'
+      AND UPPER(NVL(u.NOME,'')) NOT LIKE '%GM-RM%'
+),
+pedidos_dia AS (
+    SELECT p.CODUSUR, p.CODCLI,
+           SUM(p.VLATEND) AS VL_PEDIDO
+    FROM EBD.PCPEDC p
+    , dia_ref d
+    WHERE p.CODFILIAL = :codFilial
+      AND TRUNC(p.DATA) = d.DT
+      AND p.POSICAO != 'C'
+      AND p.DTCANCEL IS NULL
+    GROUP BY p.CODUSUR, p.CODCLI
+)
+SELECT
+    rh.CODUSUR,
+    SUBSTR(NVL(u.NOME,'?'),1,35)                             AS VENDEDOR,
+    COUNT(DISTINCT rh.CODCLI)                                AS CLIENTES_ROTA,
+    COUNT(DISTINCT CASE WHEN pd.CODCLI IS NOT NULL
+                    AND rh.CODCLI = pd.CODCLI THEN rh.CODCLI END) AS POSITIV_ROTA,
+    ROUND(COUNT(DISTINCT CASE WHEN pd.CODCLI IS NOT NULL
+                    AND rh.CODCLI = pd.CODCLI THEN rh.CODCLI END)
+          / NULLIF(COUNT(DISTINCT rh.CODCLI),0) * 100, 1)   AS PCT_ROTA,
+    NVL(SUM(CASE WHEN rh.CODCLI = pd.CODCLI THEN pd.VL_PEDIDO END),0) AS VL_ROTA,
+    COUNT(DISTINCT CASE WHEN pd.CODCLI IS NOT NULL
+                    AND rh.CODCLI != pd.CODCLI THEN pd.CODCLI END) AS CLIENTES_FORA,
+    NVL(SUM(CASE WHEN rh.CODCLI != pd.CODCLI THEN pd.VL_PEDIDO END),0) AS VL_FORA,
+    NVL(SUM(pd.VL_PEDIDO),0)                                AS VL_TOTAL
+FROM rota_hoje rh
+JOIN EBD.PCUSUARI u ON u.CODUSUR = rh.CODUSUR
+LEFT JOIN pedidos_dia pd ON pd.CODUSUR = rh.CODUSUR
+GROUP BY rh.CODUSUR, u.NOME
+ORDER BY VL_TOTAL DESC NULLS LAST
+```
+
+---
+
+### Variante B: Multi-filial (lista)
+
+Substituir filtro de filial por:
+```sql
+WHERE u.CODFILIAL IN ('02','16')  -- ex: SP1
+```
+E adicionar `u.CODFILIAL`, `pf.FANTASIA` no SELECT + GROUP BY com JOIN PCFILIAL.
+
+---
+
+### Variante C: Regional completa
+
+```sql
+WHERE u.CODFILIAL IN ('15','18')  -- ex: SP2 = Guarulhos + SBC
+```
+Mesma estrutura da variante B.
+
+---
+
+### Resultado referência — EBD SBC (18) · 16/07/2026 (quinta)
+
+| Métrica | Valor |
+|---|---|
+| Clientes na rota hoje | 398 |
+| RCAs com rota | 37 |
+| Semanal (perio=7) | 251 |
+| Quinzenal (perio=14) | 147 |
+| Mensal (perio=28) | 0 |
+| Latência | **32ms** ⚡ |
+
+---
+
+### Anti-padrões a evitar
+
+```sql
+-- ❌ ERRADO: PCMOVROTACLI tem 34M linhas — lenta demais para uso operacional
+FROM EBD.PCMOVROTACLI r
+
+-- ❌ ERRADO: PCROTACLI não tem CODFILIAL — ORA-00904
+WHERE r.CODFILIAL = :codFilial
+
+-- ❌ ERRADO: sem janela de DTPROXVISITA pega rota de semanas futuras
+WHERE UPPER(r.DIASEMANA) = 'QUINTA'  -- sem filtro DTPROXVISITA
+
+-- ✅ CORRETO: filial via JOIN PCUSUARI
+JOIN EBD.PCUSUARI u ON u.CODUSUR = r.CODUSUR
+WHERE u.CODFILIAL = :codFilial
+  AND TRUNC(r.DTPROXVISITA) BETWEEN TRUNC(SYSDATE) - 7 AND TRUNC(SYSDATE)
+```
+
