@@ -1591,3 +1591,171 @@ WHERE vf.DATAFATURAMENTO BETWEEN :dataIni AND :dataFim
 GROUP BY vf.CODIGOFILIAL, pp.CODMARCA
 ORDER BY BRUTO DESC
 ```
+
+
+<!-- AUTO-APPEND PROP-492EAFAE aprovado por Thiago -->
+
+
+## T182 — Produtividade em Rota por RCA (PCMOVROTACLI) ✅ Validado 16/07/2026
+
+> Substitui o uso de `GD_FATO_ROTACLIENTE` para "rota do dia" quando se quer
+> respeitar periodicidade (7/14/28 dias). Validado em EBD MATRIZ (01) quarta 15/07/2026.
+
+### Por que PCMOVROTACLI e não GD_FATO_ROTACLIENTE
+
+| Fonte | Periodicidade | DTPROXVISITA | Resultado |
+|---|:---:|:---:|---|
+| `GD_FATO_ROTACLIENTE` | ❌ Não tem | ❌ Não tem | Inflado — inclui quinzenais/mensais que não são visitados hoje |
+| `PCMOVROTACLI` | ✅ 7/14/28 | ✅ Sim | Correto — só clientes cuja visita está agendada para o dia |
+
+### Estrutura de PCMOVROTACLI
+
+| Campo | Tipo | Significado |
+|---|---|---|
+| `CODUSUR` | NUMBER | RCA |
+| `CODCLI` | NUMBER | Cliente |
+| `DIASEMANA` | VARCHAR2 | Dia fixo da rota (SEGUNDA, TERCA, QUARTA...) |
+| `PERIODICIDADE` | NUMBER | 7=semanal, 14=quinzenal, 28=mensal |
+| `DTPROXVISITA` | DATE | Próxima visita agendada |
+
+> ⚠️ `DTPROXVISITA` avança automaticamente após a visita ser registrada.
+> Clientes com `DTPROXVISITA` no futuro distante = não foram visitados ainda.
+
+### Filtro correto para "rota de hoje"
+
+```sql
+-- Dia da semana atual (Oracle: 1=Dom, 2=Seg, ..., 5=Qui, ..., 7=Sab)
+WHERE UPPER(r.DIASEMANA) IN (
+    CASE TO_CHAR(:dtRef, 'D')
+      WHEN '2' THEN 'SEGUNDA'
+      WHEN '3' THEN 'TERCA'
+      WHEN '4' THEN 'QUARTA'
+      WHEN '5' THEN 'QUINTA'
+      WHEN '6' THEN 'SEXTA'
+      WHEN '7' THEN 'SABADO'
+    END,
+    CASE TO_CHAR(:dtRef, 'D')
+      WHEN '3' THEN 'TERÇA'
+      WHEN '7' THEN 'SÁBADO'
+      ELSE NULL
+    END
+)
+AND TRUNC(r.DTPROXVISITA) <= TRUNC(:dtRef)        -- visita deveria ocorrer hoje ou estava atrasada
+AND TRUNC(r.DTPROXVISITA) >= TRUNC(:dtRef) - 7    -- janela de 1 semana (evita histórico antigo)
+```
+
+> Cicatriz #40 (TERCA/TERÇA e SABADO/SÁBADO): usar sempre as 2 variantes com e sem acento.
+
+### T182 — Query completa: Produtividade em Rota por RCA, por filial
+
+```sql
+WITH dia_ref AS (
+    SELECT TRUNC(:dtRef) AS DT,
+           CASE TO_CHAR(TRUNC(:dtRef),'D')
+             WHEN '2' THEN 'SEGUNDA' WHEN '3' THEN 'TERCA'
+             WHEN '4' THEN 'QUARTA'  WHEN '5' THEN 'QUINTA'
+             WHEN '6' THEN 'SEXTA'   WHEN '7' THEN 'SABADO'
+           END AS NOME_DIA
+    FROM DUAL
+),
+rota_dia AS (
+    -- Clientes realmente agendados para :dtRef por periodicidade
+    SELECT r.CODUSUR, r.CODCLI
+    FROM EBD.PCMOVROTACLI r, dia_ref d
+    WHERE (UPPER(r.DIASEMANA) = d.NOME_DIA
+           OR UPPER(r.DIASEMANA) = REPLACE(d.NOME_DIA,'C','Ç'))
+      AND TRUNC(r.DTPROXVISITA) <= d.DT
+      AND TRUNC(r.DTPROXVISITA) >= d.DT - 7
+),
+pedidos_dia AS (
+    -- Pedidos digitados no dia (excluindo bonificações e cancelados)
+    SELECT p.NUMPED, p.CODUSUR, p.CODCLI, p.CODFILIAL,
+           NVL(p.VLATEND,0) AS VALOR,
+           CASE WHEN r.CODCLI IS NOT NULL THEN 1 ELSE 0 END AS NA_ROTA
+    FROM EBD.PCPEDC p
+    LEFT JOIN rota_dia r ON r.CODUSUR = p.CODUSUR AND r.CODCLI = p.CODCLI
+    WHERE TRUNC(p.DATA) = (SELECT DT FROM dia_ref)
+      AND p.POSICAO != 'C'
+      AND p.DTCANCEL IS NULL
+      AND p.CONDVENDA NOT IN (4,5,6,8,10,11,12,13,20,98,99)
+      AND p.CODFILIAL = :codFilial
+)
+SELECT
+    u.CODUSUR,
+    SUBSTR(NVL(u.NOME,'?'),1,40)           AS VENDEDOR,
+    COUNT(DISTINCT rt.CODCLI)              AS CLIENTES_ROTA,
+    -- Pedidos NA rota
+    COUNT(DISTINCT CASE WHEN pd.NA_ROTA=1 THEN pd.CODCLI END) AS POSIT_ROTA,
+    COUNT(DISTINCT CASE WHEN pd.NA_ROTA=1 THEN pd.NUMPED END) AS PEDS_ROTA,
+    NVL(SUM(CASE WHEN pd.NA_ROTA=1 THEN pd.VALOR END),0)      AS VALOR_ROTA,
+    -- Pedidos FORA da rota
+    COUNT(DISTINCT CASE WHEN pd.NA_ROTA=0 THEN pd.CODCLI END) AS POSIT_FORA,
+    COUNT(DISTINCT CASE WHEN pd.NA_ROTA=0 THEN pd.NUMPED END) AS PEDS_FORA,
+    NVL(SUM(CASE WHEN pd.NA_ROTA=0 THEN pd.VALOR END),0)      AS VALOR_FORA,
+    -- Total
+    COUNT(DISTINCT pd.NUMPED)              AS PEDS_TOTAL,
+    NVL(SUM(pd.VALOR),0)                  AS VALOR_TOTAL,
+    -- % positivação na rota
+    CASE WHEN COUNT(DISTINCT rt.CODCLI) > 0
+         THEN ROUND(COUNT(DISTINCT CASE WHEN pd.NA_ROTA=1 THEN pd.CODCLI END)
+                    / COUNT(DISTINCT rt.CODCLI) * 100, 1)
+         ELSE 0 END                        AS PCT_POSIT_ROTA
+FROM EBD.PCUSUARI u
+LEFT JOIN rota_dia rt  ON rt.CODUSUR = u.CODUSUR
+LEFT JOIN pedidos_dia pd ON pd.CODUSUR = u.CODUSUR
+WHERE u.CODFILIAL = :codFilial
+  AND (u.DTTERMINO IS NULL OR u.DTTERMINO >= TRUNC(SYSDATE))
+  AND u.CODUSUR NOT IN (
+      SELECT COD_CADRCA FROM EBD.PCSUPERV WHERE COD_CADRCA IS NOT NULL
+  )
+  AND UPPER(NVL(u.NOME,'')) NOT LIKE '%ORFAO%'
+  AND UPPER(NVL(u.NOME,'')) NOT LIKE '%VAGO%'
+  AND UPPER(NVL(u.NOME,'')) NOT LIKE '%ECOMMERCE%'
+  AND UPPER(NVL(u.NOME,'')) NOT LIKE '%GM-RM%'
+  AND UPPER(NVL(u.NOME,'')) NOT LIKE '%GERENTE%'
+GROUP BY u.CODUSUR, u.NOME
+ORDER BY VALOR_TOTAL DESC NULLS LAST
+```
+
+### Binds obrigatórios
+
+| Bind | Tipo | Exemplo |
+|---|---|---|
+| `:dtRef` | DATE | `TRUNC(SYSDATE)` (hoje) ou `TRUNC(SYSDATE)-1` (ontem) |
+| `:codFilial` | VARCHAR2 | `'01'` |
+
+### Variantes
+
+- **1 RCA específico:** adicionar `AND u.CODUSUR = :codUsur`
+- **Regional:** substituir `u.CODFILIAL = :codFilial` por `u.CODFILIAL IN ('05','14')`
+- **BR completo:** remover filtro de filial (atenção: query pesada, usar com max_rows)
+- **Ontem:** `:dtRef = TRUNC(SYSDATE) - 1`
+
+### Resultado de referência (quarta 15/07/2026 · EBD MATRIZ 01)
+
+| Métrica | Valor |
+|---|---|
+| RCAs com rota no dia | 123 |
+| Total pedidos | ~220 |
+| Maior positivação rota | FRANCISCO ROBERTO 76,2% |
+| Maior valor fora de rota | SHARLENY LADISLAU R$ 28.690 |
+
+### Comparativo ANTONIO KELVEN (1343) — antes vs depois
+
+| Métrica | GD_FATO_ROTACLIENTE (errado) | PCMOVROTACLI (correto) |
+|---|---:|---:|
+| Clientes na rota | 60 | 58 |
+| Valor NA rota | R$ 1.208 | R$ 13.456 |
+| Valor FORA da rota | R$ 12.879 | R$ 631 |
+
+> O dado anterior estava **invertido** porque `GD_FATO_ROTACLIENTE` não respeita
+> periodicidade — incluía todos os clientes de quarta, mesmo os quinzenais/mensais
+> que não eram visitados naquele dia.
+
+### Cicatriz associada
+
+> Nunca usar `GD_FATO_ROTACLIENTE` para "clientes da rota hoje" quando precisar
+> respeitar periodicidade. Usar sempre `PCMOVROTACLI` com filtro `DTPROXVISITA`.
+> `GD_FATO_ROTACLIENTE` é válida apenas para visão de carteira total (quem pertence
+> à rota de quem), sem recorte por dia específico.
+
