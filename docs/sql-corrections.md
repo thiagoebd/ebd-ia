@@ -1134,3 +1134,107 @@ Em **todas** as perguntas do tipo:
 - "Ranking de vendedores por visitas/pedidos/faturamento"
 - Qualquer contagem ou listagem de força de vendas
 
+
+
+<!-- AUTO-APPEND PROP-F1EF0E45 aprovado por Thiago -->
+
+
+## Cicatriz: Produtividade em Rota — pedidos NA rota vs FORA da rota (15/07/2026)
+
+### Problema detectado
+Ao exibir produtividade de RCAs em rota (15/07/2026, EBD MATRIZ filial 01), o valor
+total mostrado para ANTONIO KELVEN SOARES DA SILVA (1343) foi **R$ 1.208,30** — número
+incorreto. O valor real dos pedidos do dia era **R$ 14.152,77**.
+
+**Causa raiz:** o cruzamento considerou apenas pedidos cujos clientes estavam na rota
+planejada do dia (`GD_FATO_ROTACLIENTE + DIASEMANA`), ignorando pedidos digitados para
+clientes **fora da rota planejada**. O valor residual (R$ 1.208,30) era apenas a fatia
+de pedidos "dentro da rota", não o total real de produção do vendedor.
+
+### Regra de negócio corrigida
+
+> Em qualquer análise de produtividade de campo (rota, roteiro, visita, venda na rua),
+> o valor total de pedidos do RCA no dia é a **soma de TODOS os pedidos digitados**,
+> independente de o cliente estar ou não na rota planejada daquele dia.
+> A rota serve como **denominador de cobertura**, não como filtro de pedidos.
+
+### Colunas obrigatórias em relatórios de rota
+
+Todo relatório de produtividade em rota DEVE exibir as colunas abaixo separadas:
+
+| Coluna | Definição |
+|---|---|
+| `CLIENTES_ROTA` | Clientes planejados para o dia (GD_FATO_ROTACLIENTE + DIASEMANA) |
+| `POSITIVADOS_ROTA` | Clientes da rota que tiveram pedido hoje |
+| `PEDIDOS_ROTA` | Pedidos cujo cliente está na rota do dia |
+| `VALOR_ROTA` | Valor dos pedidos dentro da rota |
+| `PEDIDOS_FORA_ROTA` | Pedidos cujo cliente NÃO está na rota do dia |
+| `VALOR_FORA_ROTA` | Valor dos pedidos fora da rota |
+| `TOTAL_PEDIDOS` | `PEDIDOS_ROTA + PEDIDOS_FORA_ROTA` |
+| `VALOR_TOTAL` | `VALOR_ROTA + VALOR_FORA_ROTA` ← **este é o número correto de produção** |
+| `PCT_POSITIVACAO` | `POSITIVADOS_ROTA / CLIENTES_ROTA` |
+
+### Aplicação obrigatória
+
+Sempre que a pergunta envolver qualquer um desses termos:
+- "produtividade em rota", "produtividade de campo"
+- "pedidos em roteiro", "vendas na rua"
+- "RCAs em campo hoje", "resultado do dia do vendedor"
+- "cobertura de rota", "aproveitamento de rota"
+
+### SQL base (lógica correta)
+
+```sql
+WITH rota_dia AS (
+    -- clientes planejados para o dia da semana atual
+    SELECT r.CODIGORCA, r.CODIGOCLIENTE
+    FROM EBD.GD_FATO_ROTACLIENTE r
+    JOIN EBD.GD_DIM_RCA dr ON dr.CODIGORCA = r.CODIGORCA
+    JOIN dia_ref d ON UPPER(r.DIASEMANA) IN (d.NOME, REPLACE(d.NOME,'C','Ç'))
+    JOIN EBD.PCUSUARI u ON u.CODUSUR = r.CODIGORCA
+    WHERE u.CODFILIAL = :codFilial
+      AND UPPER(NVL(dr.RCA,'')) NOT LIKE 'ORFAO%'
+      AND UPPER(NVL(dr.RCA,'')) NOT LIKE 'RCA VAGO%'
+),
+pedidos_dia AS (
+    SELECT p.CODUSUR,
+           p.CODCLI,
+           p.NUMPED,
+           p.VLATEND,
+           CASE WHEN r.CODIGOCLIENTE IS NOT NULL THEN 1 ELSE 0 END AS NA_ROTA
+    FROM EBD.PCPEDC p
+    LEFT JOIN rota_dia r ON r.CODIGORCA = p.CODUSUR AND r.CODIGOCLIENTE = p.CODCLI
+    WHERE p.CODFILIAL = :codFilial
+      AND TRUNC(p.DATA) = TRUNC(SYSDATE)
+      AND p.POSICAO != 'C'
+      AND p.DTCANCEL IS NULL
+      AND p.CONDVENDA NOT IN (4,5,6,8,10,11,12,13,20,98,99)
+)
+SELECT
+    pd.CODUSUR,
+    SUBSTR(NVL(u.NOME,'?'),1,40)               AS VENDEDOR,
+    COUNT(DISTINCT rd.CODIGOCLIENTE)            AS CLIENTES_ROTA,
+    COUNT(DISTINCT CASE WHEN pd.NA_ROTA=1 THEN pd.CODCLI END) AS POSITIVADOS_ROTA,
+    SUM(CASE WHEN pd.NA_ROTA=1 THEN 1 ELSE 0 END) AS PEDIDOS_ROTA,
+    SUM(CASE WHEN pd.NA_ROTA=1 THEN pd.VLATEND ELSE 0 END) AS VALOR_ROTA,
+    SUM(CASE WHEN pd.NA_ROTA=0 THEN 1 ELSE 0 END) AS PEDIDOS_FORA_ROTA,
+    SUM(CASE WHEN pd.NA_ROTA=0 THEN pd.VLATEND ELSE 0 END) AS VALOR_FORA_ROTA,
+    COUNT(pd.NUMPED)                            AS TOTAL_PEDIDOS,
+    SUM(pd.VLATEND)                             AS VALOR_TOTAL,
+    ROUND(COUNT(DISTINCT CASE WHEN pd.NA_ROTA=1 THEN pd.CODCLI END)
+          / NULLIF(COUNT(DISTINCT rd.CODIGOCLIENTE),0)*100,1) AS PCT_POSITIVACAO
+FROM pedidos_dia pd
+JOIN EBD.PCUSUARI u ON u.CODUSUR = pd.CODUSUR
+LEFT JOIN rota_dia rd ON rd.CODIGORCA = pd.CODUSUR
+GROUP BY pd.CODUSUR, u.NOME
+ORDER BY VALOR_TOTAL DESC
+```
+
+### Anti-padrão a evitar
+
+❌ **NUNCA** usar apenas `SUM(VLATEND) WHERE CODCLI IN (clientes da rota)` como valor total
+do RCA — isso corta pedidos fora da rota e gera número errado (caso ANTONIO KELVEN: R$ 1.208
+em vez de R$ 14.152).
+
+❌ **NUNCA** apresentar `VALOR_ROTA` como se fosse a produção total do vendedor.
+
