@@ -1,8 +1,8 @@
 {
- "generated_at": "2026-07-20T13:44:53.534084+00:00",
+ "generated_at": "2026-07-20T13:52:23.439756+00:00",
  "source": "docs/query_templates.md",
- "source_sha256": "e819481013b7b2ff",
- "count": 47,
+ "source_sha256": "2c0d6e6f9c85831c",
+ "count": 50,
  "templates": [
   {
    "code": "T100",
@@ -585,6 +585,45 @@
    "latency_note": null,
    "binds": [],
    "sql": "SELECT dr.SUPERVISOR,\n       dr.GERENTE,\n       COUNT(DISTINCT dr.CODIGORCA) AS QTD_RCAS,\n       SUM(v.VLATEND)               AS FATURAMENTO\nFROM EBD.VIEW_VENDAS_RESUMO_FATURAMENTO v\nJOIN EBD.GD_DIM_RCA dr ON dr.CODIGORCA = v.CODUSUR\nWHERE v.DTSAIDA BETWEEN TRUNC(SYSDATE,'MM') AND SYSDATE\n  AND dr.SUPERVISOR IS NOT NULL\nGROUP BY dr.SUPERVISOR, dr.GERENTE\nORDER BY FATURAMENTO DESC"
+  },
+  {
+   "code": "T250",
+   "version": null,
+   "title": "Localizar fornecedor por nome (ok=5+, <60ms)",
+   "familia": "fornecedores",
+   "validated": false,
+   "validation_note": null,
+   "latency_note": null,
+   "binds": [
+    "nome"
+   ],
+   "sql": "SELECT CODFORNEC,\n       FORNECEDOR,\n       CODFORNECPRINC,\n       NVL(CODFORNECPRINC, CODFORNEC) AS COD_RAIZ\nFROM EBD.PCFORNEC\nWHERE UPPER(FORNECEDOR) LIKE '%' || UPPER(:nome) || '%'\nORDER BY CODFORNEC\nFETCH FIRST 50 ROWS ONLY"
+  },
+  {
+   "code": "T251",
+   "version": null,
+   "title": "Faturamento por fornecedor raiz no mês (padrão rápido — resolve o timeout)",
+   "familia": "fornecedores",
+   "validated": false,
+   "validation_note": null,
+   "latency_note": null,
+   "binds": [
+    "codFornecRaiz"
+   ],
+   "sql": "WITH prods_forn AS (\n    SELECT p.CODPROD\n    FROM EBD.PCPRODUT p\n    JOIN EBD.PCFORNEC f ON f.CODFORNEC = p.CODFORNEC\n    WHERE NVL(f.CODFORNECPRINC, f.CODFORNEC) = :codFornecRaiz\n)\nSELECT v.CODFILIAL,\n       SUBSTR(NVL(pf.FANTASIA,'?'),1,30) AS FILIAL,\n       SUM(v.VLATEND)                    AS FATURAMENTO\nFROM EBD.VIEW_VENDAS_RESUMO_FATURAMENTO v\nJOIN prods_forn pr ON pr.CODPROD = v.CODPROD\nLEFT JOIN EBD.PCFILIAL pf ON pf.CODIGO = v.CODFILIAL\nWHERE v.DTSAIDA BETWEEN TRUNC(SYSDATE,'MM') AND SYSDATE\nGROUP BY v.CODFILIAL, SUBSTR(NVL(pf.FANTASIA,'?'),1,30)\nORDER BY FATURAMENTO DESC"
+  },
+  {
+   "code": "T252",
+   "version": null,
+   "title": "Ruptura por fornecedor raiz no mês (padrão ok=52, corrigido)",
+   "familia": "fornecedores",
+   "validated": false,
+   "validation_note": null,
+   "latency_note": null,
+   "binds": [
+    "codFornecRaiz"
+   ],
+   "sql": "WITH prods_forn AS (\n    SELECT p.CODPROD\n    FROM EBD.PCPRODUT p\n    JOIN EBD.PCFORNEC f ON f.CODFORNEC = p.CODFORNEC\n    WHERE NVL(f.CODFORNECPRINC, f.CODFORNEC) = :codFornecRaiz\n)\nSELECT ft.CODPROD,\n       SUBSTR(NVL(pr.DESCRICAO,'?'),1,50) AS PRODUTO,\n       SUM(ft.QT * ft.PVENDA)             AS VL_RUPTURA\nFROM EBD.PCFALTA ft\nJOIN prods_forn pf2 ON pf2.CODPROD = ft.CODPROD\nJOIN EBD.PCPRODUT pr ON pr.CODPROD = ft.CODPROD\nWHERE ft.DATA BETWEEN TRUNC(SYSDATE,'MM') AND SYSDATE\nGROUP BY ft.CODPROD, SUBSTR(NVL(pr.DESCRICAO,'?'),1,50)\nORDER BY VL_RUPTURA DESC\nFETCH FIRST 30 ROWS ONLY"
   }
  ]
 }

@@ -2199,3 +2199,74 @@ JOIN EBD.PCFILIAL pf ON pf.CODIGO = r.CODFILIAL_COMERCIAL
 GROUP BY r.CODFILIAL_COMERCIAL, SUBSTR(NVL(pf.FANTASIA,'?'),1,30)
 ORDER BY VL_RUPTURA DESC
 ```
+
+# Parte 17 — Família Fornecedores (T250-T252) — 20/07/2026
+Origem: mineração (133 queries PCFORNEC, padrão rápido ok=6 a 286ms vs lentos de 80s por retry).
+Fecha a família fornecedores e mata o risco de timeout (queries batiam 71-80s no teto de 85s).
+
+**Cicatriz #61 (fornecedor raiz):** o "fornecedor principal/raiz" é `NVL(CODFORNECPRINC, CODFORNEC)`
+— quando o fornecedor não tem principal, ele é o próprio. PCFORNEC colunas validadas:
+CODFORNEC, FORNECEDOR, CODFORNECPRINC (só essas três; nome do fornecedor = FORNECEDOR).
+
+**Cicatriz #62 (CAUSA do timeout de 80s):** a VIEW_VENDAS_RESUMO_FATURAMENTO NÃO tem CODEMITENTE
+nem DTSAIDA_STR (ORA-00904) — o modelo inventava essas colunas, errava e retentava, e cada retry
+varria a tabela (80s). Faturamento por fornecedor: filtrar o COD_RAIZ na PCFORNEC PRIMEIRO
+(subconjunto pequeno), depois cruzar produtos→view. Nunca filtrar emitente na view.
+
+**Cicatriz #63 (achar fornecedor por nome):** busca de fornecedor é rápida (<60ms) por
+`UPPER(FORNECEDOR) LIKE '%NOME%'` direto na PCFORNEC — não precisa de JOIN. Sempre resolver o
+código do fornecedor ANTES de montar a query de vendas (evita o modelo chutar código).
+
+## T250 — Localizar fornecedor por nome (ok=5+, <60ms)
+Pergunta: "qual o código do fornecedor X?" / "existe fornecedor chamado Y?"
+```sql
+SELECT CODFORNEC,
+       FORNECEDOR,
+       CODFORNECPRINC,
+       NVL(CODFORNECPRINC, CODFORNEC) AS COD_RAIZ
+FROM EBD.PCFORNEC
+WHERE UPPER(FORNECEDOR) LIKE '%' || UPPER(:nome) || '%'
+ORDER BY CODFORNEC
+FETCH FIRST 50 ROWS ONLY
+```
+
+## T251 — Faturamento por fornecedor raiz no mês (padrão rápido — resolve o timeout)
+Pergunta: "quanto vendemos do fornecedor X este mês?" · filtra fornecedor ANTES de cruzar
+```sql
+WITH prods_forn AS (
+    SELECT p.CODPROD
+    FROM EBD.PCPRODUT p
+    JOIN EBD.PCFORNEC f ON f.CODFORNEC = p.CODFORNEC
+    WHERE NVL(f.CODFORNECPRINC, f.CODFORNEC) = :codFornecRaiz
+)
+SELECT v.CODFILIAL,
+       SUBSTR(NVL(pf.FANTASIA,'?'),1,30) AS FILIAL,
+       SUM(v.VLATEND)                    AS FATURAMENTO
+FROM EBD.VIEW_VENDAS_RESUMO_FATURAMENTO v
+JOIN prods_forn pr ON pr.CODPROD = v.CODPROD
+LEFT JOIN EBD.PCFILIAL pf ON pf.CODIGO = v.CODFILIAL
+WHERE v.DTSAIDA BETWEEN TRUNC(SYSDATE,'MM') AND SYSDATE
+GROUP BY v.CODFILIAL, SUBSTR(NVL(pf.FANTASIA,'?'),1,30)
+ORDER BY FATURAMENTO DESC
+```
+
+## T252 — Ruptura por fornecedor raiz no mês (padrão ok=52, corrigido)
+Pergunta: "qual a ruptura do fornecedor X?" · fornecedor raiz + PCFALTA
+```sql
+WITH prods_forn AS (
+    SELECT p.CODPROD
+    FROM EBD.PCPRODUT p
+    JOIN EBD.PCFORNEC f ON f.CODFORNEC = p.CODFORNEC
+    WHERE NVL(f.CODFORNECPRINC, f.CODFORNEC) = :codFornecRaiz
+)
+SELECT ft.CODPROD,
+       SUBSTR(NVL(pr.DESCRICAO,'?'),1,50) AS PRODUTO,
+       SUM(ft.QT * ft.PVENDA)             AS VL_RUPTURA
+FROM EBD.PCFALTA ft
+JOIN prods_forn pf2 ON pf2.CODPROD = ft.CODPROD
+JOIN EBD.PCPRODUT pr ON pr.CODPROD = ft.CODPROD
+WHERE ft.DATA BETWEEN TRUNC(SYSDATE,'MM') AND SYSDATE
+GROUP BY ft.CODPROD, SUBSTR(NVL(pr.DESCRICAO,'?'),1,50)
+ORDER BY VL_RUPTURA DESC
+FETCH FIRST 30 ROWS ONLY
+```
