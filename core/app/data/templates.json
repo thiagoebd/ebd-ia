@@ -1,8 +1,8 @@
 {
- "generated_at": "2026-07-20T14:26:40.533956+00:00",
+ "generated_at": "2026-07-20T14:42:15.565692+00:00",
  "source": "docs/query_templates.md",
- "source_sha256": "03c99127ff5aca70",
- "count": 53,
+ "source_sha256": "1878ca003bc90a28",
+ "count": 56,
  "templates": [
   {
    "code": "T100",
@@ -661,6 +661,45 @@
    "latency_note": null,
    "binds": [],
    "sql": "SELECT u.CODFILIAL,\n       SUBSTR(NVL(pf.FANTASIA,'?'),1,30) AS FILIAL,\n       COUNT(*)                          AS TOTAL_CLIENTES,\n       COUNT(DISTINCT c.CODUSUR1)        AS QTD_VENDEDORES,\n       SUM(CASE WHEN c.DTULTCOMP >= TRUNC(SYSDATE) - 90 THEN 1 ELSE 0 END) AS ATIVOS_90D\nFROM EBD.PCCLIENT c\nJOIN EBD.PCUSUARI u ON u.CODUSUR = c.CODUSUR1\nLEFT JOIN EBD.PCFILIAL pf ON pf.CODIGO = u.CODFILIAL\nWHERE c.DTEXCLUSAO IS NULL\nGROUP BY u.CODFILIAL, SUBSTR(NVL(pf.FANTASIA,'?'),1,30)\nORDER BY TOTAL_CLIENTES DESC"
+  },
+  {
+   "code": "T270",
+   "version": null,
+   "title": "Rota de hoje por vendedor (quem visitar hoje · DTPROXVISITA)",
+   "familia": "equipe_campo",
+   "validated": false,
+   "validation_note": null,
+   "latency_note": null,
+   "binds": [
+    "codFilial"
+   ],
+   "sql": "SELECT u.CODFILIAL,\n       SUBSTR(NVL(u.NOME,'?'),1,30)      AS VENDEDOR,\n       r.SEQUENCIA,\n       r.CODCLI,\n       SUBSTR(NVL(c.CLIENTE,'?'),1,35)   AS CLIENTE,\n       r.PERIODICIDADE,\n       r.DTPROXVISITA\nFROM EBD.PCROTACLI r\nJOIN EBD.PCUSUARI u ON u.CODUSUR = r.CODUSUR\nLEFT JOIN EBD.PCCLIENT c ON c.CODCLI = r.CODCLI\nWHERE r.DTPROXVISITA = TRUNC(SYSDATE)\n  AND u.CODFILIAL = :codFilial\n  AND (r.DTFINAL IS NULL OR r.DTFINAL >= TRUNC(SYSDATE))\nORDER BY u.NOME, r.SEQUENCIA"
+  },
+  {
+   "code": "T271",
+   "version": null,
+   "title": "Tamanho da rota por vendedor na filial (carteira de rota)",
+   "familia": "equipe_campo",
+   "validated": false,
+   "validation_note": null,
+   "latency_note": null,
+   "binds": [
+    "codFilial"
+   ],
+   "sql": "SELECT u.CODFILIAL,\n       SUBSTR(NVL(u.NOME,'?'),1,30)                                   AS VENDEDOR,\n       COUNT(*)                                                       AS CLIENTES_ROTA,\n       SUM(CASE WHEN r.PERIODICIDADE = 7  THEN 1 ELSE 0 END)          AS SEMANAIS,\n       SUM(CASE WHEN r.PERIODICIDADE = 14 THEN 1 ELSE 0 END)          AS QUINZENAIS\nFROM EBD.PCROTACLI r\nJOIN EBD.PCUSUARI u ON u.CODUSUR = r.CODUSUR\nWHERE u.CODFILIAL = :codFilial\n  AND (r.DTFINAL IS NULL OR r.DTFINAL >= TRUNC(SYSDATE))\nGROUP BY u.CODFILIAL, SUBSTR(NVL(u.NOME,'?'),1,30)\nORDER BY CLIENTES_ROTA DESC"
+  },
+  {
+   "code": "T272",
+   "version": null,
+   "title": "Rota da semana por dia (distribuição de visitas)",
+   "familia": "equipe_campo",
+   "validated": false,
+   "validation_note": null,
+   "latency_note": null,
+   "binds": [
+    "codFilial"
+   ],
+   "sql": "SELECT r.DIASEMANA,\n       COUNT(*)                    AS CLIENTES,\n       COUNT(DISTINCT r.CODUSUR)   AS VENDEDORES\nFROM EBD.PCROTACLI r\nJOIN EBD.PCUSUARI u ON u.CODUSUR = r.CODUSUR\nWHERE u.CODFILIAL = :codFilial\n  AND (r.DTFINAL IS NULL OR r.DTFINAL >= TRUNC(SYSDATE))\nGROUP BY r.DIASEMANA\nORDER BY CLIENTES DESC"
   }
  ]
 }

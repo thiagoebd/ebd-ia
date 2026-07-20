@@ -2338,3 +2338,75 @@ WHERE c.DTEXCLUSAO IS NULL
 GROUP BY u.CODFILIAL, SUBSTR(NVL(pf.FANTASIA,'?'),1,30)
 ORDER BY TOTAL_CLIENTES DESC
 ```
+
+# Parte 19 — Rota de Visitas (T270-T272) — 20/07/2026
+Origem: schema completo da PCROTACLI provado (30 colunas, exemplos reais). Fecha o 3º sentido
+de "carteira" (rota) e DESCARTA a GD_FATO_ROTACLIENTE que o modelo vinha usando errado.
+
+**Cicatriz #67 (TABELA DE ROTA — descartar as erradas):** a rota vigente é PCROTACLI (144k
+linhas, snapshot atual, alimentada pela rotina 354 e atualizada pela 820 na madrugada).
+- USAR: PCROTACLI. Colunas: CODUSUR (RCA), CODCLI (cliente), DIASEMANA (texto),
+  SEQUENCIA (ordem na rota), PERIODICIDADE (7=semanal, 14=quinzenal), DTPROXVISITA (data
+  da próxima visita — a chave), DTFINAL (2999-12-31 = rota ativa sem prazo), DIAFIXO (S/N).
+- NÃO USAR GD_FATO_ROTACLIENTE: só tem CODIGORCA/CODIGOCLIENTE/DIASEMANA, dá resultado pobre
+  e frequentemente ZERO (foi o que fez a análise de rota falhar antes).
+- NUNCA USAR PCMOVROTACLI: 34M linhas, histórico desde 2003, 26s só para COUNT (timeout).
+
+**Cicatriz #68 (rota de HOJE — DTPROXVISITA é mais preciso que DIASEMANA):** para "quem visitar
+hoje", filtrar por DTPROXVISITA = TRUNC(SYSDATE), NÃO por DIASEMANA. Motivo: clientes quinzenais
+(PERIODICIDADE=14) só devem ser visitados em semanas específicas — filtrar por DIASEMANA os
+traria toda semana (errado). DTPROXVISITA já respeita a periodicidade. Rota ativa: DTFINAL futura
+(inclui 2999-12-31). PCROTACLI NÃO tem CODFILIAL — filial vem do RCA (JOIN PCUSUARI por CODUSUR).
+
+**Cicatriz #69 (DIASEMANA é texto acentuado):** DIASEMANA vem como texto em maiúsculas
+(SEGUNDA, TERÇA, QUARTA, QUINTA, SEXTA, SÁBADO) — TERÇA e SÁBADO têm acento. Comparar com
+cuidado (UPPER + acento) ou preferir DTPROXVISITA que é data e não sofre disso.
+
+## T270 — Rota de hoje por vendedor (quem visitar hoje · DTPROXVISITA)
+Pergunta: "rota de hoje da filial X" / "quem o vendedor Y visita hoje"
+```sql
+SELECT u.CODFILIAL,
+       SUBSTR(NVL(u.NOME,'?'),1,30)      AS VENDEDOR,
+       r.SEQUENCIA,
+       r.CODCLI,
+       SUBSTR(NVL(c.CLIENTE,'?'),1,35)   AS CLIENTE,
+       r.PERIODICIDADE,
+       r.DTPROXVISITA
+FROM EBD.PCROTACLI r
+JOIN EBD.PCUSUARI u ON u.CODUSUR = r.CODUSUR
+LEFT JOIN EBD.PCCLIENT c ON c.CODCLI = r.CODCLI
+WHERE r.DTPROXVISITA = TRUNC(SYSDATE)
+  AND u.CODFILIAL = :codFilial
+  AND (r.DTFINAL IS NULL OR r.DTFINAL >= TRUNC(SYSDATE))
+ORDER BY u.NOME, r.SEQUENCIA
+```
+
+## T271 — Tamanho da rota por vendedor na filial (carteira de rota)
+Pergunta: "quantos clientes cada vendedor tem na rota" / "carteira de rota da filial X"
+```sql
+SELECT u.CODFILIAL,
+       SUBSTR(NVL(u.NOME,'?'),1,30)                                   AS VENDEDOR,
+       COUNT(*)                                                       AS CLIENTES_ROTA,
+       SUM(CASE WHEN r.PERIODICIDADE = 7  THEN 1 ELSE 0 END)          AS SEMANAIS,
+       SUM(CASE WHEN r.PERIODICIDADE = 14 THEN 1 ELSE 0 END)          AS QUINZENAIS
+FROM EBD.PCROTACLI r
+JOIN EBD.PCUSUARI u ON u.CODUSUR = r.CODUSUR
+WHERE u.CODFILIAL = :codFilial
+  AND (r.DTFINAL IS NULL OR r.DTFINAL >= TRUNC(SYSDATE))
+GROUP BY u.CODFILIAL, SUBSTR(NVL(u.NOME,'?'),1,30)
+ORDER BY CLIENTES_ROTA DESC
+```
+
+## T272 — Rota da semana por dia (distribuição de visitas)
+Pergunta: "como está distribuída a rota da semana na filial X" / "visitas por dia"
+```sql
+SELECT r.DIASEMANA,
+       COUNT(*)                    AS CLIENTES,
+       COUNT(DISTINCT r.CODUSUR)   AS VENDEDORES
+FROM EBD.PCROTACLI r
+JOIN EBD.PCUSUARI u ON u.CODUSUR = r.CODUSUR
+WHERE u.CODFILIAL = :codFilial
+  AND (r.DTFINAL IS NULL OR r.DTFINAL >= TRUNC(SYSDATE))
+GROUP BY r.DIASEMANA
+ORDER BY CLIENTES DESC
+```
