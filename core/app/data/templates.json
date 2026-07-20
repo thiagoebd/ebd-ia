@@ -1,8 +1,8 @@
 {
- "generated_at": "2026-07-20T13:52:23.439756+00:00",
+ "generated_at": "2026-07-20T14:26:40.533956+00:00",
  "source": "docs/query_templates.md",
- "source_sha256": "2c0d6e6f9c85831c",
- "count": 50,
+ "source_sha256": "03c99127ff5aca70",
+ "count": 53,
  "templates": [
   {
    "code": "T100",
@@ -624,6 +624,43 @@
     "codFornecRaiz"
    ],
    "sql": "WITH prods_forn AS (\n    SELECT p.CODPROD\n    FROM EBD.PCPRODUT p\n    JOIN EBD.PCFORNEC f ON f.CODFORNEC = p.CODFORNEC\n    WHERE NVL(f.CODFORNECPRINC, f.CODFORNEC) = :codFornecRaiz\n)\nSELECT ft.CODPROD,\n       SUBSTR(NVL(pr.DESCRICAO,'?'),1,50) AS PRODUTO,\n       SUM(ft.QT * ft.PVENDA)             AS VL_RUPTURA\nFROM EBD.PCFALTA ft\nJOIN prods_forn pf2 ON pf2.CODPROD = ft.CODPROD\nJOIN EBD.PCPRODUT pr ON pr.CODPROD = ft.CODPROD\nWHERE ft.DATA BETWEEN TRUNC(SYSDATE,'MM') AND SYSDATE\nGROUP BY ft.CODPROD, SUBSTR(NVL(pr.DESCRICAO,'?'),1,50)\nORDER BY VL_RUPTURA DESC\nFETCH FIRST 30 ROWS ONLY"
+  },
+  {
+   "code": "T260",
+   "version": null,
+   "title": "Carteira de clientes por vendedor (critério cadastral · validado no BI)",
+   "familia": "equipe_campo",
+   "validated": false,
+   "validation_note": null,
+   "latency_note": null,
+   "binds": [
+    "codFilial"
+   ],
+   "sql": "SELECT u.NOME                                                    AS VENDEDOR,\n       COUNT(*)                                                  AS TOTAL,\n       SUM(CASE WHEN c.DTEXCLUSAO IS NULL THEN 1 ELSE 0 END)     AS ATIVOS_CADASTRO,\n       SUM(CASE WHEN c.DTEXCLUSAO IS NOT NULL THEN 1 ELSE 0 END) AS EXCLUIDOS\nFROM EBD.PCCLIENT c\nJOIN EBD.PCUSUARI u ON u.CODUSUR = c.CODUSUR1\nWHERE u.CODFILIAL = :codFilial\nGROUP BY u.NOME\nORDER BY TOTAL DESC"
+  },
+  {
+   "code": "T261",
+   "version": null,
+   "title": "Carteira de clientes por vendedor (critério COMERCIAL · 90 dias sem compra)",
+   "familia": "equipe_campo",
+   "validated": false,
+   "validation_note": null,
+   "latency_note": null,
+   "binds": [
+    "codFilial"
+   ],
+   "sql": "SELECT u.NOME AS VENDEDOR,\n       COUNT(*) AS TOTAL,\n       SUM(CASE WHEN c.DTULTCOMP >= TRUNC(SYSDATE) - 90 THEN 1 ELSE 0 END) AS ATIVOS_90D,\n       SUM(CASE WHEN c.DTULTCOMP <  TRUNC(SYSDATE) - 90 OR c.DTULTCOMP IS NULL THEN 1 ELSE 0 END) AS INATIVOS_90D\nFROM EBD.PCCLIENT c\nJOIN EBD.PCUSUARI u ON u.CODUSUR = c.CODUSUR1\nWHERE u.CODFILIAL = :codFilial\n  AND c.DTEXCLUSAO IS NULL\nGROUP BY u.NOME\nORDER BY ATIVOS_90D DESC"
+  },
+  {
+   "code": "T262",
+   "version": null,
+   "title": "Total de clientes da carteira por filial (resumo)",
+   "familia": "inadimplencia",
+   "validated": false,
+   "validation_note": null,
+   "latency_note": null,
+   "binds": [],
+   "sql": "SELECT u.CODFILIAL,\n       SUBSTR(NVL(pf.FANTASIA,'?'),1,30) AS FILIAL,\n       COUNT(*)                          AS TOTAL_CLIENTES,\n       COUNT(DISTINCT c.CODUSUR1)        AS QTD_VENDEDORES,\n       SUM(CASE WHEN c.DTULTCOMP >= TRUNC(SYSDATE) - 90 THEN 1 ELSE 0 END) AS ATIVOS_90D\nFROM EBD.PCCLIENT c\nJOIN EBD.PCUSUARI u ON u.CODUSUR = c.CODUSUR1\nLEFT JOIN EBD.PCFILIAL pf ON pf.CODIGO = u.CODFILIAL\nWHERE c.DTEXCLUSAO IS NULL\nGROUP BY u.CODFILIAL, SUBSTR(NVL(pf.FANTASIA,'?'),1,30)\nORDER BY TOTAL_CLIENTES DESC"
   }
  ]
 }

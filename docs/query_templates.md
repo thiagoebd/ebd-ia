@@ -2270,3 +2270,71 @@ GROUP BY ft.CODPROD, SUBSTR(NVL(pr.DESCRICAO,'?'),1,50)
 ORDER BY VL_RUPTURA DESC
 FETCH FIRST 30 ROWS ONLY
 ```
+
+# Parte 18 — Carteira de Clientes (T260-T262) — 20/07/2026
+Origem: validado em produção (bateu o BI: SBC 2.885 clientes, Maurilio 203, Karyn 145).
+Fecha a família carteira de CLIENTES — conceito distinto de carteira de PEDIDOS (T220).
+
+**Cicatriz #64 (DESAMBIGUAÇÃO — "carteira" tem 3 sentidos):** antes de responder "carteira",
+distinguir: (1) CARTEIRA DE PEDIDOS = posição de pedidos em aberto por status (T220, PCPEDC —
+Liberado/Montado/Bloqueado); (2) CARTEIRA DE CLIENTES = clientes vinculados ao vendedor (T260,
+PCCLIENT); (3) ROTA = quais clientes o RCA visita e quando (PCROTACLI — snapshot vigente, ainda
+sem template). Se a pergunta for ambígua, PERGUNTAR qual das três.
+
+**Cicatriz #65 (vendedor e filial do cliente):** na PCCLIENT o vendedor dono do cliente é
+CODUSUR1 (validado; existem também CODUSUR2/3 secundários). PCCLIENT NÃO tem CODFILIAL direta —
+a filial do cliente vem pela filial do vendedor (JOIN PCUSUARI u ON u.CODUSUR = c.CODUSUR1,
+filtra por u.CODFILIAL) OU por c.CODFILIALNF (filial da NF). Colunas validadas: CODCLI, CLIENTE
+(nome), CODUSUR1, CODFILIALNF, DTEXCLUSAO, DTULTCOMP, CODATV1, DTCADASTRO. NÃO EXISTEM: NOME
+(é CLIENTE), CODFILIAL, CIDADE, CGC.
+
+**Cicatriz #66 (DOIS critérios de "ativo" — dão números diferentes):**
+- CADASTRAL: `DTEXCLUSAO IS NULL` = cliente não excluído do sistema (quase todos ativos).
+- COMERCIAL: 90 dias sem compra (GD_DIM_CLIENTE.STATUS) = cliente que parou de comprar.
+Ex. SBC: cadastral 2.885 ativos/0 inativos vs comercial 2.619 ativos/266 inativos.
+Diretor perguntando "clientes ativos" geralmente quer o COMERCIAL. Na dúvida, perguntar.
+
+## T260 — Carteira de clientes por vendedor (critério cadastral · validado no BI)
+Pergunta: "carteira de clientes por vendedor da filial X" / "quantos clientes cada RCA tem"
+```sql
+SELECT u.NOME                                                    AS VENDEDOR,
+       COUNT(*)                                                  AS TOTAL,
+       SUM(CASE WHEN c.DTEXCLUSAO IS NULL THEN 1 ELSE 0 END)     AS ATIVOS_CADASTRO,
+       SUM(CASE WHEN c.DTEXCLUSAO IS NOT NULL THEN 1 ELSE 0 END) AS EXCLUIDOS
+FROM EBD.PCCLIENT c
+JOIN EBD.PCUSUARI u ON u.CODUSUR = c.CODUSUR1
+WHERE u.CODFILIAL = :codFilial
+GROUP BY u.NOME
+ORDER BY TOTAL DESC
+```
+
+## T261 — Carteira de clientes por vendedor (critério COMERCIAL · 90 dias sem compra)
+Pergunta: "clientes ativos por vendedor" (ativo = comprou nos últimos 90 dias)
+```sql
+SELECT u.NOME AS VENDEDOR,
+       COUNT(*) AS TOTAL,
+       SUM(CASE WHEN c.DTULTCOMP >= TRUNC(SYSDATE) - 90 THEN 1 ELSE 0 END) AS ATIVOS_90D,
+       SUM(CASE WHEN c.DTULTCOMP <  TRUNC(SYSDATE) - 90 OR c.DTULTCOMP IS NULL THEN 1 ELSE 0 END) AS INATIVOS_90D
+FROM EBD.PCCLIENT c
+JOIN EBD.PCUSUARI u ON u.CODUSUR = c.CODUSUR1
+WHERE u.CODFILIAL = :codFilial
+  AND c.DTEXCLUSAO IS NULL
+GROUP BY u.NOME
+ORDER BY ATIVOS_90D DESC
+```
+
+## T262 — Total de clientes da carteira por filial (resumo)
+Pergunta: "quantos clientes tem a filial X?" / "tamanho da carteira da filial"
+```sql
+SELECT u.CODFILIAL,
+       SUBSTR(NVL(pf.FANTASIA,'?'),1,30) AS FILIAL,
+       COUNT(*)                          AS TOTAL_CLIENTES,
+       COUNT(DISTINCT c.CODUSUR1)        AS QTD_VENDEDORES,
+       SUM(CASE WHEN c.DTULTCOMP >= TRUNC(SYSDATE) - 90 THEN 1 ELSE 0 END) AS ATIVOS_90D
+FROM EBD.PCCLIENT c
+JOIN EBD.PCUSUARI u ON u.CODUSUR = c.CODUSUR1
+LEFT JOIN EBD.PCFILIAL pf ON pf.CODIGO = u.CODFILIAL
+WHERE c.DTEXCLUSAO IS NULL
+GROUP BY u.CODFILIAL, SUBSTR(NVL(pf.FANTASIA,'?'),1,30)
+ORDER BY TOTAL_CLIENTES DESC
+```
