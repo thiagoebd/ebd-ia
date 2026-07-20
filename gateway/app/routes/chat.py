@@ -149,7 +149,7 @@ async def chat(body: ChatRequest, claims: dict = Depends(verify_token)):
                             elif 'opus' in _mstr:
                                 _pin, _pout, _prd, _pwr = 5.0, 25.0, 0.50, 10.0
                             else:
-                                _pin, _pout, _prd, _pwr = 3.0, 15.0, 0.30, 6.0
+                                _pin, _pout, _prd, _pwr = 3.0, 15.0, 0.30, 3.75
                             _usd = (_in*_pr('LLM_PRICE_IN', _pin) + _out*_pr('LLM_PRICE_OUT', _pout)
                                     + _cr*_pr('LLM_PRICE_CACHE_READ', _prd)
                                     + _cw*_pr('LLM_PRICE_CACHE_WRITE', _pwr)) / 1000000.0

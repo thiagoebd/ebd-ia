@@ -362,6 +362,7 @@ async def run_turn_stream(
     tool_calls_log = []
     iterations = 0
     final_usage = {}
+    _usage_acc = {"input_tokens": 0, "output_tokens": 0, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0}
     consultou_catalogo = False
     tool_outcomes = []  # [(tool_name, success_bool), ...] desta turn
 
@@ -405,12 +406,17 @@ async def run_turn_stream(
             # outros tipos (thinking, etc) sao ignorados no historico reenviado
         messages.append({"role": "assistant", "content": assistant_content})
 
-        # Captura usage da ultima iteracao
+        # Acumula usage de TODAS as iteracoes (a API cobra cada chamada do loop;
+        # cache_write aparece so na iteracao que grava, cache_read nas que leem — somar da o total certo)
+        _usage_acc["input_tokens"] += final_message.usage.input_tokens
+        _usage_acc["output_tokens"] += final_message.usage.output_tokens
+        _usage_acc["cache_creation_input_tokens"] += getattr(final_message.usage, "cache_creation_input_tokens", 0)
+        _usage_acc["cache_read_input_tokens"] += getattr(final_message.usage, "cache_read_input_tokens", 0)
         final_usage = {
-            "input_tokens": final_message.usage.input_tokens,
-            "output_tokens": final_message.usage.output_tokens,
-            "cache_creation_input_tokens": getattr(final_message.usage, "cache_creation_input_tokens", 0),
-            "cache_read_input_tokens": getattr(final_message.usage, "cache_read_input_tokens", 0),
+            "input_tokens": _usage_acc["input_tokens"],
+            "output_tokens": _usage_acc["output_tokens"],
+            "cache_creation_input_tokens": _usage_acc["cache_creation_input_tokens"],
+            "cache_read_input_tokens": _usage_acc["cache_read_input_tokens"],
         }
 
         # Terminou? (sem tool_use) -> emite done e encerra
