@@ -1,8 +1,8 @@
 {
- "generated_at": "2026-07-15T19:50:10.006032+00:00",
+ "generated_at": "2026-07-20T13:44:53.534084+00:00",
  "source": "docs/query_templates.md",
- "source_sha256": "539b3d17a3a01318",
- "count": 34,
+ "source_sha256": "e819481013b7b2ff",
+ "count": 47,
  "templates": [
   {
    "code": "T100",
@@ -262,6 +262,19 @@
    "sql": "WITH dia_ref AS (\n    SELECT TRUNC(SYSDATE) AS DT,\n           CASE TO_CHAR(TRUNC(SYSDATE),'D')\n             WHEN '1' THEN 'DOMINGO' WHEN '2' THEN 'SEGUNDA'\n             WHEN '3' THEN 'TERCA'   WHEN '4' THEN 'QUARTA'\n             WHEN '5' THEN 'QUINTA'  WHEN '6' THEN 'SEXTA'\n             WHEN '7' THEN 'SABADO' END AS NOME\n    FROM DUAL\n),\nrota_filial AS (\n    SELECT DISTINCT r.CODIGOCLIENTE\n    FROM EBD.GD_FATO_ROTACLIENTE r\n    JOIN EBD.GD_DIM_RCA dr ON dr.CODIGORCA = r.CODIGORCA\n    JOIN EBD.PCCLIENT cli ON cli.CODCLI = r.CODIGOCLIENTE\n    , dia_ref d\n    WHERE UPPER(r.DIASEMANA) IN (d.NOME, REPLACE(d.NOME,'C','Ç'))\n      AND UPPER(NVL(dr.RCA,'')) NOT LIKE 'ORFAO%'\n      AND UPPER(NVL(dr.RCA,'')) NOT LIKE 'RCA VAGO%'\n      AND cli.CODFILIALNF = :codFilial\n)\nSELECT (SELECT COUNT(*) FROM rota_filial) AS NA_ROTA,\n       (SELECT COUNT(DISTINCT ped.CODCLI) FROM EBD.PCPEDC ped, dia_ref d\n        WHERE TRUNC(ped.DATA) = d.DT AND ped.POSICAO != 'C'\n          AND ped.CODFILIAL = :codFilial\n          AND ped.CODCLI IN (SELECT CODIGOCLIENTE FROM rota_filial)) AS VISITADOS,\n       (SELECT COUNT(DISTINCT v.CODCLI) FROM EBD.VIEW_VENDAS_RESUMO_FATURAMENTO v, dia_ref d\n        WHERE TRUNC(v.DTSAIDA) = d.DT AND v.CONDVENDA = 1\n          AND v.CODFILIAL = :codFilial\n          AND v.CODCLI IN (SELECT CODIGOCLIENTE FROM rota_filial)) AS FATURADOS\nFROM DUAL"
   },
   {
+   "code": "T182",
+   "version": null,
+   "title": "Produtividade em Rota por RCA (PCMOVROTACLI)  Validado 16/07/2026",
+   "familia": "equipe_campo",
+   "validated": true,
+   "validation_note": null,
+   "latency_note": null,
+   "binds": [
+    "dtRef"
+   ],
+   "sql": "-- Dia da semana atual (Oracle: 1=Dom, 2=Seg, ..., 5=Qui, ..., 7=Sab)\nWHERE UPPER(r.DIASEMANA) IN (\n    CASE TO_CHAR(:dtRef, 'D')\n      WHEN '2' THEN 'SEGUNDA'\n      WHEN '3' THEN 'TERCA'\n      WHEN '4' THEN 'QUARTA'\n      WHEN '5' THEN 'QUINTA'\n      WHEN '6' THEN 'SEXTA'\n      WHEN '7' THEN 'SABADO'\n    END,\n    CASE TO_CHAR(:dtRef, 'D')\n      WHEN '3' THEN 'TERÇA'\n      WHEN '7' THEN 'SÁBADO'\n      ELSE NULL\n    END\n)\nAND TRUNC(r.DTPROXVISITA) <= TRUNC(:dtRef)        -- visita deveria ocorrer hoje ou estava atrasada\nAND TRUNC(r.DTPROXVISITA) >= TRUNC(:dtRef) - 7    -- janela de 1 semana (evita histórico antigo)"
+  },
+  {
    "code": "T190",
    "version": null,
    "title": "Catálogo de produtos com EAN, fornecedor e departamento (minerado de padrão ok=4)",
@@ -437,6 +450,141 @@
    "latency_note": "0,3s (rápido).",
    "binds": [],
    "sql": "SELECT ped.NUMPED,\n       SUBSTR(NVL(pf.FANTASIA,'?'),1,16) AS FILIAL,\n       SUBSTR(NVL(dc.CLIENTE,'?'),1,24) AS CLIENTE,\n       SUBSTR(NVL(dr.RCA,'?'),1,18) AS RCA,\n       TO_CHAR(ped.DATA,'DD/MM') AS DT,\n       ROUND(SYSDATE - ped.DATA, 0) AS DIAS,\n       NVL(ped.VLTOTAL,0) AS VL,\n       NVL(ped.CODMOTBLOQUEIO,-1) AS COD_MOT,\n       NVL(m.TIPO,0) AS TIPO,    -- 1=FIN, 2=COM/OPER\n       NVL(m.ORIGEM,0) AS ORIGEM, -- 1=AUTO, 2=MANUAL\n       SUBSTR(NVL(m.DESCRICAO,'(s/motivo)'),1,30) AS MOTIVO\nFROM EBD.PCPEDC ped\nLEFT JOIN EBD.PCFILIAL pf ON pf.CODIGO = ped.CODFILIAL\nLEFT JOIN EBD.GD_DIM_CLIENTE dc ON dc.CODIGOCLIENTE = ped.CODCLI\nLEFT JOIN EBD.GD_DIM_RCA dr ON dr.CODIGORCA = ped.CODUSUR\nLEFT JOIN EBD.PCMOTBLOQUEIO m ON m.CODMOTIVO = ped.CODMOTBLOQUEIO\nWHERE ped.POSICAO='B'\n  AND ped.DATA BETWEEN TRUNC(SYSDATE,'MM') AND SYSDATE\nORDER BY ped.VLTOTAL DESC NULLS LAST\nFETCH FIRST 15 ROWS ONLY"
+  },
+  {
+   "code": "T220",
+   "version": null,
+   "title": "Carteira de pedidos por filial (T-CARTEIRA-01 transcrito · ok=7)",
+   "familia": "inadimplencia",
+   "validated": false,
+   "validation_note": null,
+   "latency_note": null,
+   "binds": [],
+   "sql": "SELECT p.CODFILIAL,\n       SUBSTR(NVL(pf.FANTASIA,'?'),1,30) AS FILIAL,\n       COUNT(DISTINCT p.NUMPED)          AS QTD_PEDIDOS,\n       SUM(p.VLATEND)                     AS CARTEIRA\nFROM EBD.PCPEDC p\nJOIN EBD.PCFILIAL pf ON pf.CODIGO = p.CODFILIAL\nWHERE p.POSICAO IN ('L','M')\n  AND p.DTCANCEL IS NULL\n  AND p.CONDVENDA NOT IN (4,8,10,13,20,98,99)\nGROUP BY p.CODFILIAL, SUBSTR(NVL(pf.FANTASIA,'?'),1,30)\nORDER BY CARTEIRA DESC"
+  },
+  {
+   "code": "T221",
+   "version": null,
+   "title": "Pedidos bloqueados por filial (ok=5)",
+   "familia": "pedidos",
+   "validated": false,
+   "validation_note": null,
+   "latency_note": null,
+   "binds": [],
+   "sql": "SELECT p.CODFILIAL,\n       SUBSTR(NVL(pf.FANTASIA,'?'),1,30) AS FILIAL,\n       COUNT(DISTINCT p.NUMPED)          AS QTD_BLOQUEADOS,\n       SUM(p.VLATEND)                     AS VLR_BLOQUEADO\nFROM EBD.PCPEDC p\nJOIN EBD.PCFILIAL pf ON pf.CODIGO = p.CODFILIAL\nWHERE p.POSICAO = 'B'\n  AND p.DTCANCEL IS NULL\n  AND p.CONDVENDA NOT IN (4,8,10,13,20,98,99)\nGROUP BY p.CODFILIAL, SUBSTR(NVL(pf.FANTASIA,'?'),1,30)\nORDER BY VLR_BLOQUEADO DESC"
+  },
+  {
+   "code": "T222",
+   "version": null,
+   "title": "Meta do mês por filial (ok=8)",
+   "familia": "metas",
+   "validated": false,
+   "validation_note": null,
+   "latency_note": null,
+   "binds": [],
+   "sql": "SELECT m.CODFILIAL,\n       SUBSTR(NVL(pf.FANTASIA,'?'),1,30) AS FILIAL,\n       SUM(m.VLVENDAPREV)                AS META_MES\nFROM EBD.PCMETA m\nJOIN EBD.PCFILIAL pf ON pf.CODIGO = m.CODFILIAL\nWHERE m.TIPOMETA = 'FL'\n  AND m.DATA BETWEEN TRUNC(SYSDATE,'MM') AND LAST_DAY(SYSDATE)\nGROUP BY m.CODFILIAL, SUBSTR(NVL(pf.FANTASIA,'?'),1,30)\nORDER BY META_MES DESC"
+  },
+  {
+   "code": "T223",
+   "version": null,
+   "title": "Realizado (faturado) vs Meta do mês por filial",
+   "familia": "metas",
+   "validated": false,
+   "validation_note": null,
+   "latency_note": null,
+   "binds": [],
+   "sql": "WITH meta AS (\n    SELECT m.CODFILIAL, SUM(m.VLVENDAPREV) AS META_MES\n    FROM EBD.PCMETA m\n    WHERE m.TIPOMETA = 'FL'\n      AND m.DATA BETWEEN TRUNC(SYSDATE,'MM') AND LAST_DAY(SYSDATE)\n    GROUP BY m.CODFILIAL\n),\nrealizado AS (\n    SELECT v.CODFILIAL, SUM(v.VLATEND) AS REALIZADO\n    FROM EBD.VIEW_VENDAS_RESUMO_FATURAMENTO v\n    WHERE v.DTSAIDA BETWEEN TRUNC(SYSDATE,'MM') AND SYSDATE\n    GROUP BY v.CODFILIAL\n)\nSELECT COALESCE(mt.CODFILIAL, rz.CODFILIAL)        AS CODFILIAL,\n       SUBSTR(NVL(pf.FANTASIA,'?'),1,30)           AS FILIAL,\n       NVL(mt.META_MES,0)                          AS META_MES,\n       NVL(rz.REALIZADO,0)                         AS REALIZADO,\n       ROUND(NVL(rz.REALIZADO,0) / NULLIF(mt.META_MES,0) * 100, 1) AS ATING_PCT\nFROM meta mt\nFULL OUTER JOIN realizado rz ON rz.CODFILIAL = mt.CODFILIAL\nLEFT JOIN EBD.PCFILIAL pf ON pf.CODIGO = COALESCE(mt.CODFILIAL, rz.CODFILIAL)\nORDER BY ATING_PCT DESC NULLS LAST"
+  },
+  {
+   "code": "T224",
+   "version": null,
+   "title": "Pedidos faturados no período por filial (ok=3)",
+   "familia": "pedidos",
+   "validated": false,
+   "validation_note": null,
+   "latency_note": null,
+   "binds": [
+    "dataFim",
+    "dataIni"
+   ],
+   "sql": "SELECT p.CODFILIAL,\n       SUBSTR(NVL(pf.FANTASIA,'?'),1,30) AS FILIAL,\n       COUNT(DISTINCT p.NUMPED)          AS QTD_PEDIDOS,\n       SUM(p.VLTOTAL)                     AS VALOR_TOTAL\nFROM EBD.PCPEDC p\nJOIN EBD.PCFILIAL pf ON pf.CODIGO = p.CODFILIAL\nWHERE p.POSICAO = 'F'\n  AND p.DATA BETWEEN TO_DATE(:dataIni,'YYYY-MM-DD') AND TO_DATE(:dataFim,'YYYY-MM-DD')\nGROUP BY p.CODFILIAL, SUBSTR(NVL(pf.FANTASIA,'?'),1,30)\nORDER BY VALOR_TOTAL DESC"
+  },
+  {
+   "code": "T230",
+   "version": null,
+   "title": "Ruptura total do mês por filial (ok=3 · rápido com filtro de filial)",
+   "familia": "estoque",
+   "validated": false,
+   "validation_note": null,
+   "latency_note": null,
+   "binds": [],
+   "sql": "SELECT f.CODFILIAL,\n       SUBSTR(NVL(pf.FANTASIA,'?'),1,30) AS FILIAL,\n       SUM(f.QT * f.PVENDA)              AS VL_RUPTURA\nFROM EBD.PCFALTA f\nJOIN EBD.PCFILIAL pf ON pf.CODIGO = f.CODFILIAL\nWHERE f.DATA BETWEEN TRUNC(SYSDATE,'MM') AND SYSDATE\n  AND f.CODFILIAL IN ('01','02','03','04','05','06','07','08','09','10','11','12','13','14','15','16')\nGROUP BY f.CODFILIAL, SUBSTR(NVL(pf.FANTASIA,'?'),1,30)\nORDER BY VL_RUPTURA DESC"
+  },
+  {
+   "code": "T231",
+   "version": null,
+   "title": "Ruptura por RCA no mês (ok=2)",
+   "familia": "equipe_campo",
+   "validated": false,
+   "validation_note": null,
+   "latency_note": null,
+   "binds": [],
+   "sql": "SELECT f.CODUSUR,\n       SUBSTR(NVL(u.NOME,'?'),1,40)     AS RCA,\n       u.CODFILIAL,\n       SUM(f.QT * f.PVENDA)             AS VL_RUPTURA\nFROM EBD.PCFALTA f\nJOIN EBD.PCUSUARI u ON u.CODUSUR = f.CODUSUR\nWHERE f.DATA BETWEEN TRUNC(SYSDATE,'MM') AND SYSDATE\n  AND f.CODFILIAL IN ('01','02','03','04','05','06','07','08','09','10','11','12','13','14','15','16')\nGROUP BY f.CODUSUR, SUBSTR(NVL(u.NOME,'?'),1,40), u.CODFILIAL\nORDER BY VL_RUPTURA DESC\nFETCH FIRST 30 ROWS ONLY"
+  },
+  {
+   "code": "T232",
+   "version": null,
+   "title": "Top produtos em ruptura no mês (por filial opcional)",
+   "familia": "estoque",
+   "validated": false,
+   "validation_note": null,
+   "latency_note": null,
+   "binds": [],
+   "sql": "SELECT f.CODPROD,\n       SUBSTR(NVL(pr.DESCRICAO,'?'),1,50) AS PRODUTO,\n       COUNT(*)                           AS OCORRENCIAS,\n       SUM(f.QT * f.PVENDA)               AS VL_RUPTURA\nFROM EBD.PCFALTA f\nJOIN EBD.PCPRODUT pr ON pr.CODPROD = f.CODPROD\nWHERE f.DATA BETWEEN TRUNC(SYSDATE,'MM') AND SYSDATE\n  AND f.CODFILIAL IN ('01','02','03','04','05','06','07','08','09','10','11','12','13','14','15','16')\nGROUP BY f.CODPROD, SUBSTR(NVL(pr.DESCRICAO,'?'),1,50)\nORDER BY VL_RUPTURA DESC\nFETCH FIRST 30 ROWS ONLY"
+  },
+  {
+   "code": "T233",
+   "version": null,
+   "title": "Ruptura por filial de venda com remap oficial de depósitos (mês)",
+   "familia": "estoque",
+   "validated": false,
+   "validation_note": null,
+   "latency_note": null,
+   "binds": [],
+   "sql": "WITH ruptura AS (\n    SELECT\n        CASE f.CODFILIAL\n            WHEN '17' THEN '10'\n            WHEN '23' THEN '14'\n            ELSE f.CODFILIAL\n        END             AS CODFILIAL_COMERCIAL,\n        f.QT * f.PVENDA AS VL\n    FROM EBD.PCFALTA f\n    WHERE f.DATA BETWEEN TRUNC(SYSDATE,'MM') AND SYSDATE\n)\nSELECT r.CODFILIAL_COMERCIAL              AS CODFILIAL,\n       SUBSTR(NVL(pf.FANTASIA,'?'),1,30)  AS FILIAL,\n       SUM(r.VL)                          AS VL_RUPTURA\nFROM ruptura r\nJOIN EBD.PCFILIAL pf ON pf.CODIGO = r.CODFILIAL_COMERCIAL\nGROUP BY r.CODFILIAL_COMERCIAL, SUBSTR(NVL(pf.FANTASIA,'?'),1,30)\nORDER BY VL_RUPTURA DESC"
+  },
+  {
+   "code": "T240",
+   "version": null,
+   "title": "Faturamento por regional BR (mês corrente · usa mapa oficial)",
+   "familia": "regionais",
+   "validated": false,
+   "validation_note": null,
+   "latency_note": null,
+   "binds": [],
+   "sql": "WITH regional_map AS (\n    SELECT '04' AS CODFILIAL, 'NE1' AS REGIONAL FROM DUAL UNION ALL\n    SELECT '12','NE1' FROM DUAL UNION ALL SELECT '21','NE2' FROM DUAL UNION ALL\n    SELECT '03','NE2' FROM DUAL UNION ALL SELECT '09','NE2' FROM DUAL UNION ALL\n    SELECT '52','NE3' FROM DUAL UNION ALL SELECT '53','NE3' FROM DUAL UNION ALL\n    SELECT '02','SP1' FROM DUAL UNION ALL SELECT '16','SP1' FROM DUAL UNION ALL\n    SELECT '18','SP2' FROM DUAL UNION ALL SELECT '15','SP2' FROM DUAL UNION ALL\n    SELECT '13','RJ1' FROM DUAL UNION ALL SELECT '10','RJ1' FROM DUAL UNION ALL\n    SELECT '14','RJ2' FROM DUAL UNION ALL SELECT '05','RJ2' FROM DUAL UNION ALL\n    SELECT '06','NO1' FROM DUAL UNION ALL SELECT '08','NO1' FROM DUAL UNION ALL\n    SELECT '11','NO2' FROM DUAL UNION ALL SELECT '07','NO2' FROM DUAL UNION ALL\n    SELECT '01','NO2' FROM DUAL UNION ALL SELECT '22','NO2' FROM DUAL\n)\nSELECT rm.REGIONAL,\n       SUM(v.VLATEND) AS FATURAMENTO\nFROM EBD.VIEW_VENDAS_RESUMO_FATURAMENTO v\nJOIN regional_map rm ON rm.CODFILIAL = LPAD(v.CODFILIAL, 2, '0')\nWHERE v.DTSAIDA BETWEEN TRUNC(SYSDATE,'MM') AND SYSDATE\nGROUP BY rm.REGIONAL\nORDER BY FATURAMENTO DESC"
+  },
+  {
+   "code": "T241",
+   "version": null,
+   "title": "Ranking de gerentes comerciais BR (GD_DIM_RCA + faturamento)",
+   "familia": "equipe_campo",
+   "validated": false,
+   "validation_note": null,
+   "latency_note": null,
+   "binds": [],
+   "sql": "SELECT dr.GERENTE,\n       COUNT(DISTINCT dr.CODIGORCA) AS QTD_RCAS,\n       SUM(v.VLATEND)               AS FATURAMENTO\nFROM EBD.VIEW_VENDAS_RESUMO_FATURAMENTO v\nJOIN EBD.GD_DIM_RCA dr ON dr.CODIGORCA = v.CODUSUR\nWHERE v.DTSAIDA BETWEEN TRUNC(SYSDATE,'MM') AND SYSDATE\n  AND dr.GERENTE IS NOT NULL\nGROUP BY dr.GERENTE\nORDER BY FATURAMENTO DESC"
+  },
+  {
+   "code": "T242",
+   "version": null,
+   "title": "Ranking de supervisores BR (GD_DIM_RCA + faturamento)",
+   "familia": "equipe_campo",
+   "validated": false,
+   "validation_note": null,
+   "latency_note": null,
+   "binds": [],
+   "sql": "SELECT dr.SUPERVISOR,\n       dr.GERENTE,\n       COUNT(DISTINCT dr.CODIGORCA) AS QTD_RCAS,\n       SUM(v.VLATEND)               AS FATURAMENTO\nFROM EBD.VIEW_VENDAS_RESUMO_FATURAMENTO v\nJOIN EBD.GD_DIM_RCA dr ON dr.CODIGORCA = v.CODUSUR\nWHERE v.DTSAIDA BETWEEN TRUNC(SYSDATE,'MM') AND SYSDATE\n  AND dr.SUPERVISOR IS NOT NULL\nGROUP BY dr.SUPERVISOR, dr.GERENTE\nORDER BY FATURAMENTO DESC"
   }
  ]
 }

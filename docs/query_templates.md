@@ -1929,3 +1929,273 @@ WHERE u.CODFILIAL = :codFilial
   AND TRUNC(r.DTPROXVISITA) BETWEEN TRUNC(SYSDATE) - 7 AND TRUNC(SYSDATE)
 ```
 
+
+# Parte 14 — Família Carteira / Pedidos / Meta (T220-T224) — 20/07/2026
+Origem: mineração do queries.jsonl (211 queries PCPEDC/PCMETA, padrões ok=8/7/7/5/5). SQLs
+validados em produção; veredito de coluna provado pelo Oracle (mine_cols.py). Fecha o
+T-CARTEIRA-01 que existia só como prosa + a família meta-dia.
+
+**Cicatriz #52:** carteira de pedidos usa PCPEDC com os filtros canônicos:
+`POSICAO IN ('L','M')` (livre/montado) + `DTCANCEL IS NULL` + `CONDVENDA NOT IN (4,8,10,13,20,98,99)`.
+Valor = VLATEND (atendido). Pedido BLOQUEADO = `POSICAO = 'B'`. Faturado = `POSICAO = 'F'`.
+
+**Cicatriz #53:** PCPEDC — colunas validadas: CODFILIAL, DATA, VLATEND, NUMPED, POSICAO,
+CODCLI, DTCANCEL, VLTOTAL, ORIGEMPED, CODUSUR, CONDVENDA, CODEMITENTE, CODCOB.
+NÃO EXISTEM: VLPESO, BLOQUEIO (ORA-00904). Data do pedido = DATA (não DTSAIDA — essa é da VIEW).
+
+**Cicatriz #54:** meta usa PCMETA — colunas: CODFILIAL, DATA, VLVENDAPREV (valor previsto),
+TIPOMETA ('FL' = filial). Meta do mês corrente:
+`TIPOMETA='FL' AND DATA BETWEEN TRUNC(SYSDATE,'MM') AND LAST_DAY(SYSDATE)`.
+
+## T220 — Carteira de pedidos por filial (T-CARTEIRA-01 transcrito · ok=7)
+Pergunta: "qual a carteira / pedidos em aberto por filial?"
+```sql
+SELECT p.CODFILIAL,
+       SUBSTR(NVL(pf.FANTASIA,'?'),1,30) AS FILIAL,
+       COUNT(DISTINCT p.NUMPED)          AS QTD_PEDIDOS,
+       SUM(p.VLATEND)                     AS CARTEIRA
+FROM EBD.PCPEDC p
+JOIN EBD.PCFILIAL pf ON pf.CODIGO = p.CODFILIAL
+WHERE p.POSICAO IN ('L','M')
+  AND p.DTCANCEL IS NULL
+  AND p.CONDVENDA NOT IN (4,8,10,13,20,98,99)
+GROUP BY p.CODFILIAL, SUBSTR(NVL(pf.FANTASIA,'?'),1,30)
+ORDER BY CARTEIRA DESC
+```
+
+## T221 — Pedidos bloqueados por filial (ok=5)
+Pergunta: "quanto tem bloqueado / pedidos travados?"
+```sql
+SELECT p.CODFILIAL,
+       SUBSTR(NVL(pf.FANTASIA,'?'),1,30) AS FILIAL,
+       COUNT(DISTINCT p.NUMPED)          AS QTD_BLOQUEADOS,
+       SUM(p.VLATEND)                     AS VLR_BLOQUEADO
+FROM EBD.PCPEDC p
+JOIN EBD.PCFILIAL pf ON pf.CODIGO = p.CODFILIAL
+WHERE p.POSICAO = 'B'
+  AND p.DTCANCEL IS NULL
+  AND p.CONDVENDA NOT IN (4,8,10,13,20,98,99)
+GROUP BY p.CODFILIAL, SUBSTR(NVL(pf.FANTASIA,'?'),1,30)
+ORDER BY VLR_BLOQUEADO DESC
+```
+
+## T222 — Meta do mês por filial (ok=8)
+Pergunta: "qual a meta da filial X este mês?"
+```sql
+SELECT m.CODFILIAL,
+       SUBSTR(NVL(pf.FANTASIA,'?'),1,30) AS FILIAL,
+       SUM(m.VLVENDAPREV)                AS META_MES
+FROM EBD.PCMETA m
+JOIN EBD.PCFILIAL pf ON pf.CODIGO = m.CODFILIAL
+WHERE m.TIPOMETA = 'FL'
+  AND m.DATA BETWEEN TRUNC(SYSDATE,'MM') AND LAST_DAY(SYSDATE)
+GROUP BY m.CODFILIAL, SUBSTR(NVL(pf.FANTASIA,'?'),1,30)
+ORDER BY META_MES DESC
+```
+
+## T223 — Realizado (faturado) vs Meta do mês por filial
+Pergunta: "como está o atingimento de meta por filial?" · combina PCMETA + VIEW canônica
+```sql
+WITH meta AS (
+    SELECT m.CODFILIAL, SUM(m.VLVENDAPREV) AS META_MES
+    FROM EBD.PCMETA m
+    WHERE m.TIPOMETA = 'FL'
+      AND m.DATA BETWEEN TRUNC(SYSDATE,'MM') AND LAST_DAY(SYSDATE)
+    GROUP BY m.CODFILIAL
+),
+realizado AS (
+    SELECT v.CODFILIAL, SUM(v.VLATEND) AS REALIZADO
+    FROM EBD.VIEW_VENDAS_RESUMO_FATURAMENTO v
+    WHERE v.DTSAIDA BETWEEN TRUNC(SYSDATE,'MM') AND SYSDATE
+    GROUP BY v.CODFILIAL
+)
+SELECT COALESCE(mt.CODFILIAL, rz.CODFILIAL)        AS CODFILIAL,
+       SUBSTR(NVL(pf.FANTASIA,'?'),1,30)           AS FILIAL,
+       NVL(mt.META_MES,0)                          AS META_MES,
+       NVL(rz.REALIZADO,0)                         AS REALIZADO,
+       ROUND(NVL(rz.REALIZADO,0) / NULLIF(mt.META_MES,0) * 100, 1) AS ATING_PCT
+FROM meta mt
+FULL OUTER JOIN realizado rz ON rz.CODFILIAL = mt.CODFILIAL
+LEFT JOIN EBD.PCFILIAL pf ON pf.CODIGO = COALESCE(mt.CODFILIAL, rz.CODFILIAL)
+ORDER BY ATING_PCT DESC NULLS LAST
+```
+
+## T224 — Pedidos faturados no período por filial (ok=3)
+Pergunta: "quantos pedidos faturamos no período?"
+```sql
+SELECT p.CODFILIAL,
+       SUBSTR(NVL(pf.FANTASIA,'?'),1,30) AS FILIAL,
+       COUNT(DISTINCT p.NUMPED)          AS QTD_PEDIDOS,
+       SUM(p.VLTOTAL)                     AS VALOR_TOTAL
+FROM EBD.PCPEDC p
+JOIN EBD.PCFILIAL pf ON pf.CODIGO = p.CODFILIAL
+WHERE p.POSICAO = 'F'
+  AND p.DATA BETWEEN TO_DATE(:dataIni,'YYYY-MM-DD') AND TO_DATE(:dataFim,'YYYY-MM-DD')
+GROUP BY p.CODFILIAL, SUBSTR(NVL(pf.FANTASIA,'?'),1,30)
+ORDER BY VALOR_TOTAL DESC
+```
+
+# Parte 15 — Família Ruptura (T230-T232) — 20/07/2026
+Origem: mineração do queries.jsonl (31 queries PCFALTA). Colunas provadas pelo Oracle.
+Fecha a família ruptura, que estava só como prosa (T130v2/T133/T134/T136).
+
+**Cicatriz #55:** ruptura = PCFALTA, valor perdido = `SUM(QT * PVENDA)`. Colunas validadas:
+CODFILIAL, DATA, QT, PVENDA, CODUSUR, CODPROD, NUMPED. NÃO EXISTE DTFALTA (data é DATA).
+
+**Cicatriz #56 (CRÍTICA — pegadinha do BI):** PCFALTA NÃO tem filtro natural de CODFILIAL e
+o BI inclui os CDs. Para ruptura POR FILIAL DE VENDA, restringir explicitamente às filiais
+comerciais, excluindo CDs: `CODFILIAL IN ('01','02','03','04','05','06','07','08','09','10','11','12','13','14','15','16')`.
+Sem esse filtro os números vêm inflados com estoque de CD E a query fica lenta (varre tudo).
+Ajustar a lista às filiais comerciais vigentes do Grupo EBD.
+
+## T230 — Ruptura total do mês por filial (ok=3 · rápido com filtro de filial)
+Pergunta: "qual a ruptura / quebra por filial este mês?"
+```sql
+SELECT f.CODFILIAL,
+       SUBSTR(NVL(pf.FANTASIA,'?'),1,30) AS FILIAL,
+       SUM(f.QT * f.PVENDA)              AS VL_RUPTURA
+FROM EBD.PCFALTA f
+JOIN EBD.PCFILIAL pf ON pf.CODIGO = f.CODFILIAL
+WHERE f.DATA BETWEEN TRUNC(SYSDATE,'MM') AND SYSDATE
+  AND f.CODFILIAL IN ('01','02','03','04','05','06','07','08','09','10','11','12','13','14','15','16')
+GROUP BY f.CODFILIAL, SUBSTR(NVL(pf.FANTASIA,'?'),1,30)
+ORDER BY VL_RUPTURA DESC
+```
+
+## T231 — Ruptura por RCA no mês (ok=2)
+Pergunta: "qual RCA/vendedor tem mais ruptura?"
+```sql
+SELECT f.CODUSUR,
+       SUBSTR(NVL(u.NOME,'?'),1,40)     AS RCA,
+       u.CODFILIAL,
+       SUM(f.QT * f.PVENDA)             AS VL_RUPTURA
+FROM EBD.PCFALTA f
+JOIN EBD.PCUSUARI u ON u.CODUSUR = f.CODUSUR
+WHERE f.DATA BETWEEN TRUNC(SYSDATE,'MM') AND SYSDATE
+  AND f.CODFILIAL IN ('01','02','03','04','05','06','07','08','09','10','11','12','13','14','15','16')
+GROUP BY f.CODUSUR, SUBSTR(NVL(u.NOME,'?'),1,40), u.CODFILIAL
+ORDER BY VL_RUPTURA DESC
+FETCH FIRST 30 ROWS ONLY
+```
+
+## T232 — Top produtos em ruptura no mês (por filial opcional)
+Pergunta: "quais produtos mais rompem?"
+```sql
+SELECT f.CODPROD,
+       SUBSTR(NVL(pr.DESCRICAO,'?'),1,50) AS PRODUTO,
+       COUNT(*)                           AS OCORRENCIAS,
+       SUM(f.QT * f.PVENDA)               AS VL_RUPTURA
+FROM EBD.PCFALTA f
+JOIN EBD.PCPRODUT pr ON pr.CODPROD = f.CODPROD
+WHERE f.DATA BETWEEN TRUNC(SYSDATE,'MM') AND SYSDATE
+  AND f.CODFILIAL IN ('01','02','03','04','05','06','07','08','09','10','11','12','13','14','15','16')
+GROUP BY f.CODPROD, SUBSTR(NVL(pr.DESCRICAO,'?'),1,50)
+ORDER BY VL_RUPTURA DESC
+FETCH FIRST 30 ROWS ONLY
+```
+
+# Parte 16 — Executivos BR / Regionais (T240-T242) — 20/07/2026
+Origem: mineração (79 queries regional_map, ok=54) + MAPA OFICIAL filial→regional fornecido
+pelo Enrico (20/07). Fecha a família executivos BR que estava só como prosa (T201/T202/T204).
+
+**Cicatriz #57 (MAPA OFICIAL filial→regional — fonte de negócio, não reconstruir):**
+O Grupo EBD tem 9 regionais. Mapa canônico (usar este CTE, não reconstruir por chute — evita
+ORA-01790 de tipo e a lentidão de 21s da versão ad-hoc):
+NE1={04,12} · NE2={21,03,09} · NE3={52,53} · SP1={02,16} · SP2={18,15} ·
+RJ1={13,10} · RJ2={14,05} · NO1={06,08} · NO2={11,07,01,22}.
+Filiais 52/53 são EBDN (Petrolina/Caruaru). Todas as 21 são filiais comerciais.
+
+**Cicatriz #58 (hierarquia comercial tem dimensão pronta):** RCA→supervisor→gerente vive em
+GD_DIM_RCA (CODIGORCA, RCA, SUPERVISOR, GERENTE, CODIGOGERENTE, SITUACAO) — roda em ~18ms.
+Não montar JOIN pesado de PCUSUARI+PCSUPERV para hierarquia; usar a dimensão.
+
+**Cicatriz #59 (OFICIAL do BRIEFING — filtro de filial depende do indicador):**
+Há DUAS regras de filial, não uma. VENDAS (faturamento/carteira/meta): 20 filiais comerciais,
+SEM os depósitos fechados — `CODFILIAL IN ('01','02','03','04','05','06','07','08','09','10','11','12','13','14','15','16','18','21','52','53')`.
+OPERAÇÃO/RUPTURA (PCFALTA): INCLUI os depósitos 17 e 23 REMAPEADOS para a filial-mãe
+(movimentam mas somam na filial de venda): `CASE CODFILIAL WHEN '17' THEN '10' (São Pedro da Aldeia→São Gonçalo) WHEN '23' THEN '14' (Petrópolis→Piraí) ELSE CODFILIAL END`.
+Ruptura BR TOTAL (fórmula #9) é SEM filtro nenhum (o BI inclui CDs no consolidado nacional).
+Depósitos fechados não aparecem no mapa regional (não faturam). São Luís é staging sem movimento (não entra).
+
+## T240 — Faturamento por regional BR (mês corrente · usa mapa oficial)
+Pergunta: "faturamento por regional" / "ranking de regionais"
+```sql
+WITH regional_map AS (
+    SELECT '04' AS CODFILIAL, 'NE1' AS REGIONAL FROM DUAL UNION ALL
+    SELECT '12','NE1' FROM DUAL UNION ALL SELECT '21','NE2' FROM DUAL UNION ALL
+    SELECT '03','NE2' FROM DUAL UNION ALL SELECT '09','NE2' FROM DUAL UNION ALL
+    SELECT '52','NE3' FROM DUAL UNION ALL SELECT '53','NE3' FROM DUAL UNION ALL
+    SELECT '02','SP1' FROM DUAL UNION ALL SELECT '16','SP1' FROM DUAL UNION ALL
+    SELECT '18','SP2' FROM DUAL UNION ALL SELECT '15','SP2' FROM DUAL UNION ALL
+    SELECT '13','RJ1' FROM DUAL UNION ALL SELECT '10','RJ1' FROM DUAL UNION ALL
+    SELECT '14','RJ2' FROM DUAL UNION ALL SELECT '05','RJ2' FROM DUAL UNION ALL
+    SELECT '06','NO1' FROM DUAL UNION ALL SELECT '08','NO1' FROM DUAL UNION ALL
+    SELECT '11','NO2' FROM DUAL UNION ALL SELECT '07','NO2' FROM DUAL UNION ALL
+    SELECT '01','NO2' FROM DUAL UNION ALL SELECT '22','NO2' FROM DUAL
+)
+SELECT rm.REGIONAL,
+       SUM(v.VLATEND) AS FATURAMENTO
+FROM EBD.VIEW_VENDAS_RESUMO_FATURAMENTO v
+JOIN regional_map rm ON rm.CODFILIAL = LPAD(v.CODFILIAL, 2, '0')
+WHERE v.DTSAIDA BETWEEN TRUNC(SYSDATE,'MM') AND SYSDATE
+GROUP BY rm.REGIONAL
+ORDER BY FATURAMENTO DESC
+```
+
+## T241 — Ranking de gerentes comerciais BR (GD_DIM_RCA + faturamento)
+Pergunta: "ranking de GCs / gerentes comerciais"
+```sql
+SELECT dr.GERENTE,
+       COUNT(DISTINCT dr.CODIGORCA) AS QTD_RCAS,
+       SUM(v.VLATEND)               AS FATURAMENTO
+FROM EBD.VIEW_VENDAS_RESUMO_FATURAMENTO v
+JOIN EBD.GD_DIM_RCA dr ON dr.CODIGORCA = v.CODUSUR
+WHERE v.DTSAIDA BETWEEN TRUNC(SYSDATE,'MM') AND SYSDATE
+  AND dr.GERENTE IS NOT NULL
+GROUP BY dr.GERENTE
+ORDER BY FATURAMENTO DESC
+```
+
+## T242 — Ranking de supervisores BR (GD_DIM_RCA + faturamento)
+Pergunta: "ranking de supervisores"
+```sql
+SELECT dr.SUPERVISOR,
+       dr.GERENTE,
+       COUNT(DISTINCT dr.CODIGORCA) AS QTD_RCAS,
+       SUM(v.VLATEND)               AS FATURAMENTO
+FROM EBD.VIEW_VENDAS_RESUMO_FATURAMENTO v
+JOIN EBD.GD_DIM_RCA dr ON dr.CODIGORCA = v.CODUSUR
+WHERE v.DTSAIDA BETWEEN TRUNC(SYSDATE,'MM') AND SYSDATE
+  AND dr.SUPERVISOR IS NOT NULL
+GROUP BY dr.SUPERVISOR, dr.GERENTE
+ORDER BY FATURAMENTO DESC
+```
+
+# Correção da família Ruptura (20/07) — remap oficial de depósitos
+
+**Cicatriz #60:** o T230 (Parte 15) usa lista simples de filial e NÃO faz o remap dos
+depósitos fechados. Para ruptura POR FILIAL DE VENDA correta, usar T233 abaixo (com CASE
+17→10, 23→14). O T230 fica válido apenas para leitura rápida "sem depósito"; prefira T233.
+
+## T233 — Ruptura por filial de venda com remap oficial de depósitos (mês)
+Pergunta: "ruptura por filial" (versão correta — Petrópolis soma em Piraí, São Pedro em São Gonçalo)
+```sql
+WITH ruptura AS (
+    SELECT
+        CASE f.CODFILIAL
+            WHEN '17' THEN '10'
+            WHEN '23' THEN '14'
+            ELSE f.CODFILIAL
+        END             AS CODFILIAL_COMERCIAL,
+        f.QT * f.PVENDA AS VL
+    FROM EBD.PCFALTA f
+    WHERE f.DATA BETWEEN TRUNC(SYSDATE,'MM') AND SYSDATE
+)
+SELECT r.CODFILIAL_COMERCIAL              AS CODFILIAL,
+       SUBSTR(NVL(pf.FANTASIA,'?'),1,30)  AS FILIAL,
+       SUM(r.VL)                          AS VL_RUPTURA
+FROM ruptura r
+JOIN EBD.PCFILIAL pf ON pf.CODIGO = r.CODFILIAL_COMERCIAL
+GROUP BY r.CODFILIAL_COMERCIAL, SUBSTR(NVL(pf.FANTASIA,'?'),1,30)
+ORDER BY VL_RUPTURA DESC
+```
