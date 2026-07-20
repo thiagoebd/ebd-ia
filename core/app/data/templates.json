@@ -1,8 +1,8 @@
 {
- "generated_at": "2026-07-20T14:42:15.565692+00:00",
+ "generated_at": "2026-07-20T17:43:13.527148+00:00",
  "source": "docs/query_templates.md",
- "source_sha256": "1878ca003bc90a28",
- "count": 56,
+ "source_sha256": "50a14b30f748cce9",
+ "count": 53,
  "templates": [
   {
    "code": "T100",
@@ -236,43 +236,6 @@
     "codFilial"
    ],
    "sql": "WITH visitas_dia AS (\n    SELECT DISTINCT v.CODUSUR\n    FROM EBD.PCVISITAFV v\n    WHERE v.DATA >= TRUNC(SYSDATE) AND v.DATA < TRUNC(SYSDATE) + 1\n)\nSELECT u.CODUSUR,\n       SUBSTR(NVL(u.NOME,'?'),1,40)      AS NOME,\n       u.TIPOVEND,\n       SUBSTR(NVL(pf.FANTASIA,'?'),1,25) AS FILIAL\nFROM EBD.PCUSUARI u\nLEFT JOIN EBD.PCFILIAL pf ON pf.CODIGO = u.CODFILIAL\nWHERE u.CODFILIAL = :codFilial\n  AND UPPER(u.NOME) NOT LIKE '%ORFAO%'\n  AND UPPER(u.NOME) NOT LIKE '%VAGO%'\n  AND UPPER(u.NOME) NOT LIKE '%ECOMMERCE%'\n  AND u.CODUSUR NOT IN (SELECT CODUSUR FROM visitas_dia)\nORDER BY u.NOME"
-  },
-  {
-   "code": "T174",
-   "version": null,
-   "title": "Aderência check-in × rota planejada, dia anterior (ESQUELETO — completar na validação)",
-   "familia": "outros",
-   "validated": false,
-   "validation_note": null,
-   "latency_note": null,
-   "binds": [],
-   "sql": "SELECT (SELECT COUNT(DISTINCT CODUSUR)\n          FROM EBD.PCVISITAFV\n         WHERE DATA = TRUNC(SYSDATE) - 1)      AS RCAS_APP,\n       (SELECT COUNT(DISTINCT r.CODIGORCA)\n          FROM EBD.GD_FATO_ROTACLIENTE r)      AS RCAS_ROTA\nFROM DUAL"
-  },
-  {
-   "code": "T180",
-   "version": null,
-   "title": "Aproveitamento de Rota por Filial  Validado",
-   "familia": "faturamento",
-   "validated": true,
-   "validation_note": null,
-   "latency_note": "0,6s",
-   "binds": [
-    "codFilial"
-   ],
-   "sql": "WITH dia_ref AS (\n    SELECT TRUNC(SYSDATE) AS DT,\n           CASE TO_CHAR(TRUNC(SYSDATE),'D')\n             WHEN '1' THEN 'DOMINGO' WHEN '2' THEN 'SEGUNDA'\n             WHEN '3' THEN 'TERCA'   WHEN '4' THEN 'QUARTA'\n             WHEN '5' THEN 'QUINTA'  WHEN '6' THEN 'SEXTA'\n             WHEN '7' THEN 'SABADO' END AS NOME\n    FROM DUAL\n),\nrota_filial AS (\n    SELECT DISTINCT r.CODIGOCLIENTE\n    FROM EBD.GD_FATO_ROTACLIENTE r\n    JOIN EBD.GD_DIM_RCA dr ON dr.CODIGORCA = r.CODIGORCA\n    JOIN EBD.PCCLIENT cli ON cli.CODCLI = r.CODIGOCLIENTE\n    , dia_ref d\n    WHERE UPPER(r.DIASEMANA) IN (d.NOME, REPLACE(d.NOME,'C','Ç'))\n      AND UPPER(NVL(dr.RCA,'')) NOT LIKE 'ORFAO%'\n      AND UPPER(NVL(dr.RCA,'')) NOT LIKE 'RCA VAGO%'\n      AND cli.CODFILIALNF = :codFilial\n)\nSELECT (SELECT COUNT(*) FROM rota_filial) AS NA_ROTA,\n       (SELECT COUNT(DISTINCT ped.CODCLI) FROM EBD.PCPEDC ped, dia_ref d\n        WHERE TRUNC(ped.DATA) = d.DT AND ped.POSICAO != 'C'\n          AND ped.CODFILIAL = :codFilial\n          AND ped.CODCLI IN (SELECT CODIGOCLIENTE FROM rota_filial)) AS VISITADOS,\n       (SELECT COUNT(DISTINCT v.CODCLI) FROM EBD.VIEW_VENDAS_RESUMO_FATURAMENTO v, dia_ref d\n        WHERE TRUNC(v.DTSAIDA) = d.DT AND v.CONDVENDA = 1\n          AND v.CODFILIAL = :codFilial\n          AND v.CODCLI IN (SELECT CODIGOCLIENTE FROM rota_filial)) AS FATURADOS\nFROM DUAL"
-  },
-  {
-   "code": "T182",
-   "version": null,
-   "title": "Produtividade em Rota por RCA (PCMOVROTACLI)  Validado 16/07/2026",
-   "familia": "equipe_campo",
-   "validated": true,
-   "validation_note": null,
-   "latency_note": null,
-   "binds": [
-    "dtRef"
-   ],
-   "sql": "-- Dia da semana atual (Oracle: 1=Dom, 2=Seg, ..., 5=Qui, ..., 7=Sab)\nWHERE UPPER(r.DIASEMANA) IN (\n    CASE TO_CHAR(:dtRef, 'D')\n      WHEN '2' THEN 'SEGUNDA'\n      WHEN '3' THEN 'TERCA'\n      WHEN '4' THEN 'QUARTA'\n      WHEN '5' THEN 'QUINTA'\n      WHEN '6' THEN 'SEXTA'\n      WHEN '7' THEN 'SABADO'\n    END,\n    CASE TO_CHAR(:dtRef, 'D')\n      WHEN '3' THEN 'TERÇA'\n      WHEN '7' THEN 'SÁBADO'\n      ELSE NULL\n    END\n)\nAND TRUNC(r.DTPROXVISITA) <= TRUNC(:dtRef)        -- visita deveria ocorrer hoje ou estava atrasada\nAND TRUNC(r.DTPROXVISITA) >= TRUNC(:dtRef) - 7    -- janela de 1 semana (evita histórico antigo)"
   },
   {
    "code": "T190",

@@ -115,12 +115,20 @@ def current_date_line() -> str:
 MAX_HISTORY_PAIRS = 10
 
 
-async def _run_tool(tool_name: str, tool_input: dict, user_id: str, user_role: str) -> str:
+from app.tools.gate_template import checar_gate
+
+
+async def _run_tool(tool_name: str, tool_input: dict, user_id: str, user_role: str,
+                    consultou_catalogo: bool = False) -> str:
     if tool_name == "oracle_query":
         sql = tool_input.get("sql", "")
+        _acao, _txt = checar_gate(sql, consultou_catalogo)
+        if _acao == "bloquear":
+            return _txt
         max_rows = tool_input.get("max_rows", 100)
         result = await execute_oracle_query(sql, max_rows=max_rows)
-        return format_result_for_claude(result)
+        _out = format_result_for_claude(result)
+        return _out + _txt if _acao == "dica" else _out
     if tool_name == "knowledge_append":
         return tool_knowledge_append(
             tipo=tool_input.get("tipo", ""),
@@ -248,6 +256,7 @@ async def run_turn(
 
     tool_calls_log = []
     iterations = 0
+    consultou_catalogo = False
 
     while iterations < settings.max_iterations:
         iterations += 1
@@ -281,7 +290,9 @@ async def run_turn(
         for block in response.content:
             if block.type == "tool_use":
                 tool_calls_log.append({"name": block.name, "input": block.input, "id": block.id})
-                result_str = await _run_tool(block.name, block.input, user_id, user_role)
+                if block.name in ("list_templates", "get_template"):
+                    consultou_catalogo = True
+                result_str = await _run_tool(block.name, block.input, user_id, user_role, consultou_catalogo)
                 tool_results.append({
                     "type": "tool_result",
                     "tool_use_id": block.id,
@@ -351,6 +362,7 @@ async def run_turn_stream(
     tool_calls_log = []
     iterations = 0
     final_usage = {}
+    consultou_catalogo = False
     tool_outcomes = []  # [(tool_name, success_bool), ...] desta turn
 
     while iterations < settings.max_iterations:
@@ -419,6 +431,8 @@ async def run_turn_stream(
         for block in final_message.content:
             if block.type == "tool_use":
                 tool_calls_log.append({"name": block.name, "input": block.input, "id": block.id})
+                if block.name in ("list_templates", "get_template"):
+                    consultou_catalogo = True
                 # status amigavel por tipo de tool
                 if block.name == "oracle_query":
                     sql = (block.input or {}).get("sql", "")
@@ -426,6 +440,13 @@ async def run_turn_stream(
                     _passo = len([t for t in tool_calls_log if t["name"] == "oracle_query"])
                     yield {"type": "status", "text": f"Passo {_passo} — {_assunto}..."}
                     yield {"type": "tool", "name": block.name, "input": block.input}
+                    _acao_g, _txt_g = checar_gate(sql, consultou_catalogo)
+                    if _acao_g == "bloquear":
+                        result_str = _txt_g
+                        tool_outcomes.append((block.name, False))
+                        yield {"type": "tool_done", "name": block.name, "success": False}
+                        tool_results.append({"type": "tool_result", "tool_use_id": block.id, "content": result_str})
+                        continue
                     # roda em modo streaming pra emitir progresso
                     final_payload = None
                     async for ev in execute_oracle_query_streaming(
@@ -442,6 +463,8 @@ async def run_turn_stream(
                             final_payload = ev["payload"]
                     _store_last_result(final_payload)
                     result_str = format_result_for_claude(final_payload)
+                    if _acao_g == "dica":
+                        result_str = result_str + _txt_g
                     import logging as _fl
                     _fl.getLogger("uvicorn.error").info("ORACLE_FORENSE sql=%r >>> result=%r", sql[:300], result_str[:400])
                     _ok = not (isinstance(result_str, str) and result_str.startswith("__ORACLE_ERROR__"))
