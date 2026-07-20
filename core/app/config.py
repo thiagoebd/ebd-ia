@@ -16,6 +16,12 @@ class Settings(BaseSettings):
     anthropic_api_key: str = Field(..., alias="ANTHROPIC_API_KEY")
     claude_model: str = Field("claude-opus-4-7", alias="CLAUDE_MODEL")
 
+    # DeepSeek (endpoint Anthropic-compativel)
+    llm_provider: str = Field("claude", alias="LLM_PROVIDER")
+    deepseek_api_key: str = Field("", alias="DEEPSEEK_API_KEY")
+    deepseek_base_url: str = Field("https://api.deepseek.com/anthropic", alias="DEEPSEEK_BASE_URL")
+    deepseek_model: str = Field("deepseek-v4-flash", alias="DEEPSEEK_MODEL")
+
     # MCP Oracle
     mcp_oracle_url: str = Field(..., alias="MCP_ORACLE_URL")
     mcp_oracle_token: str = Field(..., alias="MCP_ORACLE_TOKEN")
@@ -26,7 +32,7 @@ class Settings(BaseSettings):
 
     # Limites
     max_tokens: int = 4000
-    max_iterations: int = 15  # cap de tool-use loop
+    max_iterations: int = 50  # cap de tool-use loop (DeepSeek pode iterar mais)
 
 
 settings = Settings()

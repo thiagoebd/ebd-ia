@@ -86,7 +86,17 @@ from app.tools.knowledge_append import (
     tool_list_proposals,
 )
 
-_client = AsyncAnthropic(api_key=settings.anthropic_api_key)
+if settings.llm_provider == "deepseek":
+    _client = AsyncAnthropic(
+        api_key=settings.deepseek_api_key,
+        base_url=settings.deepseek_base_url,
+        timeout=180.0,
+        max_retries=2,
+    )
+    _active_model = settings.deepseek_model
+else:
+    _client = AsyncAnthropic(api_key=settings.anthropic_api_key)
+    _active_model = settings.claude_model
 _system_prompt = build_system_prompt()
 _tools = [ORACLE_QUERY_TOOL, KNOWLEDGE_APPEND_TOOL, LIST_PROPOSALS_TOOL, CREATE_EXCEL_TOOL, CREATE_PDF_TOOL, CREATE_PPTX_TOOL, CREATE_CHART_TOOL, LIST_TEMPLATES_TOOL, GET_TEMPLATE_TOOL]
 
@@ -261,7 +271,7 @@ async def run_turn(
     while iterations < settings.max_iterations:
         iterations += 1
         response = await _client.messages.create(
-            model=model or settings.claude_model,
+            model=model or _active_model,
             max_tokens=settings.max_tokens,
             system=system_blocks,
             tools=_tools,
@@ -373,7 +383,7 @@ async def run_turn_stream(
         text_acc = ""
         tool_uses = []  # blocks tool_use desta iteracao
         async with _client.messages.stream(
-            model=model or settings.claude_model,
+            model=model or _active_model,
             max_tokens=settings.max_tokens,
             system=system_blocks,
             tools=_tools,
@@ -534,7 +544,7 @@ async def run_turn_stream(
 
 if __name__ == "__main__":
     async def main():
-        print(f"Modelo: {settings.claude_model}")
+        print(f"Modelo: {_active_model}")
         print(f"Tools: {[t['name'] for t in _tools]}")
         print()
         question = "Quais tools voce tem disponiveis e quando deve usar cada uma?"
