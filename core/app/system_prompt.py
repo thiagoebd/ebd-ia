@@ -8,6 +8,7 @@ KB_FILES = [
     "CLAUDE.md",          # prompt base do agente
     "knowledge.md",       # vocabulario e regras de negocio
     "sql-corrections.md", # cicatrizes / armadilhas
+    "query_templates.md", # templates SQL validados (cache 1h cobre o custo)
 ]
 
 
