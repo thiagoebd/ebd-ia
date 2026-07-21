@@ -27,7 +27,7 @@ function App() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [me, setMe] = useState<MeInfo | null>(null);
-  const [selectedModel, setSelectedModel] = useState<string>("claude-haiku-4-5");
+  const [selectedModel, setSelectedModel] = useState<string>("deepseek-v4-flash");
   const [modelOpen, setModelOpen] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -440,7 +440,7 @@ function App() {
                     <span className="chip"><span className="dot-ok" /> Winthor</span>
                     {(() => {
                       const current = me?.models.available.find((m) => m.id === selectedModel);
-                      const label = current?.label || "Claude Haiku 4.5";
+                      const label = current?.label || selectedModel;
                       const isAdmin = me?.role === "admin";
                       const lockedByConv = !!active && active.msgs.length > 0;
                       if (!isAdmin || lockedByConv) {

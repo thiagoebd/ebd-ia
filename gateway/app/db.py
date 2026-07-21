@@ -27,7 +27,7 @@ CREATE TABLE IF NOT EXISTS conversations (
     id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     user_oid    text        NOT NULL,
     title       text        NOT NULL DEFAULT 'Nova conversa',
-    model       text        NOT NULL DEFAULT 'claude-haiku-4-5',
+    model       text        NOT NULL DEFAULT 'deepseek-v4-flash',
     created_at  timestamptz NOT NULL DEFAULT now(),
     updated_at  timestamptz NOT NULL DEFAULT now()
 );

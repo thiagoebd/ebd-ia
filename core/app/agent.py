@@ -365,6 +365,8 @@ async def run_turn_stream(
     tool_calls_log = []
     iterations = 0
     final_usage = {}
+    _usage_acc = {"input_tokens": 0, "output_tokens": 0,
+                  "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0}
     tool_outcomes = []  # [(tool_name, success_bool), ...] desta turn
 
     while iterations < settings.max_iterations:
@@ -408,13 +410,12 @@ async def run_turn_stream(
             # outros tipos (thinking, etc) sao ignorados no historico reenviado
         messages.append({"role": "assistant", "content": assistant_content})
 
-        # Captura usage da ultima iteracao
-        final_usage = {
-            "input_tokens": final_message.usage.input_tokens,
-            "output_tokens": final_message.usage.output_tokens,
-            "cache_creation_input_tokens": getattr(final_message.usage, "cache_creation_input_tokens", 0),
-            "cache_read_input_tokens": getattr(final_message.usage, "cache_read_input_tokens", 0),
-        }
+        # Acumula usage de TODAS as iteracoes (senao subconta turns multi-tool)
+        _usage_acc["input_tokens"] += final_message.usage.input_tokens
+        _usage_acc["output_tokens"] += final_message.usage.output_tokens
+        _usage_acc["cache_creation_input_tokens"] += getattr(final_message.usage, "cache_creation_input_tokens", 0)
+        _usage_acc["cache_read_input_tokens"] += getattr(final_message.usage, "cache_read_input_tokens", 0)
+        final_usage = _usage_acc
 
         # Terminou? (sem tool_use) -> emite done e encerra
         if final_message.stop_reason != "tool_use":

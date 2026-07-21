@@ -44,7 +44,7 @@
             "uid": "P8E80F9AEF21F6940"
           },
           "queryType": "instant",
-          "expr": "sum(sum_over_time({job=\"llm\"} | json custo_brl=\"custo_brl\" | unwrap custo_brl [$__range]))"
+          "expr": "sum(sum_over_time({job=\"llm\", model=~\"$model\"} | json custo_brl=\"custo_brl\" | unwrap custo_brl [$__range]))"
         }
       ]
     },
@@ -79,7 +79,7 @@
             "uid": "P8E80F9AEF21F6940"
           },
           "queryType": "instant",
-          "expr": "sum(sum_over_time({job=\"llm\"} | json custo_brl=\"custo_brl\" | unwrap custo_brl [$__range])) / sum(count_over_time({job=\"llm\"}[$__range]))"
+          "expr": "sum(sum_over_time({job=\"llm\", model=~\"$model\"} | json custo_brl=\"custo_brl\" | unwrap custo_brl [$__range])) / sum(count_over_time({job=\"llm\", model=~\"$model\"}[$__range]))"
         }
       ]
     },
@@ -113,7 +113,7 @@
             "uid": "P8E80F9AEF21F6940"
           },
           "queryType": "instant",
-          "expr": "sum(count_over_time({job=\"llm\"}[$__range]))"
+          "expr": "sum(count_over_time({job=\"llm\", model=~\"$model\"}[$__range]))"
         }
       ]
     },
@@ -148,7 +148,7 @@
             "uid": "P8E80F9AEF21F6940"
           },
           "queryType": "instant",
-          "expr": "sum(sum_over_time({job=\"llm\"} | json cache_read_tokens=\"cache_read_tokens\" | unwrap cache_read_tokens [$__range])) / (sum(sum_over_time({job=\"llm\"} | json cache_read_tokens=\"cache_read_tokens\" | unwrap cache_read_tokens [$__range])) + sum(sum_over_time({job=\"llm\"} | json input_tokens=\"input_tokens\" | unwrap input_tokens [$__range])))"
+          "expr": "sum(sum_over_time({job=\"llm\", model=~\"$model\"} | json cache_read_tokens=\"cache_read_tokens\" | unwrap cache_read_tokens [$__range])) / (sum(sum_over_time({job=\"llm\", model=~\"$model\"} | json cache_read_tokens=\"cache_read_tokens\" | unwrap cache_read_tokens [$__range])) + sum(sum_over_time({job=\"llm\", model=~\"$model\"} | json input_tokens=\"input_tokens\" | unwrap input_tokens [$__range])))"
         }
       ]
     },
@@ -182,7 +182,7 @@
             "uid": "P8E80F9AEF21F6940"
           },
           "queryType": "instant",
-          "expr": "sum(sum_over_time({job=\"llm\"} | json output_tokens=\"output_tokens\" | unwrap output_tokens [$__range]))"
+          "expr": "sum(sum_over_time({job=\"llm\", model=~\"$model\"} | json output_tokens=\"output_tokens\" | unwrap output_tokens [$__range]))"
         }
       ]
     },
@@ -216,7 +216,7 @@
             "type": "loki",
             "uid": "P8E80F9AEF21F6940"
           },
-          "expr": "sum(sum_over_time({job=\"llm\"} | json custo_brl=\"custo_brl\" | unwrap custo_brl [1d]))",
+          "expr": "sum(sum_over_time({job=\"llm\", model=~\"$model\"} | json custo_brl=\"custo_brl\" | unwrap custo_brl [1d]))",
           "legendFormat": "R$/dia"
         }
       ]
@@ -251,7 +251,7 @@
             "type": "loki",
             "uid": "P8E80F9AEF21F6940"
           },
-          "expr": "sum(sum_over_time({job=\"llm\"} | json input_tokens=\"input_tokens\" | unwrap input_tokens [1d]))",
+          "expr": "sum(sum_over_time({job=\"llm\", model=~\"$model\"} | json input_tokens=\"input_tokens\" | unwrap input_tokens [1d]))",
           "legendFormat": "entrada"
         },
         {
@@ -260,7 +260,7 @@
             "type": "loki",
             "uid": "P8E80F9AEF21F6940"
           },
-          "expr": "sum(sum_over_time({job=\"llm\"} | json output_tokens=\"output_tokens\" | unwrap output_tokens [1d]))",
+          "expr": "sum(sum_over_time({job=\"llm\", model=~\"$model\"} | json output_tokens=\"output_tokens\" | unwrap output_tokens [1d]))",
           "legendFormat": "saída"
         },
         {
@@ -269,7 +269,7 @@
             "type": "loki",
             "uid": "P8E80F9AEF21F6940"
           },
-          "expr": "sum(sum_over_time({job=\"llm\"} | json cache_read_tokens=\"cache_read_tokens\" | unwrap cache_read_tokens [1d]))",
+          "expr": "sum(sum_over_time({job=\"llm\", model=~\"$model\"} | json cache_read_tokens=\"cache_read_tokens\" | unwrap cache_read_tokens [1d]))",
           "legendFormat": "cache lido"
         },
         {
@@ -278,7 +278,7 @@
             "type": "loki",
             "uid": "P8E80F9AEF21F6940"
           },
-          "expr": "sum(sum_over_time({job=\"llm\"} | json cache_creation_tokens=\"cache_creation_tokens\" | unwrap cache_creation_tokens [1d]))",
+          "expr": "sum(sum_over_time({job=\"llm\", model=~\"$model\"} | json cache_creation_tokens=\"cache_creation_tokens\" | unwrap cache_creation_tokens [1d]))",
           "legendFormat": "cache gravado"
         }
       ]
@@ -313,7 +313,7 @@
             "type": "loki",
             "uid": "P8E80F9AEF21F6940"
           },
-          "expr": "sum(sum_over_time({job=\"llm\"} | json cache_read_tokens=\"cache_read_tokens\" | unwrap cache_read_tokens [1d])) / (sum(sum_over_time({job=\"llm\"} | json cache_read_tokens=\"cache_read_tokens\" | unwrap cache_read_tokens [1d])) + sum(sum_over_time({job=\"llm\"} | json input_tokens=\"input_tokens\" | unwrap input_tokens [1d])))",
+          "expr": "sum(sum_over_time({job=\"llm\", model=~\"$model\"} | json cache_read_tokens=\"cache_read_tokens\" | unwrap cache_read_tokens [1d])) / (sum(sum_over_time({job=\"llm\", model=~\"$model\"} | json cache_read_tokens=\"cache_read_tokens\" | unwrap cache_read_tokens [1d])) + sum(sum_over_time({job=\"llm\", model=~\"$model\"} | json input_tokens=\"input_tokens\" | unwrap input_tokens [1d])))",
           "legendFormat": "ratio"
         }
       ]
@@ -349,7 +349,7 @@
             "type": "loki",
             "uid": "P8E80F9AEF21F6940"
           },
-          "expr": "quantile_over_time(0.5, {job=\"llm\"} | json ttft_ms=\"ttft_ms\" | unwrap ttft_ms [1d]) by ()",
+          "expr": "quantile_over_time(0.5, {job=\"llm\", model=~\"$model\"} | json ttft_ms=\"ttft_ms\" | unwrap ttft_ms [1d]) by ()",
           "legendFormat": "1º token · 50% menor que"
         },
         {
@@ -358,7 +358,7 @@
             "type": "loki",
             "uid": "P8E80F9AEF21F6940"
           },
-          "expr": "quantile_over_time(0.95, {job=\"llm\"} | json ttft_ms=\"ttft_ms\" | unwrap ttft_ms [1d]) by ()",
+          "expr": "quantile_over_time(0.95, {job=\"llm\", model=~\"$model\"} | json ttft_ms=\"ttft_ms\" | unwrap ttft_ms [1d]) by ()",
           "legendFormat": "1º token · 95% menor que"
         },
         {
@@ -367,7 +367,7 @@
             "type": "loki",
             "uid": "P8E80F9AEF21F6940"
           },
-          "expr": "quantile_over_time(0.5, {job=\"llm\"} | json total_ms=\"total_ms\" | unwrap total_ms [1d]) by ()",
+          "expr": "quantile_over_time(0.5, {job=\"llm\", model=~\"$model\"} | json total_ms=\"total_ms\" | unwrap total_ms [1d]) by ()",
           "legendFormat": "turno total · 50% menor que"
         },
         {
@@ -376,7 +376,7 @@
             "type": "loki",
             "uid": "P8E80F9AEF21F6940"
           },
-          "expr": "quantile_over_time(0.95, {job=\"llm\"} | json total_ms=\"total_ms\" | unwrap total_ms [1d]) by ()",
+          "expr": "quantile_over_time(0.95, {job=\"llm\", model=~\"$model\"} | json total_ms=\"total_ms\" | unwrap total_ms [1d]) by ()",
           "legendFormat": "turno total · 95% menor que"
         }
       ]
@@ -401,7 +401,7 @@
             "type": "loki",
             "uid": "P8E80F9AEF21F6940"
           },
-          "expr": "sum by (user_nome) (sum_over_time({job=\"llm\"} | json custo_brl=\"custo_brl\" | unwrap custo_brl [$__range]))",
+          "expr": "sum by (user_nome) (sum_over_time({job=\"llm\", model=~\"$model\"} | json custo_brl=\"custo_brl\" | unwrap custo_brl [$__range]))",
           "legendFormat": "{{user_nome}}"
         }
       ],
@@ -483,7 +483,7 @@
             "type": "loki",
             "uid": "P8E80F9AEF21F6940"
           },
-          "expr": "sum by (canal) (count_over_time({job=\"llm\"}[$__range]))",
+          "expr": "sum by (canal) (count_over_time({job=\"llm\", model=~\"$model\"}[$__range]))",
           "legendFormat": "{{canal}}"
         }
       ],
@@ -528,7 +528,7 @@
             "type": "loki",
             "uid": "P8E80F9AEF21F6940"
           },
-          "expr": "{job=\"llm\"} | json | line_format \"{{.user_nome}} · {{.model}} · R$ {{.custo_brl}} · {{.ttft_ms}}ms 1º token · {{.pergunta}}\""
+          "expr": "{job=\"llm\", model=~\"$model\"} | json | line_format \"{{.user_nome}} · {{.model}} · R$ {{.custo_brl}} · {{.ttft_ms}}ms 1º token · {{.pergunta}}\""
         }
       ],
       "fieldConfig": {
@@ -559,12 +559,48 @@
             "type": "loki",
             "uid": "P8E80F9AEF21F6940"
           },
-          "expr": "{job=\"llm\"} | json | custo_brl > 0.25 | line_format \"R$ {{.custo_brl}} · {{.user_nome}} · in {{.input_tokens}} / out {{.output_tokens}} / cacheR {{.cache_read_tokens}} / cacheW {{.cache_creation_tokens}} · {{.pergunta}}\""
+          "expr": "{job=\"llm\", model=~\"$model\"} | json | custo_brl > 0.25 | line_format \"R$ {{.custo_brl}} · {{.user_nome}} · in {{.input_tokens}} / out {{.output_tokens}} / cacheR {{.cache_read_tokens}} / cacheW {{.cache_creation_tokens}} · {{.pergunta}}\""
         }
       ],
       "fieldConfig": {
         "defaults": {}
       }
     }
-  ]
+  ],
+  "templating": {
+    "list": [
+      {
+        "name": "model",
+        "label": "Modelo",
+        "type": "query",
+        "datasource": {
+          "type": "loki",
+          "uid": "P8E80F9AEF21F6940"
+        },
+        "query": {
+          "type": 1,
+          "label": "model",
+          "stream": "{job=\"llm\"}"
+        },
+        "refresh": 2,
+        "sort": 1,
+        "multi": true,
+        "includeAll": true,
+        "allValue": ".+",
+        "current": {
+          "selected": true,
+          "text": [
+            "deepseek-v4-flash",
+            "deepseek-v4-pro"
+          ],
+          "value": [
+            "deepseek-v4-flash",
+            "deepseek-v4-pro"
+          ]
+        },
+        "options": [],
+        "hide": 0
+      }
+    ]
+  }
 }
