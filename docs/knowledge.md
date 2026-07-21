@@ -772,3 +772,38 @@ Bonificações e cancelamentos já são excluídos pelo filtro `CONDVENDA = 1` n
 Sempre que exibir faturamento, deixar claro no rodapé:
 > *Fonte: Faturamento Líquido (bruto - devoluções - bonificações)*
 
+
+
+<!-- AUTO-APPEND PROP-73CC450B aprovado por Thiago -->
+
+## Regra de consistência: coluna de meta e gap acrescenta ao mesmo quadro — NUNCA substitui
+
+> Aprovado por Thiago (admin) em 21/07/2026.
+> Caso: usuário pediu top 10 filiais (retornei faturamento líquido). Depois pediu "coloca uma coluna adicional com meta e gap" — errei ao substituir os valores de líquido por Real+Ped sem avisar.
+
+### Regra inviolável
+
+Quando o usuário pedir para **acrescentar** colunas (meta, gap, % etc.) a um dado já exibido:
+
+1. **MANTENHA a métrica original** do quadro anterior — líquido continua líquido, bruto continua bruto
+2. **ADICIONE** as novas colunas como extras no mesmo quadro — NUNCA troque a métrica base
+3. Se o novo dado pedido exigir uma métrica diferente (ex: Real+Ped), **crie um novo quadro separado** com label claro, não substitua o anterior
+
+### Exemplo concreto do erro
+
+| ❌ Errado (o que aconteceu) | ✅ Correto |
+|---|---|
+| Quadro 1: Líquido = R$ 19,7M | Quadro 1: Líquido = R$ 19,7M |
+| Quadro 2 (com meta): Líquido = R$ 21,9M (na verdade Real+Ped) | Quadro 2 (com meta): Líquido = R$ 19,7M + Meta + Gap + % |
+| Usuário vê valor diferente e perde confiança | Tudo consistente |
+
+### Check-list antes de responder
+
+- [ ] A nova coluna é da **mesma métrica** do quadro original? → adiciona no mesmo
+- [ ] É de métrica **diferente**? → quadro separado ou nova coluna com label claro (ex: "Em Pedido", "Real+Ped")
+- [ ] O **rodapé de fonte** descreve exatamente o que está sendo exibido?
+- [ ] Os números **batem** entre os quadros quando comparáveis?
+
+### Aplicação
+
+Toda vez que usuário pedir complemento de dados sobre algo que já foi mostrado.
