@@ -269,6 +269,10 @@ CREATE_ROUTE_MAP_TOOL = {
                         "lat": {"type": "string", "description": "LATITUDE (string do Oracle)"},
                         "lng": {"type": "string", "description": "LONGITUDE (string do Oracle)"},
                         "municipio": {"type": "string"},
+                        "status": {"type": "string",
+                            "enum": ["vendeu", "visitou_nao_vendeu", "nao_visitou", "fora_rota"],
+                            "description": "Status do cliente no dia (colore o pin). vendeu=verde, "
+                                           "visitou_nao_vendeu=vermelho, nao_visitou=amarelo, fora_rota=azul"},
                     },
                     "required": ["codcli", "cliente", "lat", "lng"],
                 },
