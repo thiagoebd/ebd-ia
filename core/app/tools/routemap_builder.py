@@ -89,6 +89,7 @@ def _clean_points(raw: list[dict]) -> tuple[list[dict], dict]:
                 "lat": round(lat, 7),
                 "lng": round(lng, 7),
                 "municipio": (p.get("municipio") or "").strip() or None,
+                "status": (p.get("status") or "").strip() or None,
             }
     pts = sorted(seen.values(), key=lambda x: (x["seq"] is None, x["seq"] if x["seq"] is not None else 0))
     coords_unicas = len({(x["lat"], x["lng"]) for x in pts})
@@ -98,6 +99,8 @@ def _clean_points(raw: list[dict]) -> tuple[list[dict], dict]:
         "descartados": descartados,
         "coords_unicas": coords_unicas,  # < plotados = geocodacao grosseira (pins empilhados)
     }
+    from collections import Counter
+    stats["by_status"] = dict(Counter(x.get("status") or "sem_status" for x in pts))
     return pts, stats
 
 

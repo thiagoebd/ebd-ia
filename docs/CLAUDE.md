@@ -555,3 +555,10 @@ Quando o usuario pedir "roteiro/rota no mapa", "onde estao os clientes do RCA", 
    (troque DTPROXVISITA por outra data se pedirem outro dia; para uma FILIAL inteira, junte PCUSUARI u ON u.CODUSUR=r.CODUSUR e filtre u.CODFILIAL).
 2. Chame create_route_map passando title, rca, dia (YYYY-MM-DD) e points=[{seq,codcli,cliente,lat,lng,municipio}].
    O backend deduplica por codcli e descarta coord invalida. NAO rode a query de novo so pro mapa.
+
+### IMPORTANTE — status é do PIN, não só do texto
+Ao gerar QUALQUER mapa de rota de um vendedor, calcule a positivação e passe o `status` em CADA ponto
+do create_route_map. Use EXATAMENTE um destes valores (não use cor nem rótulo):
+  vendeu | visitou_nao_vendeu | nao_visitou | fora_rota
+NÃO escreva a legenda colorida só no texto — o card colore e conta sozinho a partir do campo `status`.
+Se você calculou o status pra tabela, ele TEM que ir no campo `status` de cada ponto também.
