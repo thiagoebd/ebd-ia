@@ -87,6 +87,19 @@ from app.tools.knowledge_append import (
 )
 
 _client = AsyncAnthropic(api_key=settings.anthropic_api_key)
+_deepseek_client = (
+    AsyncAnthropic(api_key=settings.deepseek_api_key, base_url=settings.deepseek_base_url)
+    if settings.deepseek_api_key else None
+)
+
+
+def _client_for(model: str | None):
+    """Roteia o client pelo prefixo do modelo: deepseek-* -> DeepSeek; senao Claude.
+    Para deepseek, o nome real do modelo vem do .env (settings.deepseek_model)."""
+    m = model or settings.claude_model
+    if m.startswith("deepseek") and _deepseek_client is not None:
+        return _deepseek_client, m
+    return _client, m
 _system_prompt = build_system_prompt()
 _tools = [ORACLE_QUERY_TOOL, KNOWLEDGE_APPEND_TOOL, LIST_PROPOSALS_TOOL, CREATE_EXCEL_TOOL, CREATE_PDF_TOOL, CREATE_PPTX_TOOL, CREATE_CHART_TOOL, LIST_TEMPLATES_TOOL, GET_TEMPLATE_TOOL]
 
@@ -251,8 +264,9 @@ async def run_turn(
 
     while iterations < settings.max_iterations:
         iterations += 1
-        response = await _client.messages.create(
-            model=model or settings.claude_model,
+        _cli, _m = _client_for(model)
+        response = await _cli.messages.create(
+            model=_m,
             max_tokens=settings.max_tokens,
             system=system_blocks,
             tools=_tools,
@@ -359,8 +373,9 @@ async def run_turn_stream(
         # Streaming da chamada ao Claude
         text_acc = ""
         tool_uses = []  # blocks tool_use desta iteracao
-        async with _client.messages.stream(
-            model=model or settings.claude_model,
+        _cli, _m = _client_for(model)
+        async with _cli.messages.stream(
+            model=_m,
             max_tokens=settings.max_tokens,
             system=system_blocks,
             tools=_tools,

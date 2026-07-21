@@ -1,18 +1,17 @@
-"""Catálogo dos modelos Claude disponíveis no chat web e regras por role.
+"""Catálogo dos modelos disponíveis no chat web e regras por role.
 
 Fonte única: importado por /api/me (mostra opções pro front) e por /api/chat (valida).
 """
 import os
 
-DEFAULT_MODEL = "claude-sonnet-4-6"
+DEFAULT_MODEL = "deepseek-v4-flash"
 
 ALL_MODELS = [
-    {"id": "claude-haiku-4-5",  "label": "Claude Haiku 4.5",  "tier": "rápido e barato"},
-    {"id": "claude-sonnet-4-6", "label": "Claude Sonnet 4.6", "tier": "equilibrado"},
-    {"id": "claude-opus-4-8",   "label": "Claude Opus 4.8",   "tier": "mais capaz"},
+    {"id": "deepseek-v4-flash", "label": "DeepSeek Flash", "tier": "rápido e econômico"},
+    {"id": "deepseek-v4-pro",   "label": "DeepSeek Pro",   "tier": "mais capaz"},
 ]
 
-USER_MODELS = ["claude-haiku-4-5"]
+USER_MODELS = [m["id"] for m in ALL_MODELS]
 ADMIN_MODELS = [m["id"] for m in ALL_MODELS]
 
 ADMIN_OIDS = {

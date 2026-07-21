@@ -144,7 +144,12 @@ async def chat(body: ChatRequest, claims: dict = Depends(verify_token)):
                             _cr  = int(_u.get("cache_read_input_tokens", 0) or 0)
                             _cw  = int(_u.get("cache_creation_input_tokens", 0) or 0)
                             _mstr = str(model_used).lower()
-                            if 'haiku' in _mstr:
+                            if 'deepseek' in _mstr:
+                                if 'pro' in _mstr:
+                                    _pin, _pout, _prd, _pwr = 0.435, 0.87, 0.003625, 0.0
+                                else:
+                                    _pin, _pout, _prd, _pwr = 0.14, 0.28, 0.0028, 0.0
+                            elif 'haiku' in _mstr:
                                 _pin, _pout, _prd, _pwr = 1.0, 5.0, 0.10, 2.0
                             elif 'opus' in _mstr:
                                 _pin, _pout, _prd, _pwr = 5.0, 25.0, 0.50, 10.0
