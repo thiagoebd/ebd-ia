@@ -70,6 +70,8 @@ from app.tools.oracle_bridge import (
 )
 from app.tools.artifact_tools import CREATE_EXCEL_TOOL, CREATE_PDF_TOOL, CREATE_PPTX_TOOL, CREATE_CHART_TOOL
 from app.tools.chart_builder import build_chart
+from app.tools.artifact_tools import CREATE_ROUTE_MAP_TOOL
+from app.tools.routemap_builder import build_route_map
 from app.tools.template_catalog import (
     LIST_TEMPLATES_TOOL, GET_TEMPLATE_TOOL, tool_list_templates, tool_get_template,
 )
@@ -101,7 +103,7 @@ def _client_for(model: str | None):
         return _deepseek_client, m
     return _client, m
 _system_prompt = build_system_prompt()
-_tools = [ORACLE_QUERY_TOOL, KNOWLEDGE_APPEND_TOOL, LIST_PROPOSALS_TOOL, CREATE_EXCEL_TOOL, CREATE_PDF_TOOL, CREATE_PPTX_TOOL, CREATE_CHART_TOOL, LIST_TEMPLATES_TOOL, GET_TEMPLATE_TOOL]
+_tools = [ORACLE_QUERY_TOOL, KNOWLEDGE_APPEND_TOOL, LIST_PROPOSALS_TOOL, CREATE_EXCEL_TOOL, CREATE_PDF_TOOL, CREATE_PPTX_TOOL, CREATE_CHART_TOOL, LIST_TEMPLATES_TOOL, GET_TEMPLATE_TOOL, CREATE_ROUTE_MAP_TOOL]
 
 
 def reload_system_prompt() -> int:
@@ -153,6 +155,8 @@ async def _run_tool(tool_name: str, tool_input: dict, user_id: str, user_role: s
         return await _run_create_pptx(tool_input, user_id)
     if tool_name == "create_chart":
         return await _run_create_chart(tool_input, user_id)
+    if tool_name == "create_route_map":
+        return await _run_create_route_map(tool_input, user_id)
     if tool_name == "list_templates":
         return tool_list_templates(familia=tool_input.get("familia"))
     if tool_name == "get_template":
@@ -476,6 +480,8 @@ async def run_turn_stream(
                         yield {"type": "status", "text": "Montando a apresentação..."}
                     elif block.name == "create_chart":
                         yield {"type": "status", "text": "Montando o gráfico..."}
+                    elif block.name == "create_route_map":
+                        yield {"type": "status", "text": "Montando o mapa do roteiro..."}
                     elif block.name in ("list_templates", "get_template"):
                         yield {"type": "status", "text": "Selecionando a consulta padrão..."}
                     else:
@@ -635,6 +641,43 @@ async def _run_create_chart(tool_input: dict, user_id: str) -> str:
     except Exception as e:
         logger.exception("Erro ao gerar grafico")
         return f"ERRO ao gerar grafico: {type(e).__name__}: {str(e)[:200]}"
+
+
+async def _run_create_route_map(tool_input: dict, user_id: str) -> str:
+    """create_route_map: valida/dedup pontos da rota, grava JSON, registra no PG."""
+    import logging
+    logger = logging.getLogger("uvicorn.error")
+    try:
+        title = tool_input.get("title", "Roteiro EBD")
+        artifact_id, file_path, filename, size_bytes = build_route_map(tool_input)
+        import json as _json
+        _spec = _json.loads(file_path.read_text(encoding="utf-8"))
+        from gateway.app import db as gw_db
+        _cid = _conv_id_ctx.get()
+        row = await gw_db.create_artifact(
+            conversation_id=_cid if _cid else None,
+            user_oid=str(user_id),
+            kind="route_map",
+            filename=filename,
+            title=title,
+            file_path=str(file_path),
+            size_bytes=size_bytes,
+            metadata={
+                "rca": tool_input.get("rca", ""),
+                "dia": tool_input.get("dia", ""),
+                "stats": _spec.get("stats", {}),
+                "footer": tool_input.get("footer", ""),
+            },
+        )
+        return (
+            f"ARTEFATO_CRIADO type=route_map id={row['id']} "
+            f'filename="{filename}" size_bytes={size_bytes}'
+        )
+    except ValueError as e:
+        return f"ERRO na spec do mapa: {e}"
+    except Exception as e:
+        logger.exception("Erro ao gerar mapa de roteiro")
+        return f"ERRO ao gerar mapa: {type(e).__name__}: {str(e)[:200]}"
 
 
 async def _run_create_pdf(tool_input: dict, user_id: str) -> str:

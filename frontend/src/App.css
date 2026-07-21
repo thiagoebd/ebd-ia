@@ -320,3 +320,7 @@ aside .sb-head img,
   font-size: 0.85rem;
   text-align: center;
 }
+
+/* mapa de roteiro precisa de largura — escapa do max-width estreito dos artefatos */
+.artifacts:has(.mapcard) { max-width: 720px; }
+.mapcard { width: 100%; }

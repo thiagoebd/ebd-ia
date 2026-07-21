@@ -234,3 +234,49 @@ CREATE_CHART_TOOL = {
         "required": ["chart_type", "title", "x_key", "series", "data", "footer"],
     },
 }
+
+
+CREATE_ROUTE_MAP_TOOL = {
+    "name": "create_route_map",
+    "description": (
+        "Plota no MAPA (renderizado na conversa) o roteiro de um vendedor/RCA — "
+        "os clientes da rota como marcadores, na ordem de visita. "
+        "Chamar quando o usuario pedir 'roteiro', 'rota do vendedor no mapa', "
+        "'onde estao os clientes do RCA', 'mapa da rota'. "
+        "Fonte da coordenada: PCCLIENT.LATITUDE/LONGITUDE (join por CODCLI na PCROTACLI). "
+        "REUTILIZE as rows que oracle_query acabou de retornar — NAO rode a query de novo. "
+        "Passe TODOS os pontos que tem coordenada; o backend deduplica por codcli e "
+        "descarta lat/lng invalidos. Idealmente filtre por UM dia (DIASEMANA) para o "
+        "roteiro-dia; a rota inteira do RCA e a carteira toda, nao um roteiro. "
+        "footer OBRIGATORIO: fonte + escopo (ex: 'Rota ativa do RCA X, quarta-feira — "
+        "coordenada de cadastro PCCLIENT')."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "title": {"type": "string",
+                      "description": "Ex: 'Roteiro RCA 3366 (Antonio Fernando) — quarta'"},
+            "rca": {"type": "string",
+                    "description": "Identificacao do RCA. Ex: '3366 — Antonio Fernando (fil 08)'"},
+            "points": {
+                "type": "array", "maxItems": 200,
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "seq": {"type": "integer", "description": "SEQUENCIA da rota"},
+                        "codcli": {"type": "integer"},
+                        "cliente": {"type": "string"},
+                        "lat": {"type": "string", "description": "LATITUDE (string do Oracle)"},
+                        "lng": {"type": "string", "description": "LONGITUDE (string do Oracle)"},
+                        "municipio": {"type": "string"},
+                    },
+                    "required": ["codcli", "cliente", "lat", "lng"],
+                },
+                "description": "Clientes da rota COM coordenada. Backend deduplica por codcli.",
+            },
+            "footer": {"type": "string",
+                       "description": "OBRIGATORIO. Fonte + escopo do roteiro em linguagem de negocio."},
+        },
+        "required": ["title", "rca", "points", "footer"],
+    },
+}

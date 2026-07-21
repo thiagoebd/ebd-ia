@@ -92,6 +92,10 @@ TEST_USERS_RAW: list[dict] = [
      "nome": "Fernanda", "role": "admin", "codusur": None, "filiais": "*", "regionais": None},
     {"user_id": 10, "celular": None, "email": "tercio.quatroni@ebdgrupo.com.br",
      "nome": "Tercio Quatroni", "role": "admin", "codusur": None, "filiais": "*", "regionais": None},
+    {"user_id": 11, "celular": None, "email": "fabio.alves@ebdgrupo.com.br",
+     "nome": "Fabio Alves", "role": "admin", "codusur": None, "filiais": "*", "regionais": None},
+    {"user_id": 12, "celular": None, "email": "hudson.coutinho@ebdgrupo.com.br",
+     "nome": "Hudson Coutinho", "role": "admin", "codusur": None, "filiais": "*", "regionais": None},
     # Identidade de SERVICO (canal Telegram / fallback interno).
     # LEGACY: celular mantido como alias de transicao — bot em producao tem o
     # default antigo em memoria. REMOVER quando o bot migrar pra systemd.

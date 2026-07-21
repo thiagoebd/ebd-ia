@@ -10,6 +10,7 @@ import { loginRequest, apiRequest } from "./auth/authConfig";
 import "./App.css";
 import { ArtifactCard, type ArtifactRef } from "./ArtifactCard";
 import { ChartCard } from "./ChartCard";
+import { MapCard } from "./MapCard";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL;
 
@@ -407,6 +408,8 @@ function App() {
                             {m.artifacts.map((a) => (
                               a.kind === "chart"
                                 ? <ChartCard key={a.id} artifact={a} getToken={token} />
+                                : a.kind === "route_map"
+                                ? <MapCard key={a.id} artifact={a} getToken={token} />
                                 : <ArtifactCard key={a.id} artifact={a} getToken={token} />
                             ))}
                           </div>

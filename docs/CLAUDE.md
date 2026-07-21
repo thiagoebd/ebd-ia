@@ -542,3 +542,16 @@ Quando o usuario quer TODOS os registros (extração, base completa, "todos os R
 chame oracle_query com max_rows=5000 (teto do sistema). Se o resultado voltar
 marcado TRUNCATED mesmo em 5000, informe o teto e ofereça filtrar (por regional,
 por filial) — NUNCA entregue parcial como se fosse total sem avisar.
+
+
+## Mapa de roteiro (tool create_route_map)
+Quando o usuario pedir "roteiro/rota no mapa", "onde estao os clientes do RCA", "mapa da rota":
+1. Rode oracle_query da rota-dia (a coordenada vem do PCCLIENT, NAO do PCVISITAFV — visita nao tem GPS):
+   SELECT r.SEQUENCIA, r.CODCLI, c.CLIENTE, c.LATITUDE, c.LONGITUDE, c.MUNICENT
+   FROM PCROTACLI r JOIN PCCLIENT c ON c.CODCLI=r.CODCLI
+   WHERE r.CODUSUR=:rca AND r.DTFINAL>SYSDATE AND r.DTPROXVISITA=TRUNC(SYSDATE)
+     AND c.LATITUDE IS NOT NULL
+   ORDER BY r.SEQUENCIA
+   (troque DTPROXVISITA por outra data se pedirem outro dia; para uma FILIAL inteira, junte PCUSUARI u ON u.CODUSUR=r.CODUSUR e filtre u.CODFILIAL).
+2. Chame create_route_map passando title, rca, dia (YYYY-MM-DD) e points=[{seq,codcli,cliente,lat,lng,municipio}].
+   O backend deduplica por codcli e descarta coord invalida. NAO rode a query de novo so pro mapa.
