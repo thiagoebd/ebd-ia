@@ -14,6 +14,7 @@ from pydantic import BaseModel
 
 from gateway.app.auth.entra import verify_token
 from gateway.app.models_catalog import is_admin
+from gateway.app import acl_store
 from fastapi import HTTPException
 from gateway.app import db
 from gateway.app.models_catalog import resolve_model
@@ -60,7 +61,7 @@ def _title_from(text: str) -> str:
 async def chat(body: ChatRequest, claims: dict = Depends(verify_token)):
     oid = claims.get("oid")
     _email = claims.get("preferred_username") or claims.get("upn") or claims.get("unique_name") or claims.get("email")
-    if not is_admin(oid, _email):
+    if not await acl_store.is_allowed(_email):
         raise HTTPException(status_code=403, detail="Seu acesso ainda nao foi configurado. Fale com o admin (TI Grupo EBD).")
     user_id = oid or claims.get("sub") or "web-user"
     user_role = "admin"  # passou aqui = autorizado pela ACL

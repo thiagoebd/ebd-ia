@@ -11,13 +11,14 @@ import "./App.css";
 import { ArtifactCard, type ArtifactRef } from "./ArtifactCard";
 import { ChartCard } from "./ChartCard";
 import { MapCard } from "./MapCard";
+import { AccessAdmin } from "./AccessAdmin";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL;
 
 type Msg = { role: "user" | "assistant"; text: string; status?: string; tools?: string[]; artifacts?: ArtifactRef[] };
 type Thread = { id: string; title: string; msgs: Msg[]; loaded: boolean; model?: string };
 type ModelInfo = { id: string; label: string; tier: string };
-type MeInfo = { role: "admin" | "user"; models: { default: string; available: ModelInfo[] } };
+type MeInfo = { role: "admin" | "user"; super_admin?: boolean; models: { default: string; available: ModelInfo[] } };
 
 function App() {
   const { instance, accounts } = useMsal();
@@ -30,6 +31,7 @@ function App() {
   const [me, setMe] = useState<MeInfo | null>(null);
   const [selectedModel, setSelectedModel] = useState<string>("deepseek-v4-flash");
   const [modelOpen, setModelOpen] = useState(false);
+  const [showAccess, setShowAccess] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -65,7 +67,7 @@ function App() {
         const meResp = await fetch(`${API_BASE}/api/me`, { headers: { Authorization: `Bearer ${t}` } });
         if (meResp.ok) {
           const meData = await meResp.json();
-          setMe({ role: meData.role, models: meData.models });
+          setMe({ role: meData.role, super_admin: meData.super_admin, models: meData.models });
           setSelectedModel(meData.models.default);
         }
       } catch { /* silencioso */ }
@@ -293,6 +295,7 @@ function App() {
               <div className="sb-link"><span className="lbl">Gráficos</span><span className="count">—</span></div>
             </div>
 
+            {me?.super_admin && (<div className="sb-section" style={{cursor:"pointer"}} onClick={() => setShowAccess(true)}>Acessos</div>)}
             <div className="sb-section">Conexões</div>
             <div className="sb-list">
               <div className="sb-link"><span className="dot-ok" /><span className="lbl">Winthor / Oracle</span></div>
@@ -354,6 +357,7 @@ function App() {
               <button className="link" onClick={logout}>sair</button>
             </div>
           </aside>
+          {showAccess && me?.super_admin && <AccessAdmin getToken={token} onClose={() => setShowAccess(false)} />}
 
           <main className="main">
             <div className="chat" ref={scrollRef}>
