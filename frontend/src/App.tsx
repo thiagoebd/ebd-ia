@@ -32,6 +32,10 @@ function App() {
   const [selectedModel, setSelectedModel] = useState<string>("deepseek-v4-flash");
   const [modelOpen, setModelOpen] = useState(false);
   const [showAccess, setShowAccess] = useState(false);
+  const [mercado, setMercado] = useState<{
+    macro: { rotulo: string; valor: string; ref: string | null }[];
+    noticias: { titulo: string; veiculo: string; link: string; quando: string }[];
+  }>({ macro: [], noticias: [] });
   const [confirmingDelete, setConfirmingDelete] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -68,6 +72,12 @@ function App() {
         if (meResp.ok) {
           const meData = await meResp.json();
           setMe({ role: meData.role, super_admin: meData.super_admin, models: meData.models });
+        try {
+          const tok = await token();
+          const rm = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/mercado`,
+                                 { headers: { Authorization: `Bearer ${tok}` } });
+          if (rm.ok) setMercado(await rm.json());
+        } catch { /* bloco de mercado e opcional: falhou, nao aparece */ }
           setSelectedModel(meData.models.default);
         }
       } catch { /* silencioso */ }
@@ -365,34 +375,32 @@ function App() {
                 {messages.length === 0 ? (
                   <div className="empty">
                     <h1>Como posso te <em>ajudar hoje?</em></h1>
-                    <p className="empty-sub">Pergunte em português — eu cuido do resto. Você tem visão <strong>Brasil completa</strong>.</p>
-                    <p className="empty-sub">Posso gerar <strong>Excel, PDF e PowerPoint</strong> quando você pedir.</p>
-                    <div className="suggest">
-                      <button onClick={() => send("Qual o faturamento de hoje no BR?")}>
-                        <span className="s-title">Faturamento de hoje</span>
-                        <span className="s-desc">Líquido por filial, visão BR.</span>
-                      </button>
-                      <button onClick={() => send("Top 10 filiais por faturamento no mês")}>
-                        <span className="s-title">Top 10 filiais no mês</span>
-                        <span className="s-desc">Ranking de faturamento do mês corrente.</span>
-                      </button>
-                      <button onClick={() => send("Como está a ruptura hoje no BR?")}>
-                        <span className="s-title">Ruptura agora</span>
-                        <span className="s-desc">SKUs em falta e valor perdido por filial.</span>
-                      </button>
-                      <button onClick={() => send("Top fornecedores do mês por faturamento")}>
-                        <span className="s-title">Top fornecedores</span>
-                        <span className="s-desc">Maiores fornecedores no mês corrente.</span>
-                      </button>
-                      <button onClick={() => send("Quantos vendedores transmitiram pedido hoje no BR?")}>
-                        <span className="s-title">Vendedores em campo hoje</span>
-                        <span className="s-desc">Quem transmitiu pedido até agora.</span>
-                      </button>
-                      <button onClick={() => send("Como cada regional está vs meta do mês?")}>
-                        <span className="s-title">% Meta por regional</span>
-                        <span className="s-desc">Realização do mês por regional.</span>
-                      </button>
-                    </div>
+                    <p className="empty-sub">Sou um agente especializado em distribuição. Consulto o Winthor na hora e te devolvo o dado rapidinho.</p>
+                    <p className="empty-sub">Vou além de puxar número: comparo períodos, rankeio filiais, vendedores e fornecedores, cruzo meta com realizado e mostro onde está o gap, aponto ruptura e acompanho positivação em campo.</p>
+                    <p className="empty-sub">Mostro em texto, tabela, gráfico ou mapa — e gero <strong>Excel, PDF ou PowerPoint</strong> quando você pedir.</p>
+                    {mercado.macro.length > 0 && (
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: 26, justifyContent: "center", margin: "30px 0 4px" }}>
+                        {mercado.macro.map((m) => (
+                          <div key={m.rotulo} style={{ textAlign: "center", minWidth: 92 }}>
+                            <div style={{ fontSize: 11, letterSpacing: ".06em", textTransform: "uppercase", color: "#8a8a80" }}>{m.rotulo}</div>
+                            <div style={{ fontSize: 19, fontWeight: 600, color: "#1c2c5e", marginTop: 2 }}>{m.valor}</div>
+                            {m.ref && <div style={{ fontSize: 10, color: "#a8a89c", marginTop: 1 }}>{m.ref}</div>}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    {mercado.noticias.length > 0 && (
+                      <div style={{ maxWidth: 620, margin: "26px auto 0", textAlign: "left" }}>
+                        <div style={{ fontSize: 11, letterSpacing: ".08em", textTransform: "uppercase", color: "#8a8a80", marginBottom: 8 }}>Mercado</div>
+                        {mercado.noticias.map((n) => (
+                          <a key={n.link} href={n.link} target="_blank" rel="noopener noreferrer"
+                             style={{ display: "block", padding: "9px 0", borderTop: "1px solid #ececE4", textDecoration: "none", color: "inherit" }}>
+                            <div style={{ fontSize: 14, lineHeight: 1.35, color: "#2a2a24" }}>{n.titulo}</div>
+                            <div style={{ fontSize: 11.5, color: "#9a9a8e", marginTop: 2 }}>{n.veiculo} · {n.quando}</div>
+                          </a>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 ) : (
                   messages.map((m, i) => (
