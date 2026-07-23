@@ -1238,3 +1238,42 @@ em vez de R$ 14.152).
 
 ❌ **NUNCA** apresentar `VALOR_ROTA` como se fosse a produção total do vendedor.
 
+
+
+<!-- AUTO-APPEND PROP-5F84A956 aprovado por Thiago -->
+
+### 2026-07-23 — RCAs desligados ainda aparecem na rota (PCROTACLI) com clientes órfãos — filtrar SEMPRE por DTTERMINO
+
+**Contexto:** análise de performance de atendimento em EBD SBC (18) no mês de julho/2026. Ao listar vendedores com rota ativa (PCROTACLI + DTFINAL futuro), encontramos 7 vendedores com rota (368 clientes) mas ZERO vendas no mês — todos eram ex-funcionários desligados há meses/anos.
+
+**Erro anterior:** queries de rota/produtividade (T182, T270, T271) não filtravam `u.DTTERMINO` no JOIN com PCROTACLI, inflando o número de "vendedores da filial" e gerando métricas distorcidas de cobertura/aproveitamento.
+
+**Correção OBRIGATÓRIA em TODAS as queries de rota (PCROTACLI):**
+
+```sql
+JOIN EBD.PCUSUARI u ON u.CODUSUR = r.CODUSUR
+WHERE (u.DTTERMINO IS NULL OR u.DTTERMINO >= TRUNC(SYSDATE))
+  -- mais filtros de exclusão padrão (supervisor, ORFAO, VAGO, ECOMMERCE etc.)
+```
+
+**Impacto medido (EBD SBC, 23/07/2026):**
+- Sem filtro DTTERMINO: 34+ "vendedores" listados
+- Com filtro correto: 27 vendedores de campo ativos
+- Clientes órfãos removidos: 368 (em 7 ex-funcionários)
+- Caso mais crítico: CLOVIS MAURILIO BROCARDO — desligado out/2025, ainda com 129 clientes na rota
+
+**Regra de negócio:** PCROTACLI NÃO é automaticamente limpa quando o RCA é desligado. O cadastro de rota só é atualizado manualmente pelo supervisor/gerente. Portanto, filtro de `DTTERMINO` no JOIN com PCUSUARI é obrigatório — não confiar que PCROTACLI só contenha RCAs ativos.
+
+**Anti-padrão a evitar:**
+```sql
+-- ❌ ERRADO: confia que PCROTACLI só tem vendedores ativos
+JOIN EBD.PCUSUARI u ON u.CODUSUR = r.CODUSUR
+WHERE u.CODFILIAL = :codFilial
+
+-- ✅ CORRETO: filtra desligados explicitamente
+JOIN EBD.PCUSUARI u ON u.CODUSUR = r.CODUSUR
+WHERE u.CODFILIAL = :codFilial
+  AND (u.DTTERMINO IS NULL OR u.DTTERMINO >= TRUNC(SYSDATE))
+```
+
+**Aplicação:** revisar template T182 (Produtividade em Rota) e templates T270-T272 (Rota de Visitas) para incluir este filtro.
