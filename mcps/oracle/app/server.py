@@ -163,6 +163,106 @@ def validate_sql(sql: str) -> tuple[bool, str | None]:
     return True, None
 
 
+_scope_cat = None
+_scope_cat_erro = None
+
+
+def _scope_catalogo():
+    """Carrega o catalogo do Oracle uma vez (~4s) e mantem em memoria."""
+    global _scope_cat, _scope_cat_erro
+    if _scope_cat is not None or _scope_cat_erro is not None:
+        return _scope_cat
+    import time as _t
+    from app import scope_guard as sg
+    t0 = _t.perf_counter()
+    try:
+        _scope_cat = sg.carregar_do_oracle(get_pool())
+        log.info("scope_catalogo_ok", ms=round((_t.perf_counter() - t0) * 1000),
+                 **_scope_cat.resumo())
+    except Exception as e:
+        _scope_cat_erro = str(e)[:200]
+        log.warning("scope_catalogo_falhou", erro=_scope_cat_erro)
+    return _scope_cat
+
+
+_MSG_ESCOPO = {
+    "filial_fora_do_escopo":
+        "A filial {d} esta fora do seu escopo de acesso.",
+    "tabela_desconhecida":
+        "Nao consigo garantir o filtro de filial nessa consulta "
+        "(objeto '{d}' fora do schema mapeado).",
+    "escopo_vazio":
+        "Seu acesso nao tem nenhuma filial configurada. Fale com o TI.",
+    "catalogo_indisponivel":
+        "Nao consegui carregar o catalogo de filiais agora. Tente de novo.",
+}
+
+
+def _msg_escopo(motivo: str, detalhe: str) -> str:
+    base = _MSG_ESCOPO.get(
+        motivo, "Nao consegui aplicar o seu escopo de filial nessa consulta.")
+    return base.format(d=detalhe) if "{d}" in base else base
+
+
+def _aplicar_escopo(sql: str, user) -> str:
+    """Enforcement real: reescreve o SQL com o filtro de filial do usuario."""
+    from app import scope_guard as sg
+    cat = _scope_catalogo()
+    if cat is None:
+        raise sg.ScopeDenied("catalogo_indisponivel")
+    novo, info = sg.aplicar_escopo(sql, list(user.allowed_filiais), cat)
+    log.info("scope_aplicado", user_id=user.user_id,
+             predicados=info.get("predicados"),
+             ambiguas=info.get("ambiguas") or [],
+             filiais=info.get("filiais"))
+    return novo
+
+
+def _scope_shadow(sql: str, user) -> None:
+    """Etapa 2 — sombra. Simula um escopo regional para gerar sinal com
+    trafego real, ja que hoje ninguem tem escopo parcial. So registra."""
+    import os as _os
+    if _os.getenv("SCOPE_SHADOW", "0") not in ("1", "true", "True"):
+        return
+    import json as _j
+    import time as _t
+    from datetime import datetime as _dt
+    try:
+        from app import scope_guard as sg
+        cat = _scope_catalogo()
+        if cat is None:
+            return
+        alvo = [f.strip() for f in
+                _os.getenv("SCOPE_SHADOW_FILIAIS", "10,13,17").split(",") if f.strip()]
+        t0 = _t.perf_counter()
+        rec = {
+            "ts": _dt.now().isoformat(timespec="seconds"),
+            "user": getattr(user, "user_id", None),
+            "filiais_do_usuario": len(getattr(user, "allowed_filiais", []) or []),
+            "escopo_simulado": alvo,
+        }
+        try:
+            _novo, info = sg.aplicar_escopo(sql, alvo, cat)
+            rec.update(resultado="ok", predicados=info.get("predicados"),
+                       ambiguas=info.get("ambiguas") or [])
+        except sg.ScopeDenied as e:
+            rec.update(resultado="recusa", motivo=e.motivo, detalhe=e.detalhe[:120])
+        rec["ms"] = round((_t.perf_counter() - t0) * 1000, 1)
+        rec["sql_prefix"] = (sql or "")[:120].replace("\n", " ")
+        # Mesmo diretorio que o MCP ja grava (volume montado e com permissao
+        # do mcpuser). /app/logs pertence ao root — escrever la da EACCES.
+        d = _os.getenv("SCOPE_SHADOW_DIR") or _os.getenv(
+            "MCP_ORACLE_LOG_DIR", "/app/logs/mcp-oracle")
+        _os.makedirs(d, exist_ok=True)
+        with open(_os.path.join(d, "scope_shadow.jsonl"), "a", encoding="utf-8") as f:
+            f.write(_j.dumps(rec, default=str, ensure_ascii=False) + "\n")
+    except Exception as e:
+        try:
+            log.warning("scope_shadow_falhou", erro=str(e)[:150])
+        except Exception:
+            pass
+
+
 def inject_row_limit(sql: str, max_rows: int) -> str:
     """Injeta FETCH FIRST se ausente, pra hard cap."""
     clean = _strip_sql_comments(sql).strip().rstrip(";")
@@ -265,6 +365,28 @@ async def oracle_query(
             elapsed_ms=elapsed,
             user_context=user,
         ).model_dump()
+
+    # 2.5 ESCOPO
+    if user.escopo_total:
+        # Visao Brasil: sai fora na leitura de um booleano. SQL byte-identico,
+        # zero custo. A sombra so roda se SCOPE_SHADOW=1 (default desligado).
+        _scope_shadow(sql, user)
+    else:
+        try:
+            sql = _aplicar_escopo(sql, user)
+        except Exception as _e:
+            elapsed = (time.perf_counter() - start) * 1000
+            _motivo = getattr(_e, "motivo", "erro_escopo")
+            _detalhe = getattr(_e, "detalhe", str(_e)[:120])
+            log.warning("scope_denied", user_id=user.user_id,
+                        motivo=_motivo, detalhe=_detalhe, sql_prefix=sql[:80])
+            return ToolResponse.failure(
+                tool="oracle_query",
+                code="SCOPE_DENIED",
+                message=_msg_escopo(_motivo, _detalhe),
+                elapsed_ms=elapsed,
+                user_context=user,
+            ).model_dump()
 
     # 3. Injetar row limit
     final_sql = inject_row_limit(sql, max_rows)

@@ -81,9 +81,11 @@ def _pg_lookup_user(identifier: str, canal=None):
         _pglog.warning("escopo vazio p/ %s — negando por seguranca", identifier)
         return None
     _role = role if role in ("admin","gerente","supervisor") else "admin"
+    _total = (filiais == "*") or (scope_kind == "brasil")
     return UserContext(
         user_id=identifier, nome=nome or identifier.split("@")[0],
         role=_role, codusur=None, allowed_filiais=allowed, canal=canal,
+        escopo_total=_total,
     )
 
 
@@ -199,6 +201,7 @@ def _build_user_context(raw: dict, canal: str | None = None) -> UserContext:
         role=raw["role"],
         codusur=raw.get("codusur"),
         allowed_filiais=allowed,
+        escopo_total=(raw.get("filiais") == "*"),
         canal=canal,
     )
 

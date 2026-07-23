@@ -30,7 +30,8 @@ RUN pip install --no-cache-dir \
         "httpx>=0.27.0,<1.0.0" \
         "structlog>=24.4.0,<25.0.0" \
         "pydantic>=2.0.0,<3.0.0" \
-        "psycopg[binary]>=3.1,<4.0"
+        "psycopg[binary]>=3.1,<4.0" \
+        "sqlglot>=25.0,<32.0"
 
 COPY app/ ./app/
 

@@ -52,6 +52,13 @@ class UserContext(BaseModel):
         None, description="Canal de origem da mensagem"
     )
 
+    # Marcado na ORIGEM (onde o escopo e resolvido). True = visao Brasil.
+    # O enforcement de filial le so este booleano e sai fora: custo zero
+    # para quem enxerga tudo, que e a maioria.
+    escopo_total: bool = Field(
+        False, description="True quando o usuario enxerga todas as filiais"
+    )
+
     @field_validator("allowed_filiais")
     @classmethod
     def validar_filiais(cls, v: list[str]) -> list[str]:
