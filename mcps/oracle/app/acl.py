@@ -8,6 +8,79 @@ Fase 2: lookup em EBD.FILIAL_ACL_CHATBOT no Oracle.
 from __future__ import annotations
 
 from .models import UserContext
+import os
+import json as _json
+import logging as _logging
+
+_pglog = _logging.getLogger(__name__)
+
+# Mapa regional p/ resolver escopo vindo do Postgres (mesmo do gateway acl_store)
+_PG_REGIONAIS = {
+    "NE1": ["04","12"], "NE2": ["03","09","21"], "NE3": ["52","53"],
+    "NO1": ["06","08","11"], "NO2": ["01","07"],
+    "RJ1": ["10","13"], "RJ2": ["05","14"],
+    "SP1": ["02","16"], "SP2": ["15","18"],
+}
+_ALL_FILIAIS = ["01","02","03","04","05","06","07","08","09","10","11","12","13","14","15","16","18","21","52","53"]
+
+def _pg_resolve_filiais(scope_kind, scope_value, filiais):
+    """Traduz o escopo do acl_users em lista de CODFILIAL (ou todas p/ brasil)."""
+    if filiais == "*" or scope_kind == "brasil":
+        return list(_ALL_FILIAIS)
+    if scope_kind == "regional":
+        out = []
+        for r in (scope_value or []):
+            out += _PG_REGIONAIS.get(str(r).upper(), [])
+        return sorted(set(out)) or list(_ALL_FILIAIS)
+    # filiais/filial: usa a lista resolvida `filiais` se houver, senão scope_value
+    base = filiais if isinstance(filiais, list) and filiais else scope_value
+    return sorted({str(f).zfill(2) for f in (base or [])})
+
+def _pg_lookup_user(identifier: str, canal=None):
+    """Fase 2: busca o usuário na tabela acl_users do Postgres local.
+
+    Retorna UserContext ou None. Falha silenciosa (loga) → cai no fallback.
+    """
+    try:
+        import psycopg
+    except Exception as e:
+        _pglog.warning("psycopg indisponivel: %s", e)
+        return None
+    dsn = (f"host={os.getenv('POSTGRES_HOST','postgres')} "
+           f"port={os.getenv('POSTGRES_PORT','5432')} "
+           f"dbname={os.getenv('POSTGRES_DB')} "
+           f"user={os.getenv('POSTGRES_USER')} "
+           f"password={os.getenv('POSTGRES_PASSWORD')}")
+    try:
+        with psycopg.connect(dsn, connect_timeout=3) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT nome, role, scope_kind, scope_value, filiais, active "
+                    "FROM acl_users WHERE lower(email)=lower(%s)", (identifier,))
+                row = cur.fetchone()
+    except Exception as e:
+        _pglog.warning("pg_lookup falhou (%s): %s", identifier, e)
+        return None
+    if not row:
+        return None
+    nome, role, scope_kind, scope_value, filiais, active = row
+    if not active:
+        return None
+    # jsonb pode vir como str ou list dependendo do driver
+    if isinstance(scope_value, str):
+        try: scope_value = _json.loads(scope_value)
+        except Exception: scope_value = []
+    if isinstance(filiais, str):
+        try: filiais = _json.loads(filiais)
+        except Exception: filiais = filiais
+    allowed = _pg_resolve_filiais(scope_kind, scope_value, filiais)
+    if not allowed:
+        allowed = list(_ALL_FILIAIS)
+    _role = role if role in ("admin","gerente","supervisor") else "admin"
+    return UserContext(
+        user_id=identifier, nome=nome or identifier.split("@")[0],
+        role=_role, codusur=None, allowed_filiais=allowed, canal=canal,
+    )
 
 
 REGIONAL_TO_FILIAIS: dict[str, list[str]] = {
@@ -144,6 +217,11 @@ def resolve_user_by_identifier(
         UserContext ou None se não encontrado.
     """
     identifier = identifier.strip().lower()
+    # Fase 2: Postgres acl_users (fonte de verdade da tela de Acessos)
+    ctx = _pg_lookup_user(identifier, canal=canal)
+    if ctx is not None:
+        return ctx
+    # Fallback: TEST_USERS_RAW (usuários baked, compatibilidade)
     for raw in TEST_USERS_RAW:
         if raw.get("celular") == identifier or (raw.get("email") or "").lower() == identifier:
             return _build_user_context(raw, canal=canal)

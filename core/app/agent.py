@@ -300,11 +300,14 @@ async def run_turn(
             if block.type == "tool_use":
                 tool_calls_log.append({"name": block.name, "input": block.input, "id": block.id})
                 result_str = await _run_tool(block.name, block.input, user_id, user_role)
-                tool_results.append({
+                _tr = {
                     "type": "tool_result",
                     "tool_use_id": block.id,
                     "content": result_str,
-                })
+                }
+                if isinstance(result_str, str) and (result_str.startswith("ERRO") or result_str.startswith("__ORACLE_ERROR__")):
+                    _tr["is_error"] = True
+                tool_results.append(_tr)
         messages.append({"role": "user", "content": tool_results})
 
     return {
@@ -372,6 +375,13 @@ async def run_turn_stream(
     _usage_acc = {"input_tokens": 0, "output_tokens": 0,
                   "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0}
     tool_outcomes = []  # [(tool_name, success_bool), ...] desta turn
+    _tool_contents = []
+    _MAX_SQL_FAILS = 3
+    FALHA_WINTHOR = (
+        "Nao consegui consultar o Winthor agora — a consulta falhou no banco e eu "
+        "nao tenho os dados. Nao vou arriscar numeros sem base. "
+        "Pode tentar de novo daqui a pouco?"
+    )
 
     while iterations < settings.max_iterations:
         iterations += 1
@@ -392,7 +402,6 @@ async def run_turn_stream(
                     delta = event.delta
                     if getattr(delta, "type", None) == "text_delta":
                         text_acc += delta.text
-                        yield {"type": "token", "text": delta.text}
             final_message = await stream.get_final_message()
 
         # Registra a mensagem do assistant no historico.
@@ -421,8 +430,19 @@ async def run_turn_stream(
         _usage_acc["cache_read_input_tokens"] += getattr(final_message.usage, "cache_read_input_tokens", 0)
         final_usage = _usage_acc
 
-        # Terminou? (sem tool_use) -> emite done e encerra
+        # Terminou? (sem tool_use) -> valida, entrega o texto e encerra
         if final_message.stop_reason != "tool_use":
+            _sql = [ok for (n, ok) in tool_outcomes if n == "oracle_query"]
+            if _sql and not any(_sql):
+                text_acc = FALHA_WINTHOR
+            try:
+                from app.grounding import check_grounding, log_grounding
+                log_grounding(check_grounding(text_acc, _tool_contents),
+                              user=user_id, model=_m, iterations=iterations)
+            except Exception:
+                pass
+            for _i in range(0, len(text_acc), 60):
+                yield {"type": "token", "text": text_acc[_i:_i + 60]}
             yield {
                 "type": "done",
                 "history": messages,
@@ -506,12 +526,30 @@ async def run_turn_stream(
                             'filename': _m_fn.group(1),
                             'size_bytes': int(_m_sz.group(1)) if _m_sz else 0,
                         }
-                tool_results.append({
+                _tr = {
                     "type": "tool_result",
                     "tool_use_id": block.id,
                     "content": result_str,
-                })
+                }
+                if not _ok:
+                    _tr["is_error"] = True
+                tool_results.append(_tr)
+                _tool_contents.append(result_str if isinstance(result_str, str) else str(result_str))
         messages.append({"role": "user", "content": tool_results})
+        _fails = len([1 for (n, ok) in tool_outcomes if n == "oracle_query" and not ok])
+        if _fails >= _MAX_SQL_FAILS:
+            for _i in range(0, len(FALHA_WINTHOR), 60):
+                yield {"type": "token", "text": FALHA_WINTHOR[_i:_i + 60]}
+            yield {
+                "type": "done",
+                "history": messages,
+                "tool_calls": tool_calls_log,
+                "tool_outcomes": tool_outcomes,
+                "iterations": iterations,
+                "usage": final_usage,
+                "stop_reason": "sql_failed",
+            }
+            return
         yield {"type": "status", "text": "Analisando os dados..."}
 
     # Esgotou iteracoes

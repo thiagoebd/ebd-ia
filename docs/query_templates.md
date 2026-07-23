@@ -541,7 +541,7 @@ WITH regional_map AS (
     SELECT '04','NE1' FROM DUAL UNION ALL SELECT '05','RJ2' FROM DUAL UNION ALL
     SELECT '06','NO1' FROM DUAL UNION ALL SELECT '07','NO2' FROM DUAL UNION ALL
     SELECT '08','NO1' FROM DUAL UNION ALL SELECT '09','NE2' FROM DUAL UNION ALL
-    SELECT '10','RJ1' FROM DUAL UNION ALL SELECT '11','NO1' FROM DUAL UNION ALL
+    SELECT '10','RJ1' FROM DUAL UNION ALL SELECT '11','NO2' FROM DUAL UNION ALL
     SELECT '12','NE1' FROM DUAL UNION ALL SELECT '13','RJ1' FROM DUAL UNION ALL
     SELECT '14','RJ2' FROM DUAL UNION ALL SELECT '15','SP2' FROM DUAL UNION ALL
     SELECT '16','SP1' FROM DUAL UNION ALL SELECT '18','SP2' FROM DUAL UNION ALL
@@ -1040,6 +1040,7 @@ ao mesmo CODUSUR; usar conjunto de clientes da rota do RCA.
 ```sql
 CASE CODFILIAL
   WHEN '17' THEN '10'  -- SAO PEDRO ALDEIA -> SAO GONCALO
+  WHEN '19' THEN '04'  -- CD SAO LUIS -> SAO LUIS
   WHEN '23' THEN '14'  -- PETROPOLIS -> PIRAI
   ELSE CODFILIAL
 END AS CODFILIAL_COM
@@ -2113,7 +2114,7 @@ Não montar JOIN pesado de PCUSUARI+PCSUPERV para hierarquia; usar a dimensão.
 Há DUAS regras de filial, não uma. VENDAS (faturamento/carteira/meta): 20 filiais comerciais,
 SEM os depósitos fechados — `CODFILIAL IN ('01','02','03','04','05','06','07','08','09','10','11','12','13','14','15','16','18','21','52','53')`.
 OPERAÇÃO/RUPTURA (PCFALTA): INCLUI os depósitos 17 e 23 REMAPEADOS para a filial-mãe
-(movimentam mas somam na filial de venda): `CASE CODFILIAL WHEN '17' THEN '10' (São Pedro da Aldeia→São Gonçalo) WHEN '23' THEN '14' (Petrópolis→Piraí) ELSE CODFILIAL END`.
+(movimentam mas somam na filial de venda): `CASE CODFILIAL WHEN '17' THEN '10' (São Pedro da Aldeia→São Gonçalo) WHEN '19' THEN '04' (CD São Luís→São Luís) WHEN '23' THEN '14' (Petrópolis→Piraí) ELSE CODFILIAL END`.
 Ruptura BR TOTAL (fórmula #9) é SEM filtro nenhum (o BI inclui CDs no consolidado nacional).
 Depósitos fechados não aparecem no mapa regional (não faturam). São Luís é staging sem movimento (não entra).
 
@@ -2184,6 +2185,7 @@ WITH ruptura AS (
     SELECT
         CASE f.CODFILIAL
             WHEN '17' THEN '10'
+            WHEN '19' THEN '04'
             WHEN '23' THEN '14'
             ELSE f.CODFILIAL
         END             AS CODFILIAL_COMERCIAL,

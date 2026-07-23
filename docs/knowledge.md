@@ -143,7 +143,7 @@ incluindo coordenador.
 | 08 | EBD BOA VISTA | NO1 |
 | 09 | EBD JUAZEIRO | NE2 |
 | 10 | EBD SÃO GONÇALO | RJ1 |
-| 11 | EBD SANTAREM | NO1 |
+| 11 | EBD SANTAREM | NO2 |
 | 12 | EBD IMPERATRIZ | NE1 |
 | 13 | EBD TAQUARA | RJ1 |
 | 14 | EBD PIRAÍ | RJ2 |
@@ -175,8 +175,8 @@ incluindo coordenador.
 | NE1 | 04, 12 | EBD SAO LUIS, EBD IMPERATRIZ |
 | NE2 | 03, 09, 21 | EBD FORTALEZA, EBD JUAZEIRO, EBD TERESINA |
 | NE3 | 52, 53 | EBDN PETROLINA, EBDN CARUARU |
-| NO1 | 06, 08, 11 | EBD MANAUS, EBD BOA VISTA, EBD SANTAREM |
-| NO2 | 01, 07 | EBD MATRIZ, EBD MACAPA |
+| NO1 | 06, 08 | EBD MANAUS, EBD BOA VISTA |
+| NO2 | 01, 07, 11, 22 | EBD MATRIZ, EBD MACAPA, EBD SANTAREM, EBD MARABA |
 | RJ1 | 10, 13 | EBD SÃO GONÇALO, EBD TAQUARA |
 | RJ2 | 05, 14 | EBD DUQUE, EBD PIRAÍ |
 | SP1 | 02, 16 | EBD SP, EBD ITAPEVI |
@@ -526,7 +526,7 @@ Se o usuário quiser visão regional, ele sempre vai dizer "regional X".
 |---|---|---|
 | 22 | EBD MARABA | NO2 |
 
-Regional NO2 atualizada: filiais 01 (EBD MATRIZ) + 07 (EBD MACAPA) + 22 (EBD MARABA)
+Regional NO2 atualizada: filiais 01 (EBD MATRIZ) + 07 (EBD MACAPA) + 11 (EBD SANTAREM) + 22 (EBD MARABA)
 
 #### Depósitos — vinculados à filial mãe (NÃO são filiais comerciais)
 
@@ -551,8 +551,8 @@ Regra: em análises de ruptura física, os CDs 17, 19 e 23 entram agrupados com 
 | NE1 | 04, 12 | EBD SAO LUIS, EBD IMPERATRIZ |
 | NE2 | 03, 09, 21 | EBD FORTALEZA, EBD JUAZEIRO, EBD TERESINA |
 | NE3 | 52, 53 | EBDN PETROLINA, EBDN CARUARU |
-| NO1 | 06, 08, 11 | EBD MANAUS, EBD BOA VISTA, EBD SANTAREM |
-| NO2 | 01, 07, 22 | EBD MATRIZ, EBD MACAPA, EBD MARABA |
+| NO1 | 06, 08 | EBD MANAUS, EBD BOA VISTA |
+| NO2 | 01, 07, 11, 22 | EBD MATRIZ, EBD MACAPA, EBD SANTAREM, EBD MARABA |
 | RJ1 | 10, 13 | EBD SÃO GONÇALO, EBD TAQUARA |
 | RJ2 | 05, 14 | EBD DUQUE, EBD PIRAÍ |
 | SP1 | 02, 16 | EBD SP, EBD ITAPEVI |
@@ -572,7 +572,7 @@ Regra: em análises de ruptura física, os CDs 17, 19 e 23 entram agrupados com 
 | 08 | EBD BOA VISTA | NO1 |
 | 09 | EBD JUAZEIRO | NE2 |
 | 10 | EBD SÃO GONÇALO | RJ1 |
-| 11 | EBD SANTAREM | NO1 |
+| 11 | EBD SANTAREM | NO2 |
 | 12 | EBD IMPERATRIZ | NE1 |
 | 13 | EBD TAQUARA | RJ1 |
 | 14 | EBD PIRAÍ | RJ2 |
