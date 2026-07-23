@@ -9,26 +9,48 @@ _BREAK_GLASS = {
     if e.strip()
 }
 
-REGIONAIS: dict[str, list[str]] = {
-    "NE1": ["04","12"], "NE2": ["03","09","21"], "NE3": ["52","53"],
-    "NO1": ["06","08","11"], "NO2": ["01","07"],
-    "RJ1": ["10","13"], "RJ2": ["05","14"],
-    "SP1": ["02","16"], "SP2": ["15","18"],
-}
-
 _TTL = 30.0
 _cache: dict[str, tuple[float, dict | None]] = {}
 
+# Estrutura filial/deposito/regional vem da tabela acl_filiais (fonte unica).
+_ESTRUT_TTL = 300.0
+_estrut_cache: tuple[float, list[dict]] | None = None
 
-def resolve_filiais(scope_kind: str, scope_value: list[str]) -> str | list[str]:
+
+async def load_estrutura() -> list[dict]:
+    """[{codigo, nome, tipo, filial_mae, regional}] das filiais ativas."""
+    global _estrut_cache
+    now = time.time()
+    if _estrut_cache and now - _estrut_cache[0] < _ESTRUT_TTL:
+        return _estrut_cache[1]
+    rows = await db._pool_or_raise().fetch(
+        "SELECT codigo, nome, tipo, filial_mae, regional FROM acl_filiais_resolvido "
+        "WHERE ativa ORDER BY codigo")
+    data = [dict(r) for r in rows]
+    _estrut_cache = (now, data)
+    return data
+
+
+def invalidate_estrutura() -> None:
+    global _estrut_cache
+    _estrut_cache = None
+
+
+async def resolve_filiais(scope_kind: str, scope_value: list[str]) -> str | list[str]:
+    """Expande o escopo em lista de CODFILIAL. Deposito acompanha a filial-mae:
+    escopo RJ1 -> 10, 13 e 17; escopo filial 10 -> 10 e 17."""
     if scope_kind == "brasil":
         return "*"
+    est = await load_estrutura()
     if scope_kind == "regional":
-        out: list[str] = []
-        for r in scope_value or []:
-            out += REGIONAIS.get(str(r).upper(), [])
-        return sorted(set(out))
-    return sorted({str(f).zfill(2) for f in (scope_value or [])})
+        alvo = {str(r).upper() for r in (scope_value or [])}
+        return sorted(f["codigo"] for f in est if (f["regional"] or "").upper() in alvo)
+    sel = {str(f).zfill(2) for f in (scope_value or [])}
+    out = set(sel)
+    for f in est:
+        if f["filial_mae"] in sel:
+            out.add(f["codigo"])
+    return sorted(out)
 
 
 def invalidate(email: str | None = None) -> None:

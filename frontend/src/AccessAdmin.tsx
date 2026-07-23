@@ -3,20 +3,10 @@ import { useEffect, useState } from "react";
 const API_BASE = import.meta.env.VITE_API_BASE_URL;
 const ROLES = ["admin", "gerente", "supervisor"];
 
-const REGIONAIS: Record<string, string[]> = {
-  NE1: ["04","12"], NE2: ["03","09","21"], NE3: ["52","53"],
-  NO1: ["06","08","11"], NO2: ["01","07"],
-  RJ1: ["10","13"], RJ2: ["05","14"],
-  SP1: ["02","16"], SP2: ["15","18"],
+type Filial = {
+  codigo: string; nome: string; tipo: string;
+  filial_mae: string | null; regional: string | null;
 };
-
-const FILIAL_NOME: Record<string, string> = {
-  "01":"Matriz","02":"São Paulo","03":"Fortaleza","04":"São Luís","05":"Duque de Caxias",
-  "06":"Manaus","07":"Macapá","08":"Boa Vista","09":"Juazeiro","10":"São Gonçalo",
-  "11":"Santarém","12":"Imperatriz","13":"Taquara","14":"Piraí","15":"Guarulhos",
-  "16":"Itapevi","18":"São Bernardo","21":"Teresina","22":"Marabá","52":"Petrolina","53":"Caruaru",
-};
-const TODAS = Object.keys(FILIAL_NOME).sort();
 
 type ACLUser = {
   id: string; email: string; nome: string | null; role: string;
@@ -39,7 +29,18 @@ export function AccessAdmin({ getToken, onClose }: { getToken: () => Promise<str
   const [users, setUsers] = useState<ACLUser[]>([]);
   const [msg, setMsg] = useState<string | null>(null);
   const [form, setForm] = useState<FormState>(EMPTY);
+  const [estrut, setEstrut] = useState<Filial[]>([]);
   const editando = form.id !== null;
+
+  const FILIAL_NOME: Record<string, string> = {};
+  estrut.forEach((f) => { FILIAL_NOME[f.codigo] = f.nome; });
+  const TODAS = estrut.map((f) => f.codigo).sort();
+  const REGIONAIS: Record<string, string[]> = {};
+  estrut.forEach((f) => {
+    if (!f.regional) return;
+    if (!REGIONAIS[f.regional]) REGIONAIS[f.regional] = [];
+    REGIONAIS[f.regional].push(f.codigo);
+  });
 
   async function api(path: string, init?: RequestInit) {
     const tok = await getToken();
@@ -57,7 +58,10 @@ export function AccessAdmin({ getToken, onClose }: { getToken: () => Promise<str
     return r.status === 204 ? null : r.json();
   }
   const load = () => api("").then(setUsers).catch((e) => setMsg(String(e)));
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    load();
+    api("/filiais").then(setEstrut).catch((e) => setMsg("Falha ao carregar filiais: " + String(e)));
+  }, []);
 
   function editar(u: ACLUser) {
     setMsg(null);

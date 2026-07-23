@@ -14,27 +14,26 @@ import logging as _logging
 
 _pglog = _logging.getLogger(__name__)
 
-# Mapa regional p/ resolver escopo vindo do Postgres (mesmo do gateway acl_store)
-_PG_REGIONAIS = {
-    "NE1": ["04","12"], "NE2": ["03","09","21"], "NE3": ["52","53"],
-    "NO1": ["06","08","11"], "NO2": ["01","07"],
-    "RJ1": ["10","13"], "RJ2": ["05","14"],
-    "SP1": ["02","16"], "SP2": ["15","18"],
-}
-_ALL_FILIAIS = ["01","02","03","04","05","06","07","08","09","10","11","12","13","14","15","16","18","21","52","53"]
+# A estrutura filial/deposito/regional vem da tabela acl_filiais no Postgres.
+# Nada de mapa hardcoded aqui.
 
-def _pg_resolve_filiais(scope_kind, scope_value, filiais):
-    """Traduz o escopo do acl_users em lista de CODFILIAL (ou todas p/ brasil)."""
+def _pg_resolve_filiais(scope_kind, scope_value, filiais, est):
+    """Expande o escopo em CODFILIAL. est = [(codigo, tipo, filial_mae, regional)].
+    Deposito acompanha a filial-mae: RJ1 -> 10, 13 e 17."""
+    todas = sorted(c for (c, _t, _m, _r) in est)
     if filiais == "*" or scope_kind == "brasil":
-        return list(_ALL_FILIAIS)
+        return todas
     if scope_kind == "regional":
-        out = []
-        for r in (scope_value or []):
-            out += _PG_REGIONAIS.get(str(r).upper(), [])
-        return sorted(set(out)) or list(_ALL_FILIAIS)
-    # filiais/filial: usa a lista resolvida `filiais` se houver, senão scope_value
+        alvo = {str(r).upper() for r in (scope_value or [])}
+        out = sorted(c for (c, _t, _m, r) in est if (r or "").upper() in alvo)
+        return out or todas
     base = filiais if isinstance(filiais, list) and filiais else scope_value
-    return sorted({str(f).zfill(2) for f in (base or [])})
+    sel = {str(f).zfill(2) for f in (base or [])}
+    out = set(sel)
+    for (c, _t, m, _r) in est:
+        if m in sel:
+            out.add(c)
+    return sorted(out)
 
 def _pg_lookup_user(identifier: str, canal=None):
     """Fase 2: busca o usuário na tabela acl_users do Postgres local.
@@ -58,6 +57,10 @@ def _pg_lookup_user(identifier: str, canal=None):
                     "SELECT nome, role, scope_kind, scope_value, filiais, active "
                     "FROM acl_users WHERE lower(email)=lower(%s)", (identifier,))
                 row = cur.fetchone()
+                cur.execute(
+                    "SELECT codigo, tipo, filial_mae, regional "
+                    "FROM acl_filiais_resolvido WHERE ativa")
+                est = cur.fetchall()
     except Exception as e:
         _pglog.warning("pg_lookup falhou (%s): %s", identifier, e)
         return None
@@ -73,9 +76,10 @@ def _pg_lookup_user(identifier: str, canal=None):
     if isinstance(filiais, str):
         try: filiais = _json.loads(filiais)
         except Exception: filiais = filiais
-    allowed = _pg_resolve_filiais(scope_kind, scope_value, filiais)
+    allowed = _pg_resolve_filiais(scope_kind, scope_value, filiais, est)
     if not allowed:
-        allowed = list(_ALL_FILIAIS)
+        _pglog.warning("escopo vazio p/ %s — negando por seguranca", identifier)
+        return None
     _role = role if role in ("admin","gerente","supervisor") else "admin"
     return UserContext(
         user_id=identifier, nome=nome or identifier.split("@")[0],
@@ -87,8 +91,8 @@ REGIONAL_TO_FILIAIS: dict[str, list[str]] = {
     "NE1": ["04", "12"],
     "NE2": ["03", "09", "21"],
     "NE3": ["52", "53"],
-    "NO1": ["06", "08", "11"],
-    "NO2": ["01", "07"],
+    "NO1": ["06", "08"],
+    "NO2": ["01", "07", "11", "22"],
     "RJ1": ["10", "13"],
     "RJ2": ["05", "14"],
     "SP1": ["02", "16"],

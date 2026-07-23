@@ -39,6 +39,12 @@ async def _audit(actor, action, target, before, after):
         json.dumps(after, default=str) if after else None)
 
 
+@router.get("/filiais")
+async def list_filiais(_: str = Depends(require_super_admin)):
+    """Estrutura filial/deposito/regional — fonte unica pra tela de Acessos."""
+    return await acl_store.load_estrutura()
+
+
 @router.get("")
 async def list_users(_: str = Depends(require_super_admin)):
     rows = await db._pool_or_raise().fetch(
@@ -51,7 +57,7 @@ async def list_users(_: str = Depends(require_super_admin)):
 async def create_user(body: UpsertUser, actor: str = Depends(require_super_admin)):
     if body.scope_kind not in ("brasil","regional","filiais","filial"):
         raise HTTPException(400, "scope_kind inválido")
-    filiais = acl_store.resolve_filiais(body.scope_kind, body.scope_value)
+    filiais = await acl_store.resolve_filiais(body.scope_kind, body.scope_value)
     try:
         row = await db._pool_or_raise().fetchrow(
             "INSERT INTO acl_users (email,nome,role,scope_kind,scope_value,filiais,super_admin,created_by) "
@@ -71,7 +77,7 @@ async def update_user(uid: str, body: UpsertUser, actor: str = Depends(require_s
     before = await pool.fetchrow("SELECT * FROM acl_users WHERE id=$1", uid)
     if not before:
         raise HTTPException(404, "não encontrado")
-    filiais = acl_store.resolve_filiais(body.scope_kind, body.scope_value)
+    filiais = await acl_store.resolve_filiais(body.scope_kind, body.scope_value)
     if dict(before).get("super_admin") and not body.super_admin:
         n = await pool.fetchval("SELECT COUNT(*) FROM acl_users WHERE super_admin AND active AND id<>$1", uid)
         if not n:
