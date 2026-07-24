@@ -2596,7 +2596,8 @@ WITH vendeu AS (
       AND CONDVENDA = 1
     GROUP BY CODPROD
 )
-SELECT CASE WHEN pf.FORALINHA = 'S' THEN 'SAINDO DE LINHA'
+SELECT CASE WHEN p.CODEPTO IN (150, 160, 170, 171, 900) THEN 'APOIO' ELSE 'COMERCIAL' END                                             AS NATUREZA,
+       CASE WHEN pf.FORALINHA = 'S' THEN 'SAINDO DE LINHA'
             ELSE 'EM LINHA' END                             AS LINHA,
        CASE WHEN v.CODPROD IS NOT NULL THEN 'COM VENDA'
             ELSE 'SEM VENDA' END                            AS VENDA,
@@ -2610,10 +2611,11 @@ LEFT JOIN vendeu v    ON v.CODPROD = pf.CODPROD
 LEFT JOIN EBD.PCEST e ON e.CODFILIAL = pf.CODFILIAL AND e.CODPROD = pf.CODPROD
 WHERE pf.CODFILIAL = :codFilial
   AND pf.REVENDA = 'S'
-GROUP BY CASE WHEN pf.FORALINHA = 'S' THEN 'SAINDO DE LINHA' ELSE 'EM LINHA' END,
+GROUP BY CASE WHEN p.CODEPTO IN (150, 160, 170, 171, 900) THEN 'APOIO' ELSE 'COMERCIAL' END,
+         CASE WHEN pf.FORALINHA = 'S' THEN 'SAINDO DE LINHA' ELSE 'EM LINHA' END,
          CASE WHEN v.CODPROD IS NOT NULL THEN 'COM VENDA' ELSE 'SEM VENDA' END,
          CASE WHEN NVL(e.QTESTGER,0) > 0 THEN 'COM ESTOQUE' ELSE 'SEM ESTOQUE' END
-ORDER BY LINHA, VENDA, ESTOQUE
+ORDER BY NATUREZA DESC, LINHA, VENDA, ESTOQUE
 ```
 
 Leitura dos quadrantes:
@@ -2640,12 +2642,14 @@ do RCA** porque o `ENVIARFORCAVENDAS` nao foi marcado no cadastro. Ninguem vende
 o que nao ve — o estoque fica parado por erro de cadastro, nao por falta de
 demanda.
 
-Medido 24/07 nas 21 filiais: **85 itens, R$ 2,69 milhoes** parados. Concentrados
-em Duque de Caxias (34 itens, R$ 1,4 mi) e Taquara (26, R$ 930 mil); SBC tem um
-unico item de R$ 160,8 mil.
+A coluna `NATUREZA` separa comercial de apoio. **Some so o COMERCIAL** e mostre
+o APOIO a parte, dizendo que nao entra no total. Na primeira medicao, R$ 1,28 mi
+dos R$ 1,4 mi de Duque eram **um unico pallet de madeira** do departamento 150 —
+somado, distorceria a decisao de compra.
 
 ```sql
-SELECT pf.CODFILIAL,
+SELECT CASE WHEN p.CODEPTO IN (150, 160, 170, 171, 900) THEN 'APOIO' ELSE 'COMERCIAL' END AS NATUREZA,
+       pf.CODFILIAL,
        pf.CODPROD,
        SUBSTR(NVL(p.DESCRICAO,'?'),1,40)                       AS PRODUTO,
        NVL(e.QTESTGER,0)                                       AS QT_ESTOQUE,
@@ -2660,7 +2664,7 @@ WHERE pf.CODFILIAL = :codFilial
   AND NVL(pf.FORALINHA,'N') = 'N'
   AND NVL(pf.ENVIARFORCAVENDAS,'N') <> 'S'
   AND NVL(e.QTESTGER,0) > 0
-ORDER BY VL_PARADO DESC NULLS LAST
+ORDER BY NATUREZA DESC, VL_PARADO DESC NULLS LAST
 ```
 
 A acao aqui NAO e queima nem devolucao: e marcar `ENVIARFORCAVENDAS = 'S'` no

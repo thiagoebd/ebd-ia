@@ -938,6 +938,34 @@ de sugerir queima ou devolucao (ver T-CMP06).
 `REVENDA = 'S'` e continua vendendo. Rotule como **saindo de linha**, nunca como
 fora de linha.
 
+### Natureza do departamento — comercial x apoio
+
+Nem todo produto cadastrado e mercadoria de revenda. **Nao filtre: classifique.**
+
+`CASE WHEN p.CODEPTO IN (150, 160, 170, 171, 900) THEN 'APOIO' ELSE 'COMERCIAL' END`
+
+| Codigo | Departamento | Por que e apoio |
+|---|---|---|
+| 150 | Material para Armazenagem | pallet e embalagem logistica |
+| 160 | Merchandising | material de PDV |
+| 170 | Comodato | ativo cedido ao cliente (freezer), nao e venda |
+| 171 | Brindes-Fornecedores | premiacao de campanha — faturou ZERO em 6 meses |
+| 900 | Servicos | nao e mercadoria |
+
+**Regra de apresentacao:** o total soma **apenas o COMERCIAL**; o apoio aparece a
+parte, com a observacao de que nao esta no total. Assim a informacao nao se perde
+nem contamina decisao de compra.
+
+Lista de EXCLUSAO curta de proposito: departamento novo de mercadoria (calcados,
+por exemplo) entra como comercial automaticamente. So apoio novo exige
+manutencao — e esse erro e visivel, porque infla o numero, enquanto o contrario
+sumiria calado.
+
+⚠️ **A FatoEstoque NAO faz essa separacao** (so exclui TIPOMERC 'IM' e 'CI'):
+ela valoriza patrimonio, e pallet e brinde sao ativos reais. Dois recortes
+legitimos — **FatoEstoque para valor de estoque, natureza comercial para analise
+de venda e sortimento.** Diga qual esta usando.
+
 ### Tabelas
 
 | Tabela | O que e | Volume |
