@@ -216,56 +216,10 @@ das duas esta usando.**
 Cobertura em dias usa QTGIRODIA do Winthor, nao media calculada.
 
 
-**Filtros obrigatorios** (da definicao oficial da FatoEstoque do BI; sem eles o
-total nao bate): produto nao excluido, departamentos IM/CI fora, filiais A1/51 fora.
-
-**Duas definicoes de disponivel, ambas oficiais:**
-
-| Coluna | Formula | Quando usar |
-|---|---|---|
-| QT_DISPONIVEL | QTESTGER - QTRESERV - QTBLOQUEADA | o que da pra vender AGORA |
-| QT_DISPONIVEL_EBD | QTESTGER - QTBLOQUEADA | definicao propria da EBD, ignora reserva |
-
-A diferenca e grande em item de giro alto: no Nissin Lamen chega a 67 mil
-unidades reservadas; em item importado e quase nula. **Ao responder, diga qual
-das duas esta usando.**
-
-Cobertura em dias usa QTGIRODIA do Winthor, nao media calculada.
 
 
-**Filtros obrigatorios** (da definicao oficial da FatoEstoque do BI; sem eles o
-total nao bate): produto nao excluido, departamentos IM/CI fora, filiais A1/51 fora.
-
-**Duas definicoes de disponivel, ambas oficiais:**
-
-| Coluna | Formula | Quando usar |
-|---|---|---|
-| QT_DISPONIVEL | QTESTGER - QTRESERV - QTBLOQUEADA | o que da pra vender AGORA |
-| QT_DISPONIVEL_EBD | QTESTGER - QTBLOQUEADA | definicao propria da EBD, ignora reserva |
-
-A diferenca e grande em item de giro alto: no Nissin Lamen chega a 67 mil
-unidades reservadas; em item importado e quase nula. **Ao responder, diga qual
-das duas esta usando.**
-
-Cobertura em dias usa QTGIRODIA do Winthor, nao media calculada.
 
 
-**Filtros obrigatorios** (copiados da definicao oficial da FatoEstoque do BI; sem
-eles o total nao bate): produto nao excluido, departamentos IM/CI fora, filiais
-A1/51 fora.
-
-**Duas definicoes de disponivel, ambas oficiais:**
-
-| Coluna | Formula | Quando usar |
-|---|---|---|
-| QT_DISPONIVEL | QTESTGER - QTRESERV - QTBLOQUEADA | o que da pra vender AGORA (desconta reserva) |
-| QT_DISPONIVEL_EBD | QTESTGER - QTBLOQUEADA | definicao propria da EBD, ignora reserva |
-
-A diferenca e grande em item de giro alto: no Nissin Lamen chega a 67 mil
-unidades reservadas; em item importado e quase nula. **Ao responder, diga qual
-das duas esta usando.**
-
-Cobertura em dias usa QTGIRODIA do Winthor, nao media calculada.
 
 
 **Validado:** Nissin Lamen top em Manaus. Latência: 0,6s.
