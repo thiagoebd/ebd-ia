@@ -42,7 +42,18 @@ async def lifespan(app: FastAPI):
         log.info("Pool Postgres pronto — historico de conversas ativo")
     except Exception:
         log.exception("Falha ao conectar no Postgres — historico NAO vai persistir")
+    try:
+        from gateway.app import mercado as _mkt
+        await _mkt.iniciar_agendador()
+        log.info("Agendador do painel de mercado ativo")
+    except Exception:
+        log.exception("Falha ao iniciar o agendador de mercado — painel fica estatico")
     yield
+    try:
+        from gateway.app import mercado as _mkt
+        await _mkt.parar_agendador()
+    except Exception:
+        pass
     await db.close_db()
 
 

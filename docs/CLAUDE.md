@@ -591,3 +591,15 @@ Regras:
    knowledge. Use `VIEW_VENDAS_RESUMO_FATURAMENTO`, que ja e desnormalizada.
 4. O `GROUP BY` nao muda o custo: agrupar por fornecedor, departamento ou
    categoria custa o mesmo que por filial.
+
+
+## Compras: catalogo e o T-CMP05
+
+**O catalogo comercial de uma filial e `PCPRODFILIAL.REVENDA = 'S'`.** Nunca use
+`ATIVO = 'S'` — ele inclui insumo, amostra e material administrativo.
+`FORALINHA = 'S'` significa "nao compramos mais", mas o item continua vendendo:
+rotule como "saindo de linha".
+
+O template **T-CMP05** (qualidade de cadastro) roda **por filial**. Se o usuario
+pedir a visao Brasil, pergunte qual filial ou ofereca rodar as principais uma a
+uma.

@@ -23,9 +23,9 @@ from email.utils import parsedate_to_datetime
 log = logging.getLogger("uvicorn.error")
 
 UA = {"User-Agent": "Mozilla/5.0 (compatible; EBDia/1.0; +interno)"}
-TTL_NOTICIAS = int(os.getenv("MERCADO_TTL_NOTICIAS", "1800"))   # 30 min
+TTL_NOTICIAS = int(os.getenv("MERCADO_TTL_NOTICIAS", "14400"))  # 4 h
 TTL_MACRO = int(os.getenv("MERCADO_TTL_MACRO", "43200"))        # 12 h
-IDADE_MAX = int(os.getenv("MERCADO_IDADE_MAX", "21600"))        # 6 h -> some
+IDADE_MAX = int(os.getenv("MERCADO_IDADE_MAX", "43200"))        # 12 h -> some
 
 # Series do SGS/Banco Central. rotulo, codigo, prefixo, sufixo, mostra_ref
 SERIES = [
@@ -56,6 +56,7 @@ _LOJA = re.compile(r"inaugur|abre .{0,12}loja|nova loja|reinaugur|revitaliz|mega
 _cache: dict = {"macro": None, "macro_em": 0.0, "noticias": None, "noticias_em": 0.0}
 _lock = asyncio.Lock()
 _atualizando = False
+_tarefa = None   # referencia viva: sem isso o GC mata a tarefa
 
 
 def _get(url: str, timeout: int = 10) -> bytes:
@@ -181,3 +182,33 @@ async def payload() -> dict:
         "noticias": fresco("noticias", _cache["noticias_em"]),
         "atualizado_em": int(max(_cache["macro_em"], _cache["noticias_em"])) or None,
     }
+
+
+async def iniciar_agendador() -> None:
+    """Atualiza por RELOGIO, nao por acesso. Chamado no lifespan do gateway."""
+    global _tarefa
+
+    async def _loop():
+        await asyncio.sleep(5)
+        while True:
+            try:
+                await _atualizar(force=True)
+                log.info("mercado_atualizado noticias=%d macro=%d",
+                         len(_cache["noticias"] or []), len(_cache["macro"] or []))
+            except Exception as e:
+                log.warning("mercado_agendador_erro erro=%s", str(e)[:150])
+            await asyncio.sleep(TTL_NOTICIAS)
+
+    if _tarefa is None or _tarefa.done():
+        _tarefa = asyncio.create_task(_loop())
+
+
+async def parar_agendador() -> None:
+    global _tarefa
+    if _tarefa and not _tarefa.done():
+        _tarefa.cancel()
+        try:
+            await _tarefa
+        except BaseException:
+            pass
+    _tarefa = None

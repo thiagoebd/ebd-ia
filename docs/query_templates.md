@@ -2449,3 +2449,185 @@ WHERE u.CODFILIAL = :codFilial
 GROUP BY r.DIASEMANA
 ORDER BY CLIENTES DESC
 ```
+
+
+---
+
+# Compras — templates T-CMP
+
+Modelo: `PCPEDIDO` (cabecalho do pedido) / `PCITEM` (itens) / `PCNFENT` (entrada).
+A ponte pedido -> entrada passa pelo `PCMOV`: `PCPEDIDO.NUMPED` -> `PCMOV.NUMPED`
+-> `PCMOV.NUMTRANSENT` -> `PCNFENT.NUMTRANSENT`. O `PCNFENT` NAO tem NUMPED.
+
+## Regra de ouro do cadastro de produto
+
+**O catalogo comercial da filial e `PCPRODFILIAL.REVENDA = 'S'.`**
+
+NUNCA use `ATIVO = 'S'` para isso: o ATIVO inclui insumo, amostra e material
+administrativo. Em Teresina o ATIVO trazia 22.847 itens contra 1.814 de REVENDA
+— 18.598 itens que nunca foram para venda, inflando qualquer analise.
+
+**`FORALINHA = 'S'` NAO significa "fora de linha".** Significa que a EBD nao vai
+mais COMPRAR o item porque ele vai sair de linha — mas ele continua
+`REVENDA = 'S'` e continua vendendo normalmente. O rotulo correto e
+**SAINDO DE LINHA**.
+
+Com o criterio certo a marcacao e confiavel: na filial 18, dos 3.933 itens
+`REVENDA='S'`, 2.532 venderam nos ultimos 6 meses e apenas 54 venderam sem estar
+marcados (2% de divergencia).
+
+## Filtros obrigatorios em compras
+
+- `n.DTENT <= SYSDATE` — existem 6 notas com data no futuro (ano 5112 inclusive)
+- `n.DTCANCEL IS NULL` — nota cancelada nao conta
+- `NVL(i.QTPEDIDA,0) > 0` — 18,4% dos itens tem quantidade zero e poluem media
+- `pf.REVENDA = 'S'` em qualquer analise de catalogo
+- filiais reais: `'01','02','03','04','05','06','07','08','09','10','11','12','13','14','15','16','18','21','22','52','53'`
+
+**Status do pedido NAO vem de coluna.** `DTLIBERA`, `DTENTRADAESTOQUE`,
+`DTCHEGADA` e `DTVENC` estao preenchidas em 0% dos casos. As uteis, todas em
+100%: `DTEMISSAO`, `DTPREVENT`, `DTFATUR`, `DATALANC`, `DTEMBARQUE`.
+"Pedido em aberto" = sem ligacao no PCMOV.
+
+## T-CMP01 — Confiabilidade do fornecedor (lead time real vs prometido)
+
+Medido: 0,3s por filial, 2,3s Brasil.
+
+```sql
+SELECT p.CODFORNEC,
+       SUBSTR(NVL(f.FORNECEDOR,'?'),1,30)                        AS FORNECEDOR,
+       COUNT(*)                                                  AS ENTREGAS,
+       ROUND(MEDIAN(n.DTENT - p.DTEMISSAO),1)                    AS LEAD_TIME,
+       ROUND(MEDIAN(n.DTENT - p.DTPREVENT),1)                    AS DESVIO_PROMESSA,
+       ROUND(SUM(CASE WHEN n.DTENT > p.DTPREVENT THEN 1 ELSE 0 END)
+             / COUNT(*) * 100, 1)                                AS PCT_ATRASADAS
+FROM EBD.PCPEDIDO p
+JOIN EBD.PCMOV   m ON m.NUMPED = p.NUMPED
+JOIN EBD.PCNFENT n ON n.NUMTRANSENT = m.NUMTRANSENT
+LEFT JOIN EBD.PCFORNEC f ON f.CODFORNEC = p.CODFORNEC
+WHERE p.CODFILIAL = :codFilial
+  AND p.DTEMISSAO >= ADD_MONTHS(TRUNC(SYSDATE), -6)
+  AND n.DTENT <= SYSDATE
+  AND n.DTCANCEL IS NULL
+GROUP BY p.CODFORNEC, f.FORNECEDOR
+HAVING COUNT(*) >= 5
+ORDER BY DESVIO_PROMESSA DESC NULLS LAST
+FETCH FIRST 15 ROWS ONLY
+```
+
+`DESVIO_PROMESSA` positivo = entregou depois da data prometida. Mediana em vez de
+media porque uma importacao parada em porto distorce tudo.
+
+## T-CMP02 — Atendimento do pedido (QTPEDIDA x QTENTREGUE)
+
+Medido: 0,0s por filial, 0,3s Brasil.
+
+```sql
+SELECT p.CODFORNEC,
+       SUBSTR(NVL(f.FORNECEDOR,'?'),1,30)                             AS FORNECEDOR,
+       COUNT(*)                                                       AS ITENS,
+       ROUND(SUM(i.QTENTREGUE) / NULLIF(SUM(i.QTPEDIDA),0) * 100, 1)  AS PCT_ATENDIDO,
+       SUM(CASE WHEN NVL(i.QTENTREGUE,0) = 0 THEN 1 ELSE 0 END)       AS ITENS_ZERADOS
+FROM EBD.PCITEM i
+JOIN EBD.PCPEDIDO p ON p.NUMPED = i.NUMPED
+LEFT JOIN EBD.PCFORNEC f ON f.CODFORNEC = p.CODFORNEC
+WHERE p.CODFILIAL = :codFilial
+  AND p.DTEMISSAO BETWEEN ADD_MONTHS(TRUNC(SYSDATE), -6) AND TRUNC(SYSDATE) - 60
+  AND NVL(i.QTPEDIDA, 0) > 0
+GROUP BY p.CODFORNEC, f.FORNECEDOR
+HAVING COUNT(*) >= 10
+ORDER BY PCT_ATENDIDO NULLS LAST
+FETCH FIRST 15 ROWS ONLY
+```
+
+A janela termina em `SYSDATE - 60` de proposito: pedido recente ainda vai ser
+entregue e penalizaria o fornecedor injustamente. Sem esse recorte o atendimento
+aparece como 49%; com ele, 98,7%.
+
+## T-CMP03 — Pedidos em aberto e atrasados
+
+Medido: 0,0s por filial, 0,1s Brasil.
+
+```sql
+SELECT p.NUMPED, p.CODFILIAL, p.CODFORNEC,
+       SUBSTR(NVL(f.FORNECEDOR,'?'),1,28)          AS FORNECEDOR,
+       p.DTEMISSAO, p.DTPREVENT,
+       TRUNC(SYSDATE) - TRUNC(p.DTPREVENT)         AS DIAS_ATRASO,
+       ROUND(p.VLTOTAL,2)                          AS VLTOTAL
+FROM EBD.PCPEDIDO p
+LEFT JOIN EBD.PCFORNEC f ON f.CODFORNEC = p.CODFORNEC
+WHERE p.CODFILIAL = :codFilial
+  AND p.DTPREVENT < TRUNC(SYSDATE)
+  AND p.DTEMISSAO >= ADD_MONTHS(TRUNC(SYSDATE), -3)
+  AND NOT EXISTS (SELECT 1 FROM EBD.PCMOV m WHERE m.NUMPED = p.NUMPED)
+ORDER BY p.VLTOTAL DESC NULLS LAST
+FETCH FIRST 20 ROWS ONLY
+```
+
+## T-CMP04 — Entrada de mercadoria por periodo
+
+Medido: 0,0s por filial, 0,1s Brasil.
+
+```sql
+SELECT n.CODFILIAL,
+       COUNT(*)                          AS NOTAS,
+       COUNT(DISTINCT n.CODFORNEC)       AS FORNECEDORES,
+       ROUND(SUM(n.VLTOTAL), 2)          AS VALOR_ENTRADA
+FROM EBD.PCNFENT n
+WHERE n.CODFILIAL = :codFilial
+  AND n.DTENT BETWEEN TRUNC(SYSDATE,'MM') AND SYSDATE
+  AND n.DTENT <= SYSDATE
+  AND n.DTCANCEL IS NULL
+GROUP BY n.CODFILIAL
+ORDER BY VALOR_ENTRADA DESC NULLS LAST
+```
+
+## T-CMP05 — Qualidade de cadastro (matriz de quadrantes)
+
+⚠️ **EXIGE FILIAL.** Se o usuario pedir visao Brasil, pergunte qual filial ou
+ofereca rodar as principais uma a uma.
+
+```sql
+WITH vendeu AS (
+    SELECT CODPROD
+    FROM EBD.VIEW_VENDAS_RESUMO_FATURAMENTO
+    WHERE CODFILIAL = :codFilial
+      AND DTSAIDA >= ADD_MONTHS(TRUNC(SYSDATE), -6)
+      AND CONDVENDA = 1
+    GROUP BY CODPROD
+)
+SELECT CASE WHEN pf.FORALINHA = 'S' THEN 'SAINDO DE LINHA'
+            ELSE 'EM LINHA' END                             AS LINHA,
+       CASE WHEN v.CODPROD IS NOT NULL THEN 'COM VENDA'
+            ELSE 'SEM VENDA' END                            AS VENDA,
+       CASE WHEN NVL(e.QTESTGER,0) > 0 THEN 'COM ESTOQUE'
+            ELSE 'SEM ESTOQUE' END                          AS ESTOQUE,
+       COUNT(*)                                             AS ITENS,
+       ROUND(SUM(NVL(e.QTESTGER,0) * NVL(e.CUSTOFIN,0)), 0) AS VL_ESTOQUE
+FROM EBD.PCPRODFILIAL pf
+JOIN EBD.PCPRODUT p   ON p.CODPROD = pf.CODPROD AND p.DTEXCLUSAO IS NULL
+LEFT JOIN vendeu v    ON v.CODPROD = pf.CODPROD
+LEFT JOIN EBD.PCEST e ON e.CODFILIAL = pf.CODFILIAL AND e.CODPROD = pf.CODPROD
+WHERE pf.CODFILIAL = :codFilial
+  AND pf.REVENDA = 'S'
+GROUP BY CASE WHEN pf.FORALINHA = 'S' THEN 'SAINDO DE LINHA' ELSE 'EM LINHA' END,
+         CASE WHEN v.CODPROD IS NOT NULL THEN 'COM VENDA' ELSE 'SEM VENDA' END,
+         CASE WHEN NVL(e.QTESTGER,0) > 0 THEN 'COM ESTOQUE' ELSE 'SEM ESTOQUE' END
+ORDER BY LINHA, VENDA, ESTOQUE
+```
+
+Leitura dos quadrantes:
+
+| Situacao | O que e | Acao |
+|---|---|---|
+| Em linha, com venda, com estoque | saudavel | — |
+| **Em linha, com venda, SEM estoque** | **ruptura** | repor |
+| Em linha, sem venda, com estoque | capital parado | queima ou devolucao |
+| **Em linha, SEM venda, SEM estoque** | **sujeira de cadastro** | limpar |
+| Saindo de linha, com venda, com estoque | escoamento legitimo | acompanhar ate zerar |
+| Saindo de linha, sem venda | residuo | limpar |
+
+Medido 24/07 — filial 21 (1.814 itens de revenda): 968 saudaveis (R$ 4,18 mi),
+145 em ruptura, 46 parados (R$ 120 mil), 642 de sujeira. Filial 18 (3.933):
+1.626 saudaveis (R$ 19,5 mi), 355 em ruptura, 339 parados (R$ 589 mil), 820 de
+sujeira, 454 saindo de linha com venda e estoque (R$ 1,34 mi de escoamento).

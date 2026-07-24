@@ -918,3 +918,63 @@ acima ou abaixo de 6%, é uma diferença que vale comentar.
 
 Duas leituras estruturais: a **frota terceirizada já superou a própria** no setor,
 e a força de vendas migra devagar de RCA para CLT.
+
+
+## 16. Compras — modelo de dados e armadilhas
+
+### Cadastro de produto por filial — a regra que mais erra
+
+**Catalogo comercial da filial = `PCPRODFILIAL.REVENDA = 'S'`.** O `ATIVO = 'S'`
+inclui insumo, amostra e material administrativo e NAO serve para analise
+comercial (em Teresina eram 18.598 itens a mais).
+
+**`FORALINHA = 'S'` = "nao vamos mais comprar"**, mas o item continua
+`REVENDA = 'S'` e continua vendendo. Rotule como **saindo de linha**, nunca como
+fora de linha.
+
+### Tabelas
+
+| Tabela | O que e | Volume |
+|---|---|---|
+| `PCPEDIDO` | cabecalho do pedido de compra | 78.663 |
+| `PCITEM` | itens do pedido | 1,4 mi |
+| `PCNFENT` | entrada de mercadoria | 1,45 mi |
+| `PCSUGESTAOCOMPRAC` / `I` | sugestao de compra | 5.706 / 176.167 |
+| `PCDEVFORNEC` | devolucao a fornecedor | 33.600 |
+| `PCPRODFILIAL` | parametros do produto POR FILIAL | 854.458 |
+
+Ligacao pedido -> entrada: `PCPEDIDO.NUMPED` -> `PCMOV.NUMPED` ->
+`PCMOV.NUMTRANSENT` -> `PCNFENT.NUMTRANSENT`.
+
+### Rotinas do Winthor
+
+220 digita o pedido (sugestao pela 207), 215 libera (se o parametro 1886 da 132
+estiver ligado), 1301 da entrada na nota, 1309 analisa pre-entrada, 1106 faz o
+bonus de conferencia, 1302 e devolucao a fornecedor. O comprador e vinculado ao
+produto POR FILIAL na rotina 238 (campo Cod. Comprador na `PCPRODFILIAL`).
+
+### Armadilhas medidas
+
+- Status do pedido NAO vem de coluna: DTLIBERA, DTENTRADAESTOQUE, DTCHEGADA e
+  DTVENC estao em 0%. Use DTEMISSAO, DTPREVENT, DTFATUR (100%).
+- 6 notas com DTENT no futuro (2031 a 5112). `DTENT <= SYSDATE` sempre.
+- 18,4% dos itens do PCITEM tem QTPEDIDA = 0 e distorcem atendimento.
+- `PCFORNEC.PRAZOENTREGA` so em 7,8% dos fornecedores — a formula do estoque
+  ideal (`QTGIRODIA x (TEMREPOS + PRAZOENTREGA)`) usa zero em 92% dos casos.
+  Prefira o lead time medido.
+
+### Lead time real por filial (mediana, 6 meses)
+
+| Filial | Lead time | Desvio da promessa |
+|---|---|---|
+| 08 Boa Vista | 34 d | -1,3 |
+| 06 Manaus | 31 d | +0,2 |
+| 53 Caruaru | 21 d | **+19,7** |
+| 07 Macapa | 21 d | +13,1 |
+| 52 Petrolina | 20 d | +15,0 |
+| 09 Juazeiro | 14 d | +16,5 |
+| 18 SBC | 11 d | +4,9 |
+| 13 Taquara | 9 d | +3,9 |
+
+O problema nao e distancia, e promessa errada: o Norte demora mais mas o
+fornecedor promete certo; o Nordeste promete prazo que nao cumpre.
