@@ -297,15 +297,17 @@ function App() {
               <span className="kbd"><kbd>⌃</kbd><kbd>K</kbd></span>
             </button>
 
-            <div className="sb-section">Biblioteca</div>
-            <div className="sb-list">
-              <div className="sb-link"><span className="lbl">Planilhas</span><span className="count">—</span></div>
-              <div className="sb-link"><span className="lbl">Documentos</span><span className="count">—</span></div>
-              <div className="sb-link"><span className="lbl">Apresentações</span><span className="count">—</span></div>
-              <div className="sb-link"><span className="lbl">Gráficos</span><span className="count">—</span></div>
-            </div>
+            {me?.super_admin && (
+              <>
+                <div className="sb-section">Administração</div>
+                <div className="sb-list">
+                  <div className="sb-link" style={{ cursor: "pointer" }} onClick={() => setShowAccess(true)}>
+                    <span className="lbl">Acessos</span>
+                  </div>
+                </div>
+              </>
+            )}
 
-            {me?.super_admin && (<div className="sb-section" style={{cursor:"pointer"}} onClick={() => setShowAccess(true)}>Acessos</div>)}
             <div className="sb-section">Conexões</div>
             <div className="sb-list">
               <div className="sb-link"><span className="dot-ok" /><span className="lbl">Winthor / Oracle</span></div>
@@ -375,9 +377,17 @@ function App() {
                 {messages.length === 0 ? (
                   <div className="empty">
                     <h1>Como posso te <em>ajudar hoje?</em></h1>
-                    <p className="empty-sub">Sou um agente especializado em distribuição. Consulto o Winthor na hora e te devolvo o dado rapidinho.</p>
-                    <p className="empty-sub">Vou além de puxar número: comparo períodos, rankeio filiais, vendedores e fornecedores, cruzo meta com realizado e mostro onde está o gap, aponto ruptura e acompanho positivação em campo.</p>
-                    <p className="empty-sub">Mostro em texto, tabela, gráfico ou mapa — e gero <strong>Excel, PDF ou PowerPoint</strong> quando você pedir.</p>
+                    <div style={{
+                      border: "1.5px solid var(--warm)",
+                      borderRadius: 16,
+                      padding: "30px 42px",
+                      maxWidth: 680,
+                      margin: "20px auto 0",
+                    }}>
+                      <p className="empty-sub" style={{ margin: 0 }}>Sou um agente especializado em distribuição. Consulto o Winthor na hora e te devolvo o dado rapidinho.</p>
+                      <p className="empty-sub" style={{ margin: "8px 0 0" }}>Vou além de puxar número: comparo períodos, rankeio filiais, vendedores e fornecedores, cruzo meta com realizado e mostro onde está o gap, aponto ruptura e acompanho positivação em campo.</p>
+                      <p className="empty-sub" style={{ margin: "8px 0 0" }}>Mostro em texto, tabela, gráfico ou mapa — e gero <strong>Excel, PDF ou PowerPoint</strong> quando você pedir.</p>
+                    </div>
                     {mercado.macro.length > 0 && (
                       <div style={{ display: "flex", flexWrap: "wrap", gap: 26, justifyContent: "center", margin: "30px 0 4px" }}>
                         {mercado.macro.map((m) => (

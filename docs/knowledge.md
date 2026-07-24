@@ -807,3 +807,113 @@ Quando o usuário pedir para **acrescentar** colunas (meta, gap, % etc.) a um da
 ### Aplicação
 
 Toda vez que usuário pedir complemento de dados sobre algo que já foi mostrado.
+
+
+## 14. Contexto do negócio — canal indireto e setor mercearil
+
+Este bloco serve para **entender a pergunta e nomear as coisas corretamente**.
+NÃO serve para explicar por que um número variou: causa só quando o dado mostra
+a causa. Nunca atribua variação a "cenário macro", "retração do consumo" ou
+similar sem número que sustente.
+
+### O que a EBD é
+
+Distribuidora do **canal indireto** no setor mercearil: compra da indústria
+(fabricantes de alimento, bebida, higiene pessoal e limpeza) e vende para o
+varejo — mercearia, mercadinho, supermercado, atacarejo, conveniência.
+**Não vende ao consumidor final.**
+
+O que a distribuidora entrega ao fabricante, e que explica por que ela existe:
+
+- **Capilaridade** — chega ao ponto de venda onde a indústria não chega.
+- **Crédito** — financia o pequeno varejista.
+- **Fracionamento** — o mercadinho compra caixas, não pallets.
+- **Força de vendas** — o RCA é, na prática, extensão do time da indústria.
+
+### Termos do setor ainda não cobertos no vocabulário
+
+| Termo | Significado | Como tratar na EBD |
+|---|---|---|
+| Canal indireto | Indústria → distribuidor → varejo | é o negócio da EBD |
+| Sell-in | Venda da EBD para o varejista | é o nosso faturamento |
+| Sell-out | Venda do varejista ao consumidor final | a EBD **não enxerga** esse dado |
+| Drop size | Valor médio do pedido | usar **Ticket Médio** (métrica já definida) |
+| Curva A | Itens de maior peso no faturamento | ver `VIP` (a curva usada aqui) |
+
+⚠️ **"Cobertura" na EBD é de ESTOQUE** (`QTESTGER / QTGIRODIA`), não cobertura
+de carteira ou de visita. Se o usuário falar em cobertura de clientes, pergunte
+o que ele quer antes de responder — não assuma.
+
+### Como o setor lê os números
+
+- **Faturamento subindo com positivação caindo é concentração**: poucos clientes
+  grandes segurando o número. Vale olhar os dois juntos em análise de carteira.
+- **Ruptura em item de curva A pesa muito mais** que em item de cauda longa.
+- **Meta se acompanha por Real + Pedido**, porque pedido liberado ainda vira nota.
+- **O formato da loja define o sortimento**: atacarejo concentra em curva A,
+  mercearia carrega mix pequeno, supermercado carrega mix largo. Comparar mix
+  entre formatos diferentes sem dizer isso induz a erro.
+
+
+## 15. Régua do setor — Ranking ABAD/NielsenIQ 2026 (ano base 2025)
+
+**REGRA DE USO:** todo número aqui é do SETOR, base **2025**. Cite sempre fonte e
+ano ("Ranking ABAD/NielsenIQ 2026, base 2025"). Nunca apresente como dado da EBD,
+nunca como número do ano corrente, e ao comparar diga que as bases são diferentes.
+Estes números servem para **contextualizar** um número da EBD — não para
+substituí-lo nem para explicar por que ele variou.
+
+### Tamanho do canal
+
+O canal indireto respondeu por **R$ 616,6 bilhões**, **55,9%** de um mercado de
+consumo de alto giro estimado em R$ 1,1 trilhão, atendendo **1,18 milhão de
+pontos de venda**. Crescimento sobre 2024: **+17,27% nominal**, cerca de **11%
+real** (IPCA 4,26%). Estudo com 768 empresas.
+
+⚠️ A capa da revista traz 56,9%; a matéria de análise e a tabela de dados trazem
+**55,9%**. Usar 55,9%.
+
+⚠️ O Atacadão sozinho responde por ~30% do apurado. Sempre que possível use o
+recorte **sem Atacadão** para comparar com a EBD — a média com ele é distorcida.
+
+### Onde a EBD se situa
+
+| Modelo de operação | Part. faturamento (sem Atacadão) |
+|---|---|
+| **Distribuidor com entrega — modelo da EBD** | **44,5%** |
+| Atacado generalista com entrega | 35,0% |
+| Atacado generalista de autosserviço (atacarejo) | 15,4% |
+| Atacado de balcão | 3,9% |
+| Agente de serviços | 1,2% |
+
+A maioria das empresas opera em **dois ou mais modelos** ao mesmo tempo.
+
+### Como o setor vende (% dos pedidos)
+
+| Modelo | E-comm | RCA | Loja física | Televendas | CLT |
+|---|---|---|---|---|---|
+| **Distribuidor com entrega (EBD)** | **6** | **37** | **5** | **5** | **46** |
+| Atacado generalista com entrega | 14 | 41 | 15 | 10 | 19 |
+| Média do setor | 8 | 27 | 38 | 5 | 22 |
+
+No modelo da EBD a venda é dominada por equipe própria (CLT, 46%) e RCA (37%).
+E-commerce e televendas são complementares — se o e-commerce da EBD estiver muito
+acima ou abaixo de 6%, é uma diferença que vale comentar.
+
+### O que o setor vende (% do faturamento, sem Atacadão)
+
+| Alimentos | Higiene e beleza | Outros | Mat. construção | Bazar | Bebidas | Limpeza | Eletro |
+|---|---|---|---|---|---|---|---|
+| 46,0 | 15,2 | 9,1 | 7,9 | 7,1 | 6,2 | 6,1 | 2,3 |
+
+### Estrutura comparável
+
+| Indicador do setor | 2024 | 2025 | Var. |
+|---|---|---|---|
+| Vendedores CLT | 27.422 | 28.203 | +2,8% |
+| Representantes (RCA) | 37.343 | 37.286 | -0,2% |
+| Frota própria | — | 22.452 | — |
+| Frota terceirizada | — | 28.031 | +16,3% |
+
+Duas leituras estruturais: a **frota terceirizada já superou a própria** no setor,
+e a força de vendas migra devagar de RCA para CLT.
