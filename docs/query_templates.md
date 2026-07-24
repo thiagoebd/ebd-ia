@@ -173,29 +173,100 @@ WHERE p.CODFILIAL = :codFilial
 ## T105 — Estoque + Cobertura por Produto
 
 ```sql
-WITH venda30 AS (
-    SELECT v.CODPROD, SUM(v.QT) AS QT30
-    FROM EBD.VIEW_VENDAS_RESUMO_FATURAMENTO v
-    WHERE v.CODFILIAL = :codFilial
-      AND v.DTSAIDA >= TRUNC(SYSDATE) - 30
-      AND v.CONDVENDA = 1
-    GROUP BY v.CODPROD
-)
 SELECT
     e.CODPROD,
-    SUBSTR(NVL(p.DESCRICAO,'?'),1,40)                       AS PRODUTO,
-    NVL(e.QTESTGER,0) - NVL(e.QTRESERV,0) - NVL(e.QTBLOQUEADA,0) AS ESTOQUE_LIVRE,
-    e.CUSTOFIN                                              AS CUSTO_UNIT,
-    (NVL(e.QTESTGER,0) - NVL(e.QTRESERV,0) - NVL(e.QTBLOQUEADA,0)) * NVL(e.CUSTOFIN,0) AS VALOR_ESTOQUE,
-    ROUND(NVL(e.QTESTGER,0) / NULLIF(NVL(vd.QT30,0)/30, 0), 0) AS DIAS_COBERTURA
+    SUBSTR(NVL(p.DESCRICAO,'?'),1,40)                                    AS PRODUTO,
+    CAST(NVL(e.QTESTGER,0) AS NUMBER)                                    AS QT_GERENCIAL,
+    NVL(e.QTESTGER,0) - NVL(e.QTRESERV,0) - NVL(e.QTBLOQUEADA,0)         AS QT_DISPONIVEL,
+    NVL(e.QTESTGER,0) - NVL(e.QTBLOQUEADA,0)                             AS QT_DISPONIVEL_EBD,
+    ROUND((NVL(e.QTESTGER,0) - NVL(e.QTRESERV,0) - NVL(e.QTBLOQUEADA,0))
+          * NVL(e.CUSTOFIN,0), 2)                                        AS VL_DISPONIVEL,
+    ROUND((NVL(e.QTESTGER,0) - NVL(e.QTBLOQUEADA,0))
+          * NVL(e.CUSTOFIN,0), 2)                                        AS VL_DISPONIVEL_EBD,
+    e.QTGIRODIA                                                          AS GIRO_DIA,
+    ROUND(NVL(e.QTESTGER,0) / NULLIF(e.QTGIRODIA,0), 0)                  AS DIAS_COBERTURA,
+    CASE WHEN e.DTULTSAIDA IS NULL THEN NULL
+         ELSE TRUNC(SYSDATE) - TRUNC(e.DTULTSAIDA) END                   AS DIAS_SEM_VENDA
 FROM EBD.PCEST e
-LEFT JOIN EBD.PCPRODUT p ON p.CODPROD = e.CODPROD
-LEFT JOIN venda30 vd     ON vd.CODPROD = e.CODPROD
+JOIN EBD.PCPRODUT p ON p.CODPROD = e.CODPROD
+JOIN EBD.PCDEPTO  d ON d.CODEPTO = p.CODEPTO
 WHERE e.CODFILIAL = :codFilial
+  AND p.DTEXCLUSAO IS NULL
+  AND NVL(d.TIPOMERC,'XX') NOT IN ('IM','CI')
+  AND e.CODFILIAL NOT IN ('A1','51')
   AND NVL(e.QTESTGER,0) > 0
-ORDER BY VALOR_ESTOQUE DESC NULLS LAST
+ORDER BY VL_DISPONIVEL DESC NULLS LAST
 FETCH FIRST :topN ROWS ONLY
 ```
+
+**Filtros obrigatorios** (da definicao oficial da FatoEstoque do BI; sem eles o
+total nao bate): produto nao excluido, departamentos IM/CI fora, filiais A1/51 fora.
+
+**Duas definicoes de disponivel, ambas oficiais:**
+
+| Coluna | Formula | Quando usar |
+|---|---|---|
+| QT_DISPONIVEL | QTESTGER - QTRESERV - QTBLOQUEADA | o que da pra vender AGORA |
+| QT_DISPONIVEL_EBD | QTESTGER - QTBLOQUEADA | definicao propria da EBD, ignora reserva |
+
+A diferenca e grande em item de giro alto: no Nissin Lamen chega a 67 mil
+unidades reservadas; em item importado e quase nula. **Ao responder, diga qual
+das duas esta usando.**
+
+Cobertura em dias usa QTGIRODIA do Winthor, nao media calculada.
+
+
+**Filtros obrigatorios** (da definicao oficial da FatoEstoque do BI; sem eles o
+total nao bate): produto nao excluido, departamentos IM/CI fora, filiais A1/51 fora.
+
+**Duas definicoes de disponivel, ambas oficiais:**
+
+| Coluna | Formula | Quando usar |
+|---|---|---|
+| QT_DISPONIVEL | QTESTGER - QTRESERV - QTBLOQUEADA | o que da pra vender AGORA |
+| QT_DISPONIVEL_EBD | QTESTGER - QTBLOQUEADA | definicao propria da EBD, ignora reserva |
+
+A diferenca e grande em item de giro alto: no Nissin Lamen chega a 67 mil
+unidades reservadas; em item importado e quase nula. **Ao responder, diga qual
+das duas esta usando.**
+
+Cobertura em dias usa QTGIRODIA do Winthor, nao media calculada.
+
+
+**Filtros obrigatorios** (da definicao oficial da FatoEstoque do BI; sem eles o
+total nao bate): produto nao excluido, departamentos IM/CI fora, filiais A1/51 fora.
+
+**Duas definicoes de disponivel, ambas oficiais:**
+
+| Coluna | Formula | Quando usar |
+|---|---|---|
+| QT_DISPONIVEL | QTESTGER - QTRESERV - QTBLOQUEADA | o que da pra vender AGORA |
+| QT_DISPONIVEL_EBD | QTESTGER - QTBLOQUEADA | definicao propria da EBD, ignora reserva |
+
+A diferenca e grande em item de giro alto: no Nissin Lamen chega a 67 mil
+unidades reservadas; em item importado e quase nula. **Ao responder, diga qual
+das duas esta usando.**
+
+Cobertura em dias usa QTGIRODIA do Winthor, nao media calculada.
+
+
+**Filtros obrigatorios** (copiados da definicao oficial da FatoEstoque do BI; sem
+eles o total nao bate): produto nao excluido, departamentos IM/CI fora, filiais
+A1/51 fora.
+
+**Duas definicoes de disponivel, ambas oficiais:**
+
+| Coluna | Formula | Quando usar |
+|---|---|---|
+| QT_DISPONIVEL | QTESTGER - QTRESERV - QTBLOQUEADA | o que da pra vender AGORA (desconta reserva) |
+| QT_DISPONIVEL_EBD | QTESTGER - QTBLOQUEADA | definicao propria da EBD, ignora reserva |
+
+A diferenca e grande em item de giro alto: no Nissin Lamen chega a 67 mil
+unidades reservadas; em item importado e quase nula. **Ao responder, diga qual
+das duas esta usando.**
+
+Cobertura em dias usa QTGIRODIA do Winthor, nao media calculada.
+
 
 **Validado:** Nissin Lamen top em Manaus. Latência: 0,6s.
 
