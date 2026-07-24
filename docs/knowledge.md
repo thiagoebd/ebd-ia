@@ -928,6 +928,12 @@ e a força de vendas migra devagar de RCA para CLT.
 inclui insumo, amostra e material administrativo e NAO serve para analise
 comercial (em Teresina eram 18.598 itens a mais).
 
+**`ENVIARFORCAVENDAS = 'S'`** e o que faz o produto aparecer no app do RCA. Se
+o cadastro esquece de marcar, o item existe, tem estoque e e de revenda, mas
+**ninguem consegue vender** — some da forca de vendas. Medido 24/07: 85 itens e
+R$ 2,69 mi parados por isso. Ao analisar capital parado, cheque este campo antes
+de sugerir queima ou devolucao (ver T-CMP06).
+
 **`FORALINHA = 'S'` = "nao vamos mais comprar"**, mas o item continua
 `REVENDA = 'S'` e continua vendendo. Rotule como **saindo de linha**, nunca como
 fora de linha.

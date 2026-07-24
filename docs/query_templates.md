@@ -2631,3 +2631,42 @@ Medido 24/07 — filial 21 (1.814 itens de revenda): 968 saudaveis (R$ 4,18 mi),
 145 em ruptura, 46 parados (R$ 120 mil), 642 de sujeira. Filial 18 (3.933):
 1.626 saudaveis (R$ 19,5 mi), 355 em ruptura, 339 parados (R$ 589 mil), 820 de
 sujeira, 454 saindo de linha com venda e estoque (R$ 1,34 mi de escoamento).
+
+
+## T-CMP06 — Estoque invisivel na forca de vendas
+
+Acha item que **tem estoque, e de revenda, esta em linha, mas nao aparece no app
+do RCA** porque o `ENVIARFORCAVENDAS` nao foi marcado no cadastro. Ninguem vende
+o que nao ve — o estoque fica parado por erro de cadastro, nao por falta de
+demanda.
+
+Medido 24/07 nas 21 filiais: **85 itens, R$ 2,69 milhoes** parados. Concentrados
+em Duque de Caxias (34 itens, R$ 1,4 mi) e Taquara (26, R$ 930 mil); SBC tem um
+unico item de R$ 160,8 mil.
+
+```sql
+SELECT pf.CODFILIAL,
+       pf.CODPROD,
+       SUBSTR(NVL(p.DESCRICAO,'?'),1,40)                       AS PRODUTO,
+       NVL(e.QTESTGER,0)                                       AS QT_ESTOQUE,
+       ROUND(NVL(e.QTESTGER,0) * NVL(e.CUSTOFIN,0), 2)         AS VL_PARADO,
+       CASE WHEN e.DTULTSAIDA IS NULL THEN NULL
+            ELSE TRUNC(SYSDATE) - TRUNC(e.DTULTSAIDA) END      AS DIAS_SEM_VENDA
+FROM EBD.PCPRODFILIAL pf
+JOIN EBD.PCPRODUT p   ON p.CODPROD = pf.CODPROD AND p.DTEXCLUSAO IS NULL
+JOIN EBD.PCEST e      ON e.CODFILIAL = pf.CODFILIAL AND e.CODPROD = pf.CODPROD
+WHERE pf.CODFILIAL = :codFilial
+  AND pf.REVENDA = 'S'
+  AND NVL(pf.FORALINHA,'N') = 'N'
+  AND NVL(pf.ENVIARFORCAVENDAS,'N') <> 'S'
+  AND NVL(e.QTESTGER,0) > 0
+ORDER BY VL_PARADO DESC NULLS LAST
+```
+
+A acao aqui NAO e queima nem devolucao: e marcar `ENVIARFORCAVENDAS = 'S'` no
+cadastro da filial (rotina 238) e o item volta a ser vendavel.
+
+⚠️ **Ao diagnosticar capital parado, sempre cheque este campo antes de sugerir
+queima ou devolucao.** Item invisivel no app nao e falta de demanda — e falta de
+cadastro. Medido: em Teresina os 47 parados estavam TODOS visiveis (ali era
+demanda mesmo), mas em Duque e Taquara o problema e cadastro.
