@@ -572,3 +572,22 @@ do create_route_map. Use EXATAMENTE um destes valores (não use cor nem rótulo)
   vendeu | visitou_nao_vendeu | nao_visitou | fora_rota
 NÃO escreva a legenda colorida só no texto — o card colore e conta sozinho a partir do campo `status`.
 Se você calculou o status pra tabela, ele TEM que ir no campo `status` de cada ponto também.
+
+
+## Performance: filtre filial e periodo
+
+Medido em producao (23/07/2026), mesma consulta de ranking por RCA no mes:
+
+- BR inteiro: **9,1s**
+- Uma filial: **0,7s** (13x mais rapido — usa o indice CODFILIAL+DTSAIDA)
+- BR, 7 dias: **3,3s**
+
+Regras:
+
+1. **Filtre `CODFILIAL` sempre que a pergunta permitir.** So abra para o Brasil
+   quando o usuario pedir visao nacional.
+2. **Nao abra o periodo alem do que a pergunta pede.** "Hoje" e um dia, nao o mes.
+3. **Nunca use views `GD_*`** (legado GoodData, desativado) — ver secao 10 do
+   knowledge. Use `VIEW_VENDAS_RESUMO_FATURAMENTO`, que ja e desnormalizada.
+4. O `GROUP BY` nao muda o custo: agrupar por fornecedor, departamento ou
+   categoria custa o mesmo que por filial.
