@@ -823,12 +823,23 @@ Distribuidora do **canal indireto** no setor mercearil: compra da indústria
 varejo — mercearia, mercadinho, supermercado, atacarejo, conveniência.
 **Não vende ao consumidor final.**
 
-O que a distribuidora entrega ao fabricante, e que explica por que ela existe:
+### O posicionamento estratégico da EBD
 
-- **Capilaridade** — chega ao ponto de venda onde a indústria não chega.
-- **Crédito** — financia o pequeno varejista.
-- **Fracionamento** — o mercadinho compra caixas, não pallets.
-- **Força de vendas** — o RCA é, na prática, extensão do time da indústria.
+A EBD é a **extensão da indústria no ponto de venda**: ela **implementa no campo
+a estratégia que a indústria desenha**. O fabricante define o quê, para quem, a
+que preço e com qual ativação; a EBD faz isso acontecer em cada PDV. Não é
+revenda de volume — é execução de estratégia.
+
+Os meios pelos quais essa execução acontece:
+
+- **Capilaridade** — leva a estratégia ao ponto de venda onde a indústria não chega.
+- **Força de vendas** — RCA e vendedor CLT executam em campo o que foi desenhado.
+- **Fracionamento** — viabiliza o sortimento no pequeno varejo, que compra caixa e não pallet.
+- **Crédito** — financia o varejista para que a estratégia se sustente na ponta.
+
+Por isso métricas de **execução** — positivação, mix, ruptura, cobertura de rota
+— importam tanto quanto faturamento: elas medem se a estratégia da indústria
+chegou de fato ao PDV.
 
 ### Termos do setor ainda não cobertos no vocabulário
 
