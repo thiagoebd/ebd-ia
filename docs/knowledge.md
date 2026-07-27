@@ -1012,3 +1012,177 @@ produto POR FILIAL na rotina 238 (campo Cod. Comprador na `PCPRODFILIAL`).
 
 O problema nao e distancia, e promessa errada: o Norte demora mais mas o
 fornecedor promete certo; o Nordeste promete prazo que nao cumpre.
+
+## 17. Logistica, expedicao e WMS — modelo de dados e armadilhas
+
+Levantado e MEDIDO em 27-28/07/2026 contra o Oracle real. Todo numero desta
+secao tem consulta por tras. O que nao foi medido esta marcado como tal.
+
+### 17.1 Tres dominios distintos — nao misturar
+
+| Dominio | Pergunta | Rotinas | Tabela-nucleo |
+|---|---|---|---|
+| Expedicao | Como a venda vira carga na rua? | 901-967 | `PCCARREG` |
+| WMS | Onde a mercadoria esta no CD e quem moveu? | 17xx / 37xx | `PCMOVENDPEND` |
+| Roteirizacao de entrega | Em que ordem o caminhao entrega? | 911, 913, 915 | `PCPEDC.NUMSEQENTREGA` |
+
+Existe um quarto uso da sigla "O.S." que NAO e logistica de distribuicao:
+`PCORDEMSERVICO` + `PCOSVEICULO*` sao **manutencao de frota** (placa, modelo,
+KM, combustivel). Misturar com a O.S. de armazem produz resposta absurda com
+cara de certa.
+
+FRONTEIRA CRITICA: rota de VISITA (`PCROTACLI`, roteiro do RCA, usada pelo
+`create_route_map`) e coisa diferente de rota de ENTREGA (sequencia do
+caminhao). Mesma palavra, dois mundos.
+
+### 17.2 O que EXISTE e esta preenchido
+
+- `PCMOVENDPEND` — coracao do WMS, 97,3 mi de linhas, viva. Separador
+  (`CODFUNCOS`), conferente, endereco, O.S., tipo, quantidade, e os carimbos
+  `DTINICIOOS` / `DTFIMOS` / `DTFIMSEPARACAO` / `DTINICIOCONFERENCIA` /
+  `DTFIMCONFERENCIA` / `DTESTORNO`.
+- `PCENDERECO` / `PCESTENDERECO` — as 21 filiais + os 3 depositos (17, 19, 23)
+  usam WMS. Endereco bloqueado = endereco DESATIVADO: em SBC os 16.238
+  bloqueados tem ZERO estoque; os 14.213 livres carregam 4,09 mi de unidades.
+- `PCCORTEI` — corte na separacao, com `PVENDA` (valor) e `MOTIVO`.
+- `PCWMSCORTE` — o mesmo corte, com RESPONSAVEL (`CODFUNCCORTE` 100%
+  preenchido, `CODFUNCOS` 71-100%), endereco, O.S. e `CODMOTIVO` numerico.
+  Os totais batem com a `PCCORTEI` quase linha a linha.
+- `PCINVENTENDERECO` + `PCLOGINVENTARIOWMS` — inventario rotativo VIVO: 4.186
+  inventarios e 625 mil enderecos contados em 12 meses.
+- `PCROTAEXP` — 227 rotas de entrega; `PCCARREG.CODROTAPRINC` casa em 99,87%.
+- `PCVOLUMEOS` — 39,1 mi de linhas, rastreabilidade volume a volume (quem
+  montou palete, se embarcou, se foi cortado). AINDA NAO EXPLORADA.
+
+### 17.3 O CEMITERIO — colunas e tabelas que parecem uteis e estao VAZIAS
+
+Esta lista existe para o agente NAO escrever query bonita em cima de campo
+vazio e devolver zero com cara de resposta.
+
+| Objeto | Situacao medida |
+|---|---|
+| `PCCARREG.CODFILIALSAIDA` | 0 de 1.153.949 cargas |
+| `PCCARREG.DTRETORNO` | 3 registros no total (rotina 907 nao e usada) |
+| `PCCARREG.DATAMAPA` / `DATAHORAMAPA` | 5,5% |
+| `PCCARREG.KMINICIAL` / `KMFINAL` | valor sempre ZERO desde 2019 |
+| `PCROTAEXP.KMROTA` / `DIASENTREGA` / `PRAZOPREVENT` / `QTENTREGA` | 0 rotas preenchidas |
+| `PCPEDC.DTEMISSAOMAPA` / `NUMTRANSWMS` / `CODTRANSP` | 0 |
+| `PCPEDC.DTAGENDAENTREGA` | 35 registros |
+| `PCPEDC.DTENTREGA` | 100% preenchido mas DERIVADO — em SBC 98,6% igual ao `DTFAT`, pior caso 0 dias. NAO usar como entrega realizada |
+| `PCMOVENDPEND.CODFUNCEMBALADOR` | 0 |
+| `PCMOVEND` (CODFUNCSEP, EMPILHADEIRA, TRANSPALETEIRA, DTINICIOSEP, DTINIABAST, NUMPALETE) | todos 0 |
+| `PCCORTEI` (CODFUNCSEP, CODFUNCCONF, QTORIG, QTFALTA) | todos 0 — atribuicao so pela `PCWMSCORTE` |
+| `PCENTREGA`, `PCWMSOS`, `PCTRANSPORTE`, `PCROTASZONAENTREGA`, `PCWMSERRO`, `PCLOGCONFERENCIAWMS` | vazias |
+| `PCCARREGI` | 29.580 linhas contra 1,15 mi de cargas (2,5%) |
+| `PCROTA` | 0 linhas — a rota de entrega e a `PCROTAEXP` |
+
+CONSEQUENCIA DIRETA: **nao existe OTIF, nem km rodado, nem tempo de veiculo na
+rua, nem produtividade de equipamento.** Nao e falta de query, e falta de dado.
+
+REGRA DE METODO: medir preenchimento na JANELA RECENTE, nunca na tabela
+inteira. `DTSAIDAVEICULO` parece morta (16,9% no historico total) e esta viva
+(70,6% nos ultimos 3 meses).
+
+### 17.4 Onde o KM realmente esta
+
+A integracao com a MaximaTech/MyFrota e de MAO UNICA: `PCMYFROTA_FILA` tem
+560.094 registros de saida, e `PCMYFROTA_VIAGEM`, `PCMYFROTA_HISTORICO`,
+`PCMYFROTA_LOG`, `PCRASTREABILIDADE` e `PCITENSMYFROTA` estao todas com ZERO
+(contagem real, nao estatistica). `PCARC_CLIENTES_ROTEIRIZADOS` tem so duas
+colunas: `DTEXPORTACAO` e `CODCLI` — e log de exportacao.
+
+Se perguntarem km, rastreamento ou roteiro otimizado: responder que esse dado
+vive fora do Winthor, na plataforma da MaximaTech. NUNCA inventar numero de km.
+
+### 17.5 Ruptura de expedicao — o furo que a diretoria nao ve
+
+Sao DUAS rupturas diferentes:
+- `PCFALTA` = ruptura COMERCIAL, no momento do pedido (o agente ja conhece).
+- `PCCORTEI` / `PCWMSCORTE` = ruptura FISICA no CD, na separacao. Pedido
+  aceito, carga montada, e na hora de separar nao tinha.
+
+Medido em 90 dias: **R$ 5,01 milhoes cortados**, concentrados em RJ2 — CD
+Petropolis (23) R$ 1,66 mi e Pirai (14) R$ 829 mil, metade da empresa.
+
+Motivos (todos sao `PCTABDEV` com `TIPO = 'CO'`):
+
+| Cod | Motivo | Valor 90d | Peso |
+|---|---|---|---|
+| 62 | FALTA DE PRODUTO | R$ 3,02 mi | 60% |
+| 65 | MERCADORIA VENCIDA | R$ 1,62 mi | 32% |
+| 64 | MERCADORIA AVARIADA | R$ 269 mil | 5% |
+| 118 | OCORRENCIAS EXPEDICAO WMS | R$ 36,6 mil | |
+| 116 | EMBALAGEM ERRADA | R$ 1,1 mil | |
+
+R$ 1,62 mi de mercadoria VENCIDA cortada na separacao nao e erro de separador:
+e gestao de validade. O produto entrou, foi enderecado, venceu no endereco e so
+foi descoberto quando alguem foi busca-lo. A `PCESTENDERECO` tem `DTVAL`.
+
+### 17.6 Produtividade de armazem — o que se sustenta
+
+O tempo decorrido da O.S. NAO e tempo trabalhado (O.S. fica aberta; em Teresina
+a mediana da diferenca deu 1.110 minutos). O `HORA` da `PCMOVENDPEND` tambem
+nao serve: e carimbo da O.S., nao do movimento.
+
+O unico denominador honesto e **LINHAS POR DIA TRABALHADO**. Medido em SBC:
+apanha varia de 192 a 517 linhas/dia entre separadores.
+
+SEGMENTACAO OBRIGATORIA: separar APANHA de PALETIZADO pelo indice
+unidades/linha. Apanha fica entre 35 e 96; paletizado entre 649 e 1.982. Corte
+em 200 cai num vazio grande. Rankear junto compara trabalhos diferentes.
+
+Acuracia usa a taxa de ESTORNO (`DTESTORNO IS NOT NULL`). Medido em SBC, so
+movimentos de separacao: 0,04% a 0,59% por pessoa. ATENCAO: o estorno GERAL da
+filial (1,295%) e muito maior que o da separacao (0,28%) — o retrabalho esta na
+movimentacao interna, nao na apanha. Pirai 4,01% e Petropolis 3,11% no geral
+tem problema de MOVIMENTACAO, nao de separador.
+
+Gargalo medivel: fila entre `DTFIMSEPARACAO` e `DTINICIOCONFERENCIA` — Sao Luis
+107,5 min, SBC 81,7, Petropolis 74,7, Pirai 59,8, Duque 49,5. A DURACAO da
+conferencia nao existe (inicio e fim gravados no mesmo instante).
+
+Operacao e NOTURNA e ATRAVESSA A MEIA-NOITE. Medido na filial 18 em 14 dias
+pela hora de `DTINICIOOS` (a `DATA` da PCMOVENDPEND e truncada, e a coluna
+`HORA` e ruido — bate com o relogio real em 5% das linhas): turno das **21h as
+07h**, pico A MEIA-NOITE com 18% dos inicios de O.S., e **57% do trabalho
+depois da meia-noite** contra 38% entre 18h e 23h.
+
+Consequencia pratica: pergunta de turno NAO pode agrupar por dia calendario —
+usar `TRUNC(DTINICIOOS - 12/24)` (cicatrizes #67 e #68).
+
+### 17.7 Enums
+
+`PCENDERECO.TIPOENDER`: `AE` aereo (pulmao), `AP` picking.
+`PCENDERECO.SITUACAO`: `L` livre, `O` ocupado.
+`PCENDERECO.BLOQUEIO`: `S` bloqueado (= desativado, sem estoque), `N` ativo.
+Existe `Z` em Taquara (60 enderecos), fora da documentacao.
+`PCENDERECO.STATUS`: `N` normal, `F` falta, `C` crossdocking, `A` avaria,
+`E` excesso, `S` stage.
+`PCMOVENDPEND.CODOPER`: `E`/`S` entrada/saida, `EV`/`SV` avaria, `EA`/`SA` ajuste.
+`PCMOVENDPEND.POSICAO`: `C` concluido, `P` pendente, `A` aguardando.
+`PCINVENTENDERECO.TIPO`: `R` rotativo, `G` geral.
+`PCVEICUL.SITUACAO`: `V` e `L` = frota ATIVA (1.717 veiculos rodaram em 6
+meses); `I` = inativo (842 cadastrados, 1 carga). `B` e `O` residuais.
+`PCVEICUL.TIPOVEICULO`: `L`/`M`/`P` = leve/medio/pesado (peso medio de carga
+382 / 671 / 772 kg, e a `PCROTAEXP` tem as tres faixas de comissao). `E` sem
+traducao confirmada.
+
+Tipos de O.S. vem da `PCTIPOOS` DA EBD (42 codigos, 12 marcados "Fora de uso"),
+que e CUSTOMIZADA — o tipo 16 aqui e "Separacao por carregamento" e o 12 e
+"Separacao especifica Red - Cafe". NAO usar a tabela generica da TOTVS.
+Separacao = 13, 14, 16, 17, 20. Movimentacao interna = 50 a 61.
+Armazenagem = 51, 52, 60, 97, 98. Inventario = 70.
+
+### 17.8 Perfil operacional por filial (30 dias)
+
+Entregas por carga: Imperatriz 39,3, Caruaru 31,1, Sao Luis 26,1, Petrolina
+25,5 no topo; Guarulhos 5,7, Marabá 8,0 e Itapevi 8,5 na base. Peso por carga
+de 480 kg (Fortaleza) a 2.510 kg (Marabá).
+
+ATENCAO: `TOTVOLUME` NAO e comparavel entre filiais (157,16 em Duque contra
+1,14 em Itapevi com pesos parecidos). Unidade nao padronizada no cadastro. Peso
+serve para comparar; volume so dentro da mesma filial.
+
+Cancelamento de carga subiu de 35,4% (2022) para 49,9% (2026) — metade das
+cargas montadas e desfeita, e quase nenhuma tinha nota. E uso da 901 como
+rascunho, nao cancelamento fiscal.

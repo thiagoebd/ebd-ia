@@ -2674,3 +2674,400 @@ cadastro da filial (rotina 238) e o item volta a ser vendavel.
 queima ou devolucao.** Item invisivel no app nao e falta de demanda — e falta de
 cadastro. Medido: em Teresina os 47 parados estavam TODOS visiveis (ali era
 demanda mesmo), mas em Duque e Taquara o problema e cadastro.
+
+# Logistica, expedicao e WMS — templates T-LOG
+
+Regras que valem para TODOS os templates desta familia:
+- `PCMOVENDPEND` SEMPRE com `CODFILIAL` + `DATA` (97,3 mi de linhas).
+- Movimento valido exige `DTESTORNO IS NULL`.
+- Carga valida exige `DT_CANCEL IS NULL` (metade das cargas e cancelada).
+- `PCCARREG` nao tem filial: filial vem do `PCPEDC` pelo `NUMCAR`.
+- Mediana, nunca media: O.S. aberta distorce toda distribuicao.
+- Separacao = `TIPOOS IN (13,14,16,17,20)`.
+
+## T-LOG01 — Ruptura de expedicao por filial (R$)
+
+O que foi vendido e NAO saiu do CD. Diferente da PCFALTA, que e ruptura
+comercial no momento do pedido. Medido: 0,2s.
+
+```sql
+SELECT c.CODFILIAL,
+       COUNT(*)                                      AS LINHAS_CORTADAS,
+       COUNT(DISTINCT c.NUMPED)                      AS PEDIDOS_AFETADOS,
+       ROUND(SUM(c.QTCORTADA), 0)                    AS QT_CORTADA,
+       ROUND(SUM(c.QTCORTADA * NVL(c.PVENDA,0)), 2)  AS VALOR_CORTADO
+FROM EBD.PCCORTEI c
+WHERE c.DATA >= TRUNC(SYSDATE) - :dias
+  AND c.DATA <= SYSDATE
+GROUP BY c.CODFILIAL
+ORDER BY VALOR_CORTADO DESC
+```
+
+## T-LOG02 — Ruptura de expedicao por MOTIVO
+
+Motivo decodificado pela PCTABDEV (subconjunto TIPO='CO'). O join e por
+TO_CHAR porque PCCORTEI.MOTIVO e VARCHAR2 e mistura codigo com texto livre.
+
+```sql
+SELECT NVL(d.MOTIVO, NVL(TRIM(c.MOTIVO),'(sem motivo)')) AS MOTIVO,
+       COUNT(*)                                          AS LINHAS,
+       ROUND(SUM(c.QTCORTADA), 0)                        AS QT_CORTADA,
+       ROUND(SUM(c.QTCORTADA * NVL(c.PVENDA,0)), 2)      AS VALOR_CORTADO,
+       COUNT(DISTINCT c.CODFILIAL)                       AS FILIAIS
+FROM EBD.PCCORTEI c
+LEFT JOIN EBD.PCTABDEV d ON TO_CHAR(d.CODDEVOL) = TRIM(c.MOTIVO)
+WHERE c.DATA >= TRUNC(SYSDATE) - :dias
+  AND c.DATA <= SYSDATE
+GROUP BY NVL(d.MOTIVO, NVL(TRIM(c.MOTIVO),'(sem motivo)'))
+ORDER BY VALOR_CORTADO DESC
+```
+
+Leitura: 62 FALTA DE PRODUTO e ruptura fisica no CD; 65 MERCADORIA VENCIDA e
+gestao de validade no endereco, nao erro de separacao.
+
+## T-LOG03 — Corte com responsavel (quem cortou e quem separava)
+
+A PCCORTEI nao tem responsavel (colunas zeradas); a PCWMSCORTE tem.
+
+```sql
+SELECT w.CODFILIAL,
+       w.CODFUNCCORTE,
+       SUBSTR(NVL(e.NOME,'?'),1,28)  AS QUEM_CORTOU,
+       NVL(d.MOTIVO,'?')             AS MOTIVO,
+       COUNT(*)                      AS LINHAS,
+       ROUND(SUM(w.QTCORTADA), 0)    AS QT_CORTADA
+FROM EBD.PCWMSCORTE w
+LEFT JOIN EBD.PCTABDEV d ON d.CODDEVOL = w.CODMOTIVO
+LEFT JOIN EBD.PCEMPR   e ON e.MATRICULA = w.CODFUNCCORTE
+WHERE w.CODFILIAL = :codFilial
+  AND w.DATA >= TRUNC(SYSDATE) - :dias
+  AND w.DATA <= SYSDATE
+GROUP BY w.CODFILIAL, w.CODFUNCCORTE, SUBSTR(NVL(e.NOME,'?'),1,28), NVL(d.MOTIVO,'?')
+ORDER BY LINHAS DESC
+FETCH FIRST 20 ROWS ONLY
+```
+
+## T-LOG04 — Produtividade da separacao (linhas por dia trabalhado)
+
+Denominador correto. NAO usar tempo de O.S. nem hora ativa (cicatriz #60).
+Perfil separa apanha de paletizado: rankear junto compara trabalhos diferentes.
+
+```sql
+SELECT m.CODFUNCOS                                     AS SEPARADOR,
+       SUBSTR(NVL(e.NOME,'?'),1,28)                    AS NOME,
+       CASE WHEN SUM(m.QT)/NULLIF(COUNT(*),0) > 200
+            THEN 'PALETIZADO' ELSE 'APANHA' END        AS PERFIL,
+       COUNT(*)                                        AS LINHAS,
+       COUNT(DISTINCT m.NUMOS)                         AS OS,
+       COUNT(DISTINCT TRUNC(m.DATA))                   AS DIAS,
+       ROUND(COUNT(*) / NULLIF(COUNT(DISTINCT TRUNC(m.DATA)),0), 0) AS LINHAS_DIA,
+       ROUND(SUM(m.QT) / NULLIF(COUNT(DISTINCT TRUNC(m.DATA)),0), 0) AS UNID_DIA
+FROM EBD.PCMOVENDPEND m
+LEFT JOIN EBD.PCEMPR e ON e.MATRICULA = m.CODFUNCOS
+WHERE m.CODFILIAL = :codFilial
+  AND m.DATA >= TRUNC(SYSDATE) - :dias
+  AND m.DTESTORNO IS NULL
+  AND m.CODFUNCOS IS NOT NULL
+  AND m.TIPOOS IN (13,14,16,17,20)
+GROUP BY m.CODFUNCOS, SUBSTR(NVL(e.NOME,'?'),1,28)
+HAVING COUNT(DISTINCT TRUNC(m.DATA)) >= 5
+ORDER BY LINHAS_DIA DESC
+```
+
+## T-LOG05 — Acuracia da separacao (taxa de estorno por pessoa)
+
+Sempre apresentar junto com o T-LOG04: produtividade sem contrapeso de
+acuracia vira meta de velocidade.
+
+```sql
+SELECT m.CODFUNCOS                     AS SEPARADOR,
+       SUBSTR(NVL(e.NOME,'?'),1,28)    AS NOME,
+       COUNT(*)                        AS MOVIMENTOS,
+       SUM(CASE WHEN m.DTESTORNO IS NOT NULL THEN 1 ELSE 0 END) AS ESTORNADOS,
+       ROUND(100 * SUM(CASE WHEN m.DTESTORNO IS NOT NULL THEN 1 ELSE 0 END)
+             / COUNT(*), 2)            AS PCT_ESTORNO
+FROM EBD.PCMOVENDPEND m
+LEFT JOIN EBD.PCEMPR e ON e.MATRICULA = m.CODFUNCOS
+WHERE m.CODFILIAL = :codFilial
+  AND m.DATA >= TRUNC(SYSDATE) - :dias
+  AND m.CODFUNCOS IS NOT NULL
+  AND m.TIPOOS IN (13,14,16,17,20)
+GROUP BY m.CODFUNCOS, SUBSTR(NVL(e.NOME,'?'),1,28)
+HAVING COUNT(*) >= 500
+ORDER BY PCT_ESTORNO DESC
+```
+
+CUIDADO ao comparar filiais: o estorno GERAL (todos os tipos de O.S.) e muito
+maior que o da separacao. Pirai 4,01% e Petropolis 3,11% no geral contra 0,28%
+de separacao em SBC — o retrabalho deles e de MOVIMENTACAO INTERNA.
+
+## T-LOG06 — Gargalo: fila entre separacao e conferencia
+
+A duracao da conferencia nao existe (inicio e fim no mesmo instante). O que se
+mede e a espera. Medido: 1,8s para 5 filiais.
+
+```sql
+SELECT m.CODFILIAL,
+       COUNT(*) AS OS_MEDIDAS,
+       ROUND(MEDIAN((m.DTINICIOCONFERENCIA - m.DTFIMSEPARACAO) * 1440), 1) AS MIN_NA_FILA
+FROM EBD.PCMOVENDPEND m
+WHERE m.CODFILIAL IN (:listaFiliais)
+  AND m.DATA >= TRUNC(SYSDATE) - :dias
+  AND m.DTESTORNO IS NULL
+  AND m.DTFIMSEPARACAO IS NOT NULL
+  AND m.DTINICIOCONFERENCIA IS NOT NULL
+  AND m.DTINICIOCONFERENCIA >= m.DTFIMSEPARACAO
+GROUP BY m.CODFILIAL
+ORDER BY MIN_NA_FILA DESC
+```
+
+## T-LOG07 — Cargas e ocupacao por filial
+
+Via PCPEDC porque a PCCARREG nao tem filial. `TOTVOLUME` nao e comparavel
+entre filiais — usar peso para comparacao cruzada.
+
+```sql
+SELECT p.CODFILIAL,
+       COUNT(DISTINCT p.NUMCAR)                           AS CARGAS,
+       COUNT(*)                                           AS PEDIDOS,
+       ROUND(COUNT(*) / NULLIF(COUNT(DISTINCT p.NUMCAR),0), 1)  AS ENTREGAS_POR_CARGA,
+       ROUND(SUM(NVL(p.TOTPESO,0)) / NULLIF(COUNT(DISTINCT p.NUMCAR),0), 0) AS PESO_POR_CARGA
+FROM EBD.PCPEDC p
+WHERE p.DATA >= TRUNC(SYSDATE) - :dias
+  AND p.NUMCAR IS NOT NULL AND p.NUMCAR > 0
+  AND p.CODFILIAL IN (:listaFiliais)
+GROUP BY p.CODFILIAL
+ORDER BY CARGAS DESC
+```
+
+## T-LOG08 — Ocupacao do CD (enderecos)
+
+Bloqueio = endereco desativado (sem estoque), nao problema. Medido: 0,1s.
+
+```sql
+SELECT e.CODFILIAL,
+       COUNT(*)                                                   AS ENDERECOS,
+       SUM(CASE WHEN e.BLOQUEIO = 'S' THEN 1 ELSE 0 END)          AS DESATIVADOS,
+       SUM(CASE WHEN e.BLOQUEIO <> 'S' AND e.SITUACAO = 'O'
+                THEN 1 ELSE 0 END)                                AS OCUPADOS,
+       SUM(CASE WHEN e.BLOQUEIO <> 'S' AND e.SITUACAO = 'L'
+                THEN 1 ELSE 0 END)                                AS LIVRES,
+       SUM(CASE WHEN e.TIPOENDER = 'AP' THEN 1 ELSE 0 END)        AS PICKING,
+       SUM(CASE WHEN e.TIPOENDER = 'AE' THEN 1 ELSE 0 END)        AS PULMAO,
+       ROUND(100 * SUM(CASE WHEN e.BLOQUEIO <> 'S' AND e.SITUACAO = 'O'
+                            THEN 1 ELSE 0 END)
+             / NULLIF(SUM(CASE WHEN e.BLOQUEIO <> 'S' THEN 1 ELSE 0 END),0), 1) AS PCT_OCUPACAO
+FROM EBD.PCENDERECO e
+GROUP BY e.CODFILIAL
+ORDER BY ENDERECOS DESC
+```
+
+⚠️ Este total INCLUI o deposito virtual (#71). Para ocupacao fisica real,
+acrescentar no WHERE:
+
+```sql
+WHERE NOT EXISTS (SELECT 1 FROM EBD.PCPARAMETROWMS pw
+                   WHERE pw.CODFILIAL = e.CODFILIAL
+                     AND pw.NOME = 'DEPOSITOVIRTUAL'
+                     AND TRIM(pw.VALOR) = TO_CHAR(e.DEPOSITO))
+```
+
+## T-LOG09 — Acuracidade de inventario
+
+Inventario rotativo esta vivo (4.186 inventarios, 625 mil enderecos em 12
+meses). Divergencia = QTANT diferente de QTINVENT.
+
+```sql
+SELECT l.CODFILIAL,
+       COUNT(*)                                             AS CONTAGENS,
+       COUNT(DISTINCT l.NUMINVENT)                          AS INVENTARIOS,
+       SUM(CASE WHEN l.QTANT <> l.QTINVENT THEN 1 ELSE 0 END) AS DIVERGENTES,
+       ROUND(100 * SUM(CASE WHEN l.QTANT <> l.QTINVENT THEN 1 ELSE 0 END)
+             / COUNT(*), 2)                                 AS PCT_DIVERGENCIA
+FROM EBD.PCLOGINVENTARIOWMS l
+JOIN EBD.PCINVENTENDERECO i
+  ON i.NUMINVENT = l.NUMINVENT AND i.CODENDERECO = l.CODENDERECO
+WHERE i.DATA >= TRUNC(SYSDATE) - :dias
+  AND i.DTCANCEL IS NULL
+GROUP BY l.CODFILIAL
+ORDER BY PCT_DIVERGENCIA DESC
+```
+
+## T-LOG10 — Volume de O.S. por tipo (carga de trabalho do CD)
+
+Usa a PCTIPOOS DA EBD, que e customizada. Filial obrigatoria: sem ela a
+consulta varre 97 mi de linhas e estoura o timeout (cicatriz #62).
+
+```sql
+SELECT m.TIPOOS,
+       SUBSTR(NVL(t.DESCRICAO,'?'),1,32) AS DESCRICAO,
+       CASE WHEN m.TIPOOS IN (13,14,16,17,20)            THEN 'SEPARACAO'
+            WHEN m.TIPOOS BETWEEN 50 AND 61              THEN 'MOVIMENTACAO'
+            WHEN m.TIPOOS IN (51,52,60,97,98)            THEN 'ARMAZENAGEM'
+            WHEN m.TIPOOS = 70                           THEN 'INVENTARIO'
+            ELSE 'OUTROS' END            AS FAMILIA,
+       COUNT(*)                          AS MOVIMENTOS,
+       COUNT(DISTINCT m.NUMOS)           AS OS,
+       COUNT(DISTINCT m.CODFUNCOS)       AS PESSOAS
+FROM EBD.PCMOVENDPEND m
+LEFT JOIN EBD.PCTIPOOS t ON t.CODIGO = m.TIPOOS
+WHERE m.CODFILIAL = :codFilial
+  AND m.DATA >= TRUNC(SYSDATE) - :dias
+  AND m.DTESTORNO IS NULL
+GROUP BY m.TIPOOS, SUBSTR(NVL(t.DESCRICAO,'?'),1,32)
+ORDER BY MOVIMENTOS DESC
+```
+
+Movimentacao interna alta em relacao a separacao e sintoma de desenho ruim do
+CD: e custo que nao agrega valor.
+
+
+## T-LOG — escopo REGIONAL (ler antes de responder pergunta de regional)
+
+Os templates acima recebem `:codFilial` no singular. Pergunta de REGIONAL nao
+deve ser improvisada: trocar `= :codFilial` por `IN (lista da regional)`.
+
+**Na logistica os DEPOSITOS ENTRAM** — eles tem enderecos, O.S. e corte
+proprios, e o CD Petropolis (23) e a maior ruptura de expedicao da empresa.
+Isso e diferente de faturamento comercial, onde deposito nao entra.
+
+| Regional | Filiais para logistica (com deposito) |
+|---|---|
+| NO1 | 06, 08 |
+| NO2 | 01, 07, 11, 22 |
+| NE1 | 04, 12, **19** |
+| NE2 | 03, 09, 21 |
+| NE3 | 52, 53 |
+| RJ1 | 10, 13, **17** |
+| RJ2 | 05, 14, **23** |
+| SP1 | 02, 16 |
+| SP2 | 15, 18 |
+
+Exemplo — produtividade de separacao da regional SP2:
+
+```sql
+SELECT m.CODFILIAL,
+       m.CODFUNCOS                                     AS SEPARADOR,
+       SUBSTR(NVL(e.NOME,'?'),1,28)                    AS NOME,
+       COUNT(*)                                        AS LINHAS,
+       COUNT(DISTINCT TRUNC(m.DATA))                   AS DIAS,
+       ROUND(COUNT(*) / NULLIF(COUNT(DISTINCT TRUNC(m.DATA)),0), 0) AS LINHAS_DIA
+FROM EBD.PCMOVENDPEND m
+LEFT JOIN EBD.PCEMPR e ON e.MATRICULA = m.CODFUNCOS
+WHERE m.CODFILIAL IN ('15','18')
+  AND m.DATA >= TRUNC(SYSDATE) - :dias
+  AND m.DTESTORNO IS NULL
+  AND m.CODFUNCOS IS NOT NULL
+  AND m.TIPOOS IN (13,14,16,17,20)
+GROUP BY m.CODFILIAL, m.CODFUNCOS, SUBSTR(NVL(e.NOME,'?'),1,28)
+HAVING COUNT(DISTINCT TRUNC(m.DATA)) >= 5
+ORDER BY m.CODFILIAL, LINHAS_DIA DESC
+```
+
+## T-LOG11 — Operacao por TURNO (jornada que atravessa a meia-noite)
+
+A operacao vai das 21h as 07h, com pico A MEIA-NOITE e 57% do trabalho DEPOIS
+dela. Uma pergunta como "domingo para segunda" cobre UMA jornada, nao dois dias.
+
+DUAS regras se aplicam juntas:
+1. `PCMOVENDPEND.DATA` e TRUNCADA — nao tem hora (#68). A hora do trabalho sai
+   de `DTINICIOOS` / `DTFIMOS`. A coluna `HORA` NAO serve (bate com o relogio
+   real em 5% das linhas).
+2. `EXTRACT(HOUR FROM ...)` da ORA-30076 em coluna DATE — usar `TO_CHAR` (#66),
+   e deslocar 12h para nao partir a jornada (#67).
+
+O filtro por `m.DATA` continua porque e ele que usa o indice (CODFILIAL, DATA);
+o recorte de hora sai do DTINICIOOS.
+
+```sql
+SELECT TO_CHAR(TRUNC(m.DTINICIOOS - 12/24), 'DD/MM') AS JORNADA,
+       TO_CHAR(m.DTINICIOOS, 'HH24')                 AS HORA,
+       COUNT(*)                                      AS LINHAS,
+       COUNT(DISTINCT m.NUMOS)                       AS OS,
+       COUNT(DISTINCT m.CODFUNCOS)                   AS SEPARADORES,
+       ROUND(SUM(m.QT), 0)                           AS UNIDADES
+FROM EBD.PCMOVENDPEND m
+WHERE m.CODFILIAL IN (:listaFiliais)
+  AND m.DATA >= TRUNC(SYSDATE) - :dias
+  AND m.DTINICIOOS IS NOT NULL
+  AND m.DTESTORNO IS NULL
+  AND m.TIPOOS IN (13,14,16,17,20)
+GROUP BY TO_CHAR(TRUNC(m.DTINICIOOS - 12/24), 'DD/MM'),
+         TO_CHAR(m.DTINICIOOS, 'HH24')
+ORDER BY JORNADA DESC, HORA
+```
+
+Para o RESUMO de uma jornada (sem abrir por hora), agrupar so por
+`TRUNC(m.DTINICIOOS - 12/24)`.
+
+## T-LOG12 — Mapa de calor do armazem (densidade por deposito e rua)
+
+Responde "onde o CD trabalha e onde ele so ocupa espaco". A densidade ja sai
+calculada no SQL para o agente NAO fazer a conta e errar a unidade (#69).
+
+Denominador de endereco = cadastrados e ATIVOS (`BLOQUEIO <> 'S'`). Contar so
+os enderecos tocados esconderia a posicao ociosa, que e o que se procura.
+
+```sql
+SELECT e.DEPOSITO,
+       CASE WHEN EXISTS (SELECT 1 FROM EBD.PCPARAMETROWMS pw
+                          WHERE pw.CODFILIAL = e.CODFILIAL
+                            AND pw.NOME = 'DEPOSITOVIRTUAL'
+                            AND TRIM(pw.VALOR) = TO_CHAR(e.DEPOSITO))
+            THEN 'VIRTUAL' ELSE 'FISICO' END           AS TIPO_DEPOSITO,
+       e.RUA,
+       COUNT(*)                                        AS MOVIMENTOS,
+       COUNT(DISTINCT TRUNC(m.DATA))                   AS DIAS_COM_MOV,
+       MAX(cad.ENDER_ATIVOS)                           AS ENDERECOS_ATIVOS,
+       COUNT(DISTINCT e.CODENDERECO)                   AS ENDERECOS_USADOS,
+       COUNT(DISTINCT m.CODPROD)                       AS SKUS,
+       ROUND(SUM(m.QT), 0)                             AS UNIDADES,
+       ROUND(COUNT(*) / NULLIF(MAX(cad.ENDER_ATIVOS),0), 1)     AS MOV_POR_ENDERECO,
+       ROUND(COUNT(*) / NULLIF(MAX(cad.ENDER_ATIVOS),0)
+             / NULLIF(COUNT(DISTINCT TRUNC(m.DATA)),0), 2)      AS MOV_END_DIA
+FROM EBD.PCMOVENDPEND m
+JOIN EBD.PCENDERECO e ON e.CODENDERECO = m.CODENDERECO
+JOIN (SELECT CODFILIAL, DEPOSITO, RUA, COUNT(*) AS ENDER_ATIVOS
+      FROM EBD.PCENDERECO
+      WHERE BLOQUEIO <> 'S'
+      GROUP BY CODFILIAL, DEPOSITO, RUA) cad
+  ON  cad.CODFILIAL = e.CODFILIAL
+  AND cad.DEPOSITO  = e.DEPOSITO
+  AND cad.RUA       = e.RUA
+WHERE m.CODFILIAL = :codFilial
+  AND m.DATA >= TRUNC(SYSDATE) - :dias
+  AND m.DTESTORNO IS NULL
+  AND m.TIPOOS IN (13,14,16,17,20)
+GROUP BY e.DEPOSITO, e.RUA, e.CODFILIAL
+ORDER BY TIPO_DEPOSITO, MOV_END_DIA DESC
+```
+
+⚠️ **DEPOSITO VIRTUAL:** o Winthor cria um deposito artificial por filial para
+receber quantidade fracionada na entrada. Ele tem movimento real, mas os
+enderecos NAO sao posicoes fisicas do armazem — entram inflando qualquer conta
+de ocupacao. O template MARCA em vez de esconder: somar so `FISICO` para
+ocupacao, e citar o virtual em separado se ele aparecer. Ver #71.
+
+Leitura: `MOV_END_DIA` alto = corredor quente, candidato a congestao.
+`MOV_END_DIA` baixo com muitos `ENDERECOS_ATIVOS` = espaco ocupado sem giro,
+candidato a compactacao.
+
+ANTES DE PROPOR COMPACTACAO, cruzar com os enderecos DESATIVADOS da filial
+(T-LOG08). Em SBC ha 16.238 desativados contra ~1.900 ativos de baixo giro —
+a oportunidade de espaco esta na ordem de grandeza errada se olhar so as ruas
+frias.
+
+NUNCA apresentar "ganho estimado" em % de armazem sem a conta explicita: o
+denominador e o total de enderecos da FILIAL, nao o do deposito.
+
+## Nomes dos depositos internos (o banco nao tem)
+
+O Winthor guarda so o numero. Tabela mantida por cadastro manual — se o
+deposito nao estiver aqui, citar pelo NUMERO e nao inventar rotulo (#70).
+
+| Filial | Deposito | Nome | Confirmado por |
+|---|---|---|---|
+| 18 SBC | 1 | Area seca | Thiago, 28/07/2026 |
+| 18 SBC | 4 | Camara fria (ex.: Ferrero) | Thiago, 28/07/2026 |
+
+Demais depositos e demais filiais: A LEVANTAR com a logistica.

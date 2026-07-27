@@ -1277,3 +1277,275 @@ WHERE u.CODFILIAL = :codFilial
 ```
 
 **Aplicação:** revisar template T182 (Produtividade em Rota) e templates T270-T272 (Rota de Visitas) para incluir este filtro.
+
+
+## #55 - PCCARREG NAO tem CODFILIAL nem coluna DATA
+
+Erro cometido em 27/07/2026: assumi `CODFILIAL` e `DATA` na PCCARREG. Nao
+existem. `CODFILIALSAIDA` EXISTE mas esta preenchida em 0 de 1.153.949 cargas.
+
+  Data da carga  -> DTSAIDA (99,99% preenchida)
+  Filial         -> so via JOIN: PCPEDC.NUMCAR = PCCARREG.NUMCAR
+                    (ou PCNFSAID.NUMCAR), pegando PCPEDC.CODFILIAL
+
+Outras datas da PCCARREG: DTFECHA, DTFAT, DTSAIDAVEICULO, DTRETORNO,
+DATAMAPA, DATAHORAMAPA, DTINICIOCHECKOUT, DTFIMCHECKOUT.
+
+## #56 - PCCARREG.DT_CANCEL tem UNDERSCORE e cancela metade das cargas
+
+E `DT_CANCEL`, nao `DTCANCEL`. E nao e detalhe: 49,9% das cargas de 2026 estao
+canceladas (era 35,4% em 2022). Filtro obrigatorio em TODO template de carga:
+
+  AND DT_CANCEL IS NULL
+
+Quase nenhuma cancelada tem nota (38 em 68 mil) — e montagem desfeita na 901,
+nao cancelamento fiscal.
+
+## #57 - KM e prazo de rota NAO EXISTEM (nao insistir)
+
+PCCARREG.KMINICIAL / KMFINAL: preenchidas em ~34% das linhas mas com valor
+ZERO em 100% dos casos, em todos os anos desde 2019.
+PCROTAEXP: 227 rotas, e KMROTA, DIASENTREGA, PRAZOPREVENT e QTENTREGA com
+ZERO rotas preenchidas.
+
+Nao ha como calcular km rodado, desvio de roteiro nem prazo prometido. Esse
+dado vive na MaximaTech/MyFrota, e a integracao e de mao unica
+(PCMYFROTA_FILA com 560 mil registros de saida, tabelas de retorno zeradas).
+
+## #58 - Tabelas-fotografia de 2018 (BANIR)
+
+Existem copias congeladas com nome quase identico ao das tabelas vivas:
+PCMOVENDPEND300818 (8.470 linhas, ultima 30/08/2018), PCMOVENDPEND150818,
+PCMOVENDPEND040918, PCENDERECO040918/150818/300818, PCESTENDERECO*,
+PCINVENTENDERECO*, PCWMS040918/300818, PCPRODUTPICKING*, PCCARREG120419.
+
+A viva e PCMOVENDPEND (97,3 mi, ultima de hoje). Qualquer nome de tabela
+terminado em 6 digitos de data e fotografia — NUNCA consultar.
+
+## #59 - CODFUNCCONF e CODFUNCCOFERENTE sao a MESMA coisa
+
+A PCMOVENDPEND tem as duas colunas (a segunda com o erro de digitacao do
+proprio ERP) e elas sao IDENTICAS linha a linha em todas as filiais medidas.
+Usar qualquer uma. Ja CODFUNCEMBALADOR esta ZERADA.
+
+A PCCARREG usa CODFUNCCONF; a PCCORTEI tambem. So a PCMOVENDPEND tem a grafia
+dupla.
+
+## #60 - PCMOVENDPEND.HORA e carimbo da O.S., nao do movimento
+
+Tentativa de medir produtividade por "hora ativa" produziu 370 linhas/hora e
+1,2 hora ativa por dia — impossivel. O HORA e estampado por O.S.; milhares de
+linhas herdam a mesma hora (36 mil linhas numa unica hora em SBC).
+
+MEDIDO em 28/07/2026: a coluna HORA nao e nem a hora do movimento nem a do
+fim da O.S. — bate com DTINICIOOS em 5,3% das linhas e com DTFIMOS em 0,1%.
+Nao usar para nada. Hora real sai de DTINICIOOS / DTFIMOS (ver #68).
+
+Produtividade individual so por LINHAS POR DIA TRABALHADO:
+  COUNT(*) / COUNT(DISTINCT TRUNC(DATA))
+
+E o tempo decorrido da O.S. (DTFIMOS - DTINICIOOS) tambem nao serve: a O.S.
+fica aberta (mediana de 1.110 minutos em Teresina).
+
+## #61 - Motivo de corte: PCTABDEV com TIPO = 'CO'
+
+Os codigos de corte (62, 64, 65, 116, 118) sao da PCTABDEV, e sao exatamente
+o subconjunto TIPO = 'CO'. PCMOTIVONAOATEND esta VAZIA e PCMOTIVOAVARIA so tem
+9 codigos (1 a 9) — nao servem.
+
+ARMADILHA DE TIPO: PCCORTEI.MOTIVO e VARCHAR2 e mistura codigo numerico com
+texto livre digitado. PCTABDEV.CODDEVOL e NUMBER. Fazer o join pelo lado texto
+para nao tomar ORA-01722:
+
+  LEFT JOIN EBD.PCTABDEV d ON TO_CHAR(d.CODDEVOL) = TRIM(c.MOTIVO)
+
+PCWMSCORTE.CODMOTIVO ja e NUMBER e junta direto.
+
+## #62 - PCMOVENDPEND exige CODFILIAL + DATA
+
+97,3 milhoes de linhas. Agrupar por TIPOOS sem filtrar filial levou 204s
+(acima do timeout de 85s). Os indices uteis sao (CODFILIAL, POSICAO, DATA) e
+(DATA, CODFILIAL). SEMPRE filtrar os dois.
+
+## #63 - "O.S." e ambiguo no Winthor
+
+PCMOVENDPEND.NUMOS = ordem de servico de ARMAZEM.
+PCORDEMSERVICO + PCOSVEICULO/PCOSVEICULOMARCA/PCOSVEICULOMODELO = MANUTENCAO
+DE FROTA (placa, modelo, KM, combustivel), view VW_OSVEICULO.
+
+Sao coisas diferentes. Tambem existem duas tabelas de tipo: PCTIPOOS (armazem)
+e PCTIPOORDEMSERVICO (frota).
+
+## #64 - PCCORTEI tem o valor, PCWMSCORTE tem o responsavel
+
+Sao o MESMO evento em duas tabelas (totais batem quase linha a linha:
+Petropolis 8.033 x 8.040, Pirai 5.184 x 5.196, SBC 366 x 367).
+
+  PCCORTEI    -> PVENDA (valor do corte), MOTIVO (texto), CODCLI, CODUSUR
+  PCWMSCORTE  -> CODFUNCCORTE (100%), CODFUNCOS (71-100%), CODENDERECO,
+                 NUMOS, TIPOOS, CODMOTIVO (numerico)
+
+Na PCCORTEI as colunas CODFUNCSEP, CODFUNCCONF, QTORIG e QTFALTA estao
+PRATICAMENTE zeradas: 17 linhas preenchidas em ~31.600 cortes de 90 dias
+(0,05%). Nao servem para atribuicao — usar SO a PCWMSCORTE.
+
+## #65 - Preenchimento se mede na janela recente
+
+DTSAIDAVEICULO parece morta olhando a tabela inteira (16,9%) e esta viva nos
+ultimos 3 meses (70,6%). Historico antigo dilui e faz campo vivo parecer morto.
+Ao avaliar se uma coluna serve, filtrar os ultimos 90 dias.
+
+
+## #66 - EXTRACT(HOUR FROM coluna DATE) da ORA-30076
+
+Oracle so extrai HOUR/MINUTE/SECOND de TIMESTAMP ou INTERVAL. De uma coluna
+DATE (que e o tipo de praticamente toda data do Winthor) so sai YEAR, MONTH e
+DAY. Isso quebrou uma pergunta real de turno noturno em 27/07/2026.
+
+  ERRADO:  EXTRACT(HOUR FROM m.DATA)
+  ERRADO:  EXTRACT(HOUR FROM c.DTSAIDA)
+
+  CERTO:   TO_NUMBER(TO_CHAR(m.DTINICIOOS, 'HH24'))    -- hora como numero
+  CERTO:   TO_CHAR(m.DTINICIOOS, 'HH24')               -- hora como texto '23'
+  CERTO:   TO_CHAR(m.DTINICIOOS, 'DD/MM HH24:MI')      -- data e hora
+  CERTO:   EXTRACT(HOUR FROM CAST(m.DTINICIOOS AS TIMESTAMP))
+
+ATENCAO ao escolher a coluna: TO_CHAR sobre coluna TRUNCADA nao da erro, so
+devolve '00' em tudo. PCMOVENDPEND.DATA e truncada — ver #68.
+
+EXTRACT(YEAR FROM ...) e EXTRACT(MONTH FROM ...) funcionam em DATE — o erro so
+aparece com campo de tempo.
+
+CUIDADO ADICIONAL na PCMOVENDPEND: existe a coluna HORA, mas ela e carimbo da
+O.S., nao do movimento (cicatriz #60). Para saber a hora REAL de um movimento,
+usar TO_CHAR sobre DTINICIOOS ou DTFIMOS, nunca a coluna HORA.
+
+## #67 - Turno que vira o dia: nao usar TRUNC(DATA) sozinho
+
+A operacao de armazem da EBD e NOTURNA e ATRAVESSA A MEIA-NOITE. Medido na
+filial 18, 14 dias, pela hora de DTINICIOOS: turno das 21h as 07h, PICO A
+MEIA-NOITE (18% dos inicios de O.S.), 57% do trabalho DEPOIS da meia-noite
+contra 38% entre 18h e 23h.
+
+Logo, "domingo para segunda" ou "turno da noite" NAO pode agrupar por dia
+calendario: a maior metade da jornada cai no dia seguinte.
+
+Para tratar a jornada que atravessa a meia-noite, deslocar a hora do CARIMBO
+DE TRABALHO (nunca a DATA, que e truncada):
+
+  TRUNC(m.DTINICIOOS - 12/24)   AS JORNADA
+
+Assim tudo que acontece das 12h de um dia as 11h59 do seguinte conta como a
+mesma jornada operacional — o turno 21h-07h cabe inteiro. Usar so quando a
+pergunta for de turno; para faturamento e venda, TRUNC(DATA) normal.
+
+
+## #68 - Nem toda coluna de data do Winthor tem hora
+
+Medido em 28/07/2026 (14 dias, filial 18). CONFERIR antes de extrair hora:
+
+  SEM HORA (truncada na meia-noite):
+    PCMOVENDPEND.DATA
+    PCCARREG.DTSAIDA
+    PCPEDC.DATA
+
+  COM HORA:
+    PCMOVENDPEND.DTINICIOOS / DTFIMOS / DTFIMSEPARACAO / DTINICIOCONFERENCIA
+    PCCARREG.DTSAIDAVEICULO
+    PCCORTEI.DATA
+    PCWMSCORTE.DATA
+
+Nao da para adivinhar pelo nome nem pelo tipo: DATA e truncada na
+PCMOVENDPEND e tem hora na PCCORTEI.
+
+TO_CHAR sobre coluna truncada NAO DA ERRO — devolve '00' em todas as linhas.
+A query roda, agrupa e apresenta resultado errado com cara de certo. Foi assim
+que o T-LOG11 nasceu quebrado e passou no teste de execucao.
+
+Teste antes de usar qualquer coluna para analise de hora:
+
+  SELECT COUNT(DISTINCT TO_CHAR(<coluna>,'HH24')) FROM <tabela> WHERE ...
+
+Se voltar 1, a coluna e truncada e nao serve.
+
+
+## #69 - Movimento por endereco NAO e movimento por dia
+
+Erro real cometido pelo agente em 28/07/2026: dividiu 29.305 movimentos por
+136 enderecos, chegou a 215 e apresentou como "215 movimentos/dia por
+endereco". Faltou dividir pelos 60 dias da janela. O valor certo era 3,6/dia.
+
+O numero errado inflou a conclusao em ~60x e teria ido para reuniao de
+diretoria como "operacao hiperconcentrada".
+
+REGRA: toda densidade de armazem precisa de TRES denominadores explicitos:
+
+  movimentos                       -> total bruto do periodo
+  / enderecos                      -> intensidade por posicao NO PERIODO
+  / dias                           -> intensidade por posicao POR DIA
+
+E o rotulo tem que dizer qual dos tres e. "por endereco" e "por endereco por
+dia" diferem pelo tamanho da janela inteira.
+
+CUIDADO COM O DENOMINADOR DE ENDERECO: usar os enderecos CADASTRADOS e ATIVOS
+(BLOQUEIO <> 'S'), nao os enderecos tocados no periodo. Contar so os tocados
+esconde exatamente o problema que se quer achar — posicao ociosa. Em SBC ha
+16.238 enderecos desativados; incluir ou excluir muda tudo.
+
+## #70 - "Deposito" tem DOIS significados no Winthor
+
+Nunca usar a palavra sem qualificar. Sao coisas diferentes:
+
+  DEPOSITO-FILIAL   -> CODFILIAL 17 (Sao Pedro da Aldeia), 19 (Sao Luis),
+                       23 (Petropolis). Sao CDs que aparecem em acl_filiais,
+                       tem filial-mae, entram no mapa regional e tem ruptura
+                       propria. E o sentido de "os depositos entram na
+                       analise de logistica".
+
+  PCENDERECO.DEPOSITO -> ZONA FISICA DENTRO de um CD, nivel mais alto da
+                       hierarquia de enderecamento:
+                       DEPOSITO / RUA / PREDIO / NIVEL / APTO
+                       Em SBC sao 11 zonas; em Sao Luis, 20.
+
+Exemplo concreto (EBD SBC): o deposito interno 1 e area seca e o 4 e camara
+fria — o Ferrero fica na camara fria. Isso nao tem nenhuma relacao com as
+filiais 17/19/23.
+
+Ao responder, dizer "deposito interno N" ou "zona N do CD" para o sentido de
+endereco, e "filial-deposito NN" para o outro.
+
+NAO EXISTE TABELA no Winthor que nomeie o deposito interno. O numero e tudo o
+que o banco tem. Se o nome nao estiver na tabela do KB (secao 17), citar pelo
+NUMERO. NUNCA inferir o nome a partir do que o usuario mencionou na conversa —
+foi assim que o agente chamou o deposito 1 de "area seca" e o 4 de "camara
+fria" antes de ter qualquer confirmacao, acertando por sorte.
+
+
+## #71 - Deposito virtual: ler do parametro, NUNCA cravar 99
+
+O Winthor mantem um deposito ARTIFICIAL por filial, que recebe a quantidade
+fracionada na entrada. Ele tem movimento real mas os enderecos nao sao
+posicoes fisicas — entram inflando ocupacao e densidade do CD.
+
+Qual e o numero: sai de PCPARAMETROWMS, NOME = 'DEPOSITOVIRTUAL'.
+
+  Medido em 28/07/2026: e 99 em 20 filiais e **30 na filial 21 (Teresina)**.
+
+Por isso NAO cravar 99 no SQL. Sempre:
+
+  NOT EXISTS (SELECT 1 FROM EBD.PCPARAMETROWMS pw
+               WHERE pw.CODFILIAL = e.CODFILIAL
+                 AND pw.NOME = 'DEPOSITOVIRTUAL'
+                 AND TRIM(pw.VALOR) = TO_CHAR(e.DEPOSITO))
+
+REGRA DE APRESENTACAO: marcar, nao esconder. Se o agente sumir com o virtual
+sem avisar, o total dele nao fecha com o da logistica e ninguem entende a
+diferenca. Somar so o fisico para ocupacao e citar o virtual em separado.
+
+HIPOTESE DESCARTADA: os depositos 40, 50 e 51 NAO sao virtuais — eu supus e o
+parametro desmentiu. Sao zonas fisicas reais com pouco movimento. Deposito com
+muitos enderecos e pouco giro e ociosidade a investigar, nao artefato de
+sistema.
+
+Outros parametros da mesma familia: DEPOSITOAUTOSERVICO (nulo em todas as
+filiais da EBD) e QUEBRAOSARMAZPORDEPOSITO (= 'N' em todas).

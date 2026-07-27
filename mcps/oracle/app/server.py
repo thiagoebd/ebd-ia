@@ -309,6 +309,168 @@ mcp = FastMCP(
 )
 
 
+# ============================================================
+# ORA-00904 -> devolve as COLUNAS REAIS junto com o erro.
+#
+# 74% dos erros do agente (323 de 436 medidos em 27/07/2026) sao coluna
+# inexistente. Prompt nao resolve: o schema EBD tem 2425 tabelas. Aqui o
+# proprio MCP consulta o dicionario e entrega os nomes certos DENTRO do
+# resultado da tool — o agente nao precisa lembrar nem obedecer nada.
+# Custo: uma consulta barata em ALL_TAB_COLUMNS, SO quando falha.
+# ============================================================
+
+_RE_COL_INEXISTENTE = re.compile(r'ORA-00904:\s*"?([A-Za-z0-9_$#."]+)"?\s*:', re.I)
+_RE_TABELAS_FALLBACK = re.compile(r"\b(?:FROM|JOIN)\s+(?:EBD\.)?([A-Za-z0-9_$#]+)", re.I)
+
+
+def _tabelas_do_sql(sql: str) -> list[str]:
+    """Nomes de tabela citados no SQL. sqlglot primeiro, regex como rede."""
+    try:
+        import sqlglot
+        from sqlglot import exp
+        arv = sqlglot.parse_one(sql, read="oracle")
+        nomes = []
+        for t in arv.find_all(exp.Table):
+            n = (t.name or "").upper()
+            if n and n not in nomes:
+                nomes.append(n)
+        if nomes:
+            return nomes[:6]
+    except Exception:
+        pass
+    vistos = []
+    for n in _RE_TABELAS_FALLBACK.findall(sql or ""):
+        n = n.upper()
+        if n not in vistos:
+            vistos.append(n)
+    return vistos[:6]
+
+
+# Validado em 27/07/2026 contra colunas medidas na mao: a estatistica do
+# dicionario acerta em cheio (DTRETORNO NUM_DISTINCT=3 = os 3 registros reais;
+# KMINICIAL NUM_DISTINCT=1 = sempre zero). Guarda de validade: estatistica com
+# mais de 240 dias nao marca nada, pra nao condenar coluna boa por dado velho.
+_DIAS_STATS_VALIDA = 240
+
+
+def _marca_coluna(nd, nn, nrows, analisada) -> str:
+    """Rotulo de conteudo a partir da estatistica. Conservador por escolha."""
+    import datetime as _dt   # server.py NAO importa datetime no topo
+    try:
+        if analisada is None:
+            return ""
+        idade = (_dt.datetime.now() - analisada).days
+        if idade > _DIAS_STATS_VALIDA:
+            return ""
+        if nd is not None and nd == 0:
+            return " [VAZIA]"
+        if (nrows and nn is not None and nrows > 0
+                and (nn / nrows) > 0.99):
+            return " [QUASE VAZIA]"
+        if nd is not None and nd == 1:
+            return " [VALOR UNICO]"
+    except Exception as _e:
+        # NUNCA silenciar: falha aqui vira rotulo ausente sem ninguem notar
+        try:
+            log.warning("marca_coluna_falhou", erro=str(_e)[:120])
+        except Exception:
+            pass
+    return ""
+
+
+def _sugestao_colunas(sql: str, erro: str) -> str:
+    """Dica de colunas reais para um ORA-00904. NUNCA levanta excecao."""
+    try:
+        import difflib
+        m = _RE_COL_INEXISTENTE.search(erro or "")
+        alvo = (m.group(1) if m else "").split(".")[-1].strip('"').upper()
+        tabelas = _tabelas_do_sql(sql)
+        if not tabelas:
+            return ""
+
+        binds = {f"t{i}": t for i, t in enumerate(tabelas)}
+        lista = ",".join(f":t{i}" for i in range(len(tabelas)))
+        q = ("SELECT c.TABLE_NAME, c.COLUMN_NAME, c.NUM_DISTINCT, c.NUM_NULLS, "
+             "       t.NUM_ROWS, c.LAST_ANALYZED "
+             "FROM ALL_TAB_COLUMNS c "
+             "LEFT JOIN ALL_TABLES t "
+             "  ON t.OWNER = c.OWNER AND t.TABLE_NAME = c.TABLE_NAME "
+             f"WHERE c.OWNER = 'EBD' AND c.TABLE_NAME IN ({lista})")
+
+        pool = get_pool()
+        conn = pool.acquire()
+        try:
+            conn.call_timeout = 8000
+            with conn.cursor() as cur:
+                cur.execute(q, binds)
+                linhas = cur.fetchall()
+            conn.call_timeout = 0
+        finally:
+            try:
+                pool.release(conn)
+            except Exception:
+                pass
+
+        if not linhas:
+            return (f"A coluna {alvo or '(?)'} nao existe. As tabelas citadas "
+                    f"({', '.join(tabelas)}) nao foram encontradas no schema EBD "
+                    f"— confira o nome da TABELA antes da coluna.")
+
+        por_tab: dict[str, list[str]] = {}
+        rotulo: dict[tuple, str] = {}
+        for tab, col, _nd, _nn, _nr, _la in linhas:
+            _T, _C = tab.upper(), col.upper()
+            por_tab.setdefault(_T, []).append(_C)
+            rotulo[(_T, _C)] = _marca_coluna(_nd, _nn, _nr, _la)
+
+        partes = [f'COLUNA INEXISTENTE: "{alvo}".' if alvo
+                  else "COLUNA INEXISTENTE no SQL."]
+        partes.append("Estes sao os nomes REAIS no banco — use um deles, "
+                      "NAO invente variacoes:")
+
+        for tab in tabelas:
+            cols = por_tab.get(tab)
+            if not cols:
+                partes.append(f"  {tab}: tabela nao encontrada no schema EBD.")
+                continue
+            perto = difflib.get_close_matches(alvo, cols, n=8, cutoff=0.55) if alvo else []
+            # nome curto e onde o agente mais chuta, e onde o difflib mais falha:
+            # "KM" x "KMROTA" da 0.50 e ficava de fora. Prefixo/substring cobrem.
+            comeca = [c for c in cols
+                      if alvo and len(alvo) >= 2 and c.startswith(alvo)
+                      and c not in perto]
+            contem = [c for c in cols
+                      if alvo and len(alvo) >= 3 and (alvo in c or c in alvo)
+                      and c not in perto and c not in comeca]
+            sugest = (perto + comeca + contem)[:12]
+            if sugest:
+                _fmt = [c + rotulo.get((tab, c), "") for c in sugest]
+                partes.append(f"  {tab} ({len(cols)} colunas) -> parecidas: "
+                              + ", ".join(_fmt))
+            else:
+                amostra = ", ".join(sorted(cols)[:25])
+                partes.append(f"  {tab} ({len(cols)} colunas) -> nenhuma parecida "
+                              f"com {alvo}. Amostra: {amostra}")
+
+        if any(rotulo.get((t, c)) for t in por_tab for c in por_tab[t]):
+            partes.append("[VAZIA] = a coluna existe mas NAO tem dado no banco; "
+                          "[QUASE VAZIA] = mais de 99% nulo; [VALOR UNICO] = "
+                          "sempre o mesmo valor. Escolher uma dessas faz a "
+                          "query rodar e voltar ZERO LINHAS — o que parece "
+                          "resposta e nao e. Procure outro caminho para o dado "
+                          "(no caso de filial na PCCARREG, o join e por "
+                          "PCPEDC.NUMCAR).")
+        partes.append("Se nenhuma servir, consulte ALL_TAB_COLUMNS antes de "
+                      "tentar de novo.")
+        return "\n".join(partes)[:1800]
+    except Exception as _e:
+        try:
+            log.warning("sugestao_colunas_falhou", erro=str(_e)[:150])
+        except Exception:
+            pass
+        return ""
+
+
 @mcp.tool(
     name="oracle_query",
     description=(
@@ -468,11 +630,19 @@ async def oracle_query(
                 details={"sql_executed": final_sql},
             ).model_dump()
         log.error("oracle_query_error", user_id=user.user_id, error=str(e)[:300],
-                  full_code=full_code, sql_prefix=final_sql[:200])
+                  full_code=full_code, sql_prefix=final_sql[:200],
+                  sql_full=final_sql[:1500])
+        _msg = str(e)[:500]
+        if "ORA-00904" in str(e) or "ORA-00904" in (full_code or ""):
+            _dica = _sugestao_colunas(final_sql, str(e))
+            if _dica:
+                _msg = _msg + "\n\n" + _dica
+                log.info("ora00904_enriquecido", user_id=user.user_id,
+                         tabelas=_tabelas_do_sql(final_sql))
         return ToolResponse.failure(
             tool="oracle_query",
             code="ORACLE_ERROR",
-            message=str(e)[:500],
+            message=_msg,
             elapsed_ms=elapsed,
             user_context=user,
             details={"sql_executed": final_sql},

@@ -189,8 +189,10 @@ async def chat(body: ChatRequest, claims: dict = Depends(verify_token)):
                                 "tool_outcomes=%s preview=%r",
                                 tool_outcomes, assistant_text[:200],
                             )
-                            assistant_text = ("Nao consegui consultar o Winthor agora — "
-                                              "tenta de novo daqui a pouco?")
+                            assistant_text = ("Nao consegui trazer esses dados do "
+                                              "Winthor e nao vou arriscar numeros "
+                                              "sem base. Pode reformular a pergunta, "
+                                              "de preferencia com filial e periodo?")
                             tools_used = []
                             ev["text"] = assistant_text
                             ev["fabricacao_bloqueada"] = True
@@ -203,8 +205,10 @@ async def chat(body: ChatRequest, claims: dict = Depends(verify_token)):
                 if not saved and assistant_text:
                     # mesma trava no caminho de excecao/interrupcao
                     if _looks_like_data(assistant_text) and not tools_used:
-                        assistant_text = ("Nao consegui consultar o Winthor agora — "
-                                          "tenta de novo daqui a pouco?")
+                        assistant_text = ("Nao consegui trazer esses dados do "
+                                          "Winthor e nao vou arriscar numeros sem "
+                                          "base. Pode reformular a pergunta, de "
+                                          "preferencia com filial e periodo?")
                         tools_used = []
                     await db.add_message(conv_id, "assistant",
                                          {"text": assistant_text, "tools": tools_used})

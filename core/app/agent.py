@@ -378,9 +378,10 @@ async def run_turn_stream(
     _tool_contents = []
     _MAX_SQL_FAILS = 3
     FALHA_WINTHOR = (
-        "Nao consegui consultar o Winthor agora — a consulta falhou no banco e eu "
-        "nao tenho os dados. Nao vou arriscar numeros sem base. "
-        "Pode tentar de novo daqui a pouco?"
+        "Tentei algumas vezes e nao consegui montar uma consulta valida pra essa "
+        "pergunta. Nao vou arriscar numeros sem base. Pode reformular? Dizer a "
+        "filial e o periodo costuma resolver. Se estiver acontecendo em varias "
+        "perguntas seguidas, pode ser indisponibilidade do banco — vale avisar a TI."
     )
 
     while iterations < settings.max_iterations:

@@ -68,6 +68,79 @@ async def execute_oracle_query(
         return {"status": "error", "error": {"code": "BRIDGE_ERROR", "message": msg}}
 
 
+_ORA_INFRA = ("ORA-03113", "ORA-03114", "ORA-12541", "ORA-12170", "ORA-01033",
+              "ORA-00028", "ORA-12514", "DPY-", "TNS-")
+
+_DICAS = {
+    "ORA-00904": ("Coluna INEXISTENTE. NAO tente variacoes do nome — descubra o "
+                  "nome real primeiro: SELECT COLUMN_NAME FROM ALL_TAB_COLUMNS "
+                  "WHERE OWNER='EBD' AND TABLE_NAME='<TABELA>'. Cheque tambem o "
+                  "sql-corrections.md: varias colunas do Winthor tem grafia "
+                  "inesperada (DT_CANCEL com underscore, CODFUNCCOFERENTE com "
+                  "erro de digitacao)."),
+    "ORA-00942": ("Tabela ou view nao existe (ou sem permissao). Confira o nome e "
+                  "o prefixo EBD. Tabelas terminadas em 6 digitos de data sao "
+                  "fotografias antigas e nao devem ser usadas."),
+    "ORA-30076": ("EXTRACT(HOUR/MINUTE FROM ...) so funciona em TIMESTAMP. Em "
+                  "coluna DATE use TO_CHAR(coluna,'HH24'). Ver cicatriz #66."),
+    "ORA-01722": ("Conversao numerica invalida. Coluna VARCHAR2 com texto sendo "
+                  "comparada a NUMBER — converta o lado NUMBER com TO_CHAR."),
+    "ORA-01481": ("Mascara de formato invalida no TO_CHAR/TO_NUMBER. Cheque a "
+                  "mascara e o tipo do argumento."),
+    "ORA-00979": ("Coluna fora do GROUP BY. Toda coluna nao agregada do SELECT "
+                  "precisa estar no GROUP BY."),
+    "ORA-01858": ("Formato de data nao bate com o valor. Use TO_DATE com mascara "
+                  "explicita ou literais DATE 'YYYY-MM-DD'."),
+    "ORA-00918": "Coluna ambigua: qualifique com o alias da tabela.",
+    "ORA-00936": "Expressao ausente: SELECT/WHERE incompleto.",
+    "ORA-00933": "Comando SQL nao termina corretamente.",
+}
+
+
+def _instrucao_por_erro(code: str, msg: str) -> str:
+    """Traduz o erro do Oracle em instrucao acionavel para o agente.
+
+    SQL malformado e RECUPERAVEL: o agente deve corrigir e chamar a tool de
+    novo. So infra/timeout justifica dizer ao usuario que o banco falhou.
+    """
+    m = (msg or "").upper()
+    c = (code or "").upper()
+    base = f"A consulta ao Winthor FALHOU ({code}: {msg}). NUNCA invente numeros."
+
+    if c == "TIMEOUT" or "TIMEOUT" in m or "PASSOU DE" in m:
+        return (f"{base} Causa: a query demorou demais. REESCREVA mais leve e "
+                f"tente de novo: filtre CODFILIAL, encurte o periodo, evite "
+                f"varrer tabela grande sem indice. NAO diga que o banco caiu.")
+
+    if any(t in m for t in ("ESCOPO", "PERMISS", "NAO AUTORIZ", "FORA DO ESCOPO",
+                            "ACL", "RECUSAD", "BLOQUEAD")):
+        return (f"{base} Isso NAO e falha do banco: a consulta foi barrada pelo "
+                f"escopo de acesso do usuario. Explique que o dado pedido esta "
+                f"fora do escopo dele e ofereca o recorte que ele pode ver.")
+
+    if any(t in m for t in _ORA_INFRA):
+        return (f"{base} Causa: indisponibilidade de conexao com o banco. "
+                f"Responda que o Winthor esta indisponivel no momento e peca "
+                f"para tentar daqui a pouco.")
+
+    ora = ""
+    for k in _DICAS:
+        if k in m:
+            ora = k
+            break
+
+    if ora or "ORA-" in m:
+        dica = _DICAS.get(ora, "Revise a sintaxe e os nomes de coluna do SQL.")
+        return (f"{base} Isso e ERRO NA SUA CONSULTA, nao no banco — o Winthor "
+                f"esta no ar. {dica} CORRIJA o SQL e chame a tool NOVAMENTE. "
+                f"NAO diga ao usuario que o banco falhou e NAO desista na "
+                f"primeira tentativa.")
+
+    return (f"{base} Causa nao identificada. Tente UMA correcao do SQL; se "
+            f"falhar de novo, explique ao usuario o que voce tentou consultar e "
+            f"peca para ele reformular a pergunta.")
+
+
 def format_result_for_claude(payload: dict) -> str:
     status = payload.get("status", "unknown")
     if status != "ok":
@@ -75,10 +148,10 @@ def format_result_for_claude(payload: dict) -> str:
         code = err.get("code", "?")
         msg = err.get("message", "?")
         _log.warning("oracle_query FAIL code=%s msg=%s", code, str(msg)[:200])
-        # Marcador inequivoco que o agent/gateway detectam pra BLOQUEAR fabulacao
-        return (f"__ORACLE_ERROR__ A consulta ao Winthor FALHOU ({code}: {msg}). "
-                f"Voce NAO TEM dados. NUNCA invente numeros. Responda exatamente: "
-                f"'Nao consegui consultar o Winthor agora — tenta de novo daqui a pouco?'")
+        # Marcador inequivoco que o agent/gateway detectam pra BLOQUEAR fabulacao.
+        # A CLASSE do erro decide a instrucao: erro de SQL e RECUPERAVEL (o agente
+        # corrige e tenta de novo); infra nao e.
+        return "__ORACLE_ERROR__ " + _instrucao_por_erro(code, msg)
     result = payload.get("result", {})
     rows = result.get("rows", [])
     elapsed = payload.get("elapsed_ms", 0)
