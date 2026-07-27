@@ -3206,3 +3206,60 @@ Juazeiro apareceria inteira e uma carga de 82 dias em Duque sumiria no ruido.
 Aqui o corte e **o dobro da mediana da propria filial**, com piso de 5 dias, e a
 ordenacao e pela RAZAO em relacao ao normal da praca — nao pelo numero absoluto
 de dias.
+
+
+## T-LOG16 — Aderencia a meta de fechamento (metropolitana x interior)
+
+Meta do negocio: capital e regiao metropolitana fecham carga em **2 a 3 dias**
+(secao 17.10). Interior nao entra na mesma regua. A classificacao sai da
+`PCROTAEXP.DESCRICAO`, que e nomeada por praca.
+
+```sql
+SELECT CASE WHEN UPPER(r.DESCRICAO) LIKE '%CAPITAL%'
+              OR UPPER(r.DESCRICAO) LIKE '%METROPOLIT%' THEN '1-METROPOLITANA'
+            WHEN UPPER(r.DESCRICAO) LIKE '%INTERIOR%'
+              OR UPPER(r.DESCRICAO) LIKE '%SERT%'
+              OR UPPER(r.DESCRICAO) LIKE '%LITORAL%'
+              OR UPPER(r.DESCRICAO) LIKE '%VALE%'
+              OR UPPER(r.DESCRICAO) LIKE '%SERRA%'
+              OR UPPER(r.DESCRICAO) LIKE '%BAIXADA%'
+              OR UPPER(r.DESCRICAO) LIKE '%FLUVIAL%' THEN '2-INTERIOR'
+            ELSE '3-OUTRAS' END                          AS TIPO_ROTA,
+       c.CODROTAPRINC                                    AS ROTA,
+       SUBSTR(NVL(r.DESCRICAO,'(sem cadastro)'),1,30)    AS DESCRICAO,
+       COUNT(*)                                          AS CARGAS,
+       ROUND(MEDIAN(c.DTFECHA - c.DTSAIDA), 1)           AS DIAS_MEDIANO,
+       ROUND(100 * SUM(CASE WHEN c.DTFECHA - c.DTSAIDA <= 3
+                            THEN 1 ELSE 0 END) / COUNT(*), 1) AS PCT_NA_META,
+       MAX(c.DTFECHA - c.DTSAIDA)                        AS PIOR
+FROM (SELECT NUMCAR, MIN(DTSAIDA) AS DTSAIDA, MIN(DTFECHA) AS DTFECHA,
+             MIN(CODROTAPRINC) AS CODROTAPRINC
+      FROM EBD.PCCARREG
+      WHERE DTSAIDA >= TRUNC(SYSDATE) - :dias
+        AND DTSAIDA <= SYSDATE
+        AND DT_CANCEL IS NULL
+        AND DTFECHA IS NOT NULL
+      GROUP BY NUMCAR) c
+LEFT JOIN EBD.PCROTAEXP r ON r.CODROTA = c.CODROTAPRINC
+WHERE c.DTFECHA >= c.DTSAIDA
+GROUP BY CASE WHEN UPPER(r.DESCRICAO) LIKE '%CAPITAL%'
+                OR UPPER(r.DESCRICAO) LIKE '%METROPOLIT%' THEN '1-METROPOLITANA'
+              WHEN UPPER(r.DESCRICAO) LIKE '%INTERIOR%'
+                OR UPPER(r.DESCRICAO) LIKE '%SERT%'
+                OR UPPER(r.DESCRICAO) LIKE '%LITORAL%'
+                OR UPPER(r.DESCRICAO) LIKE '%VALE%'
+                OR UPPER(r.DESCRICAO) LIKE '%SERRA%'
+                OR UPPER(r.DESCRICAO) LIKE '%BAIXADA%'
+                OR UPPER(r.DESCRICAO) LIKE '%FLUVIAL%' THEN '2-INTERIOR'
+              ELSE '3-OUTRAS' END,
+         c.CODROTAPRINC, SUBSTR(NVL(r.DESCRICAO,'(sem cadastro)'),1,30)
+HAVING COUNT(*) >= 20
+ORDER BY TIPO_ROTA, PCT_NA_META
+```
+
+⚠️ NAO usar este template sem a coluna `TIPO_ROTA`: cobrar 3 dias de
+`CE - SERTAO DE SOBRAL`, que roda 27 dias por geografia, e cobrar o impossivel.
+
+Referencia medida (90 dias): `CE - CAPITAL` fecha em 6 dias e
+`CE - METROPOLITANA` em 7 — os dois piores metropolitanos da empresa. Sudeste
+metropolitano fica entre 1 e 3.

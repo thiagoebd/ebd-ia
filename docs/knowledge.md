@@ -1257,3 +1257,66 @@ de contas.
 ⚠️ ARMADILHA DE CONTAGEM: contar carga em aberto DEPOIS do join com PCPEDC
 multiplica pelo numero de pedidos. Agregar por NUMCAR primeiro — o T-LOG14 e o
 T-LOG15 ja fazem isso.
+
+### 17.10 Meta de fechamento de carga e classificacao da rota
+
+REGRA DE NEGOCIO (informada pelo Thiago, 27/07/2026): capital e regiao
+metropolitana tem meta de **2 a 3 dias** para fechamento de carga. Rota de
+interior leva dias legitimamente e nao entra na mesma regua.
+
+A `PCROTAEXP.DESCRICAO` classifica sozinha — o cadastro e nomeado por praca:
+
+  METROPOLITANA:  descricao com 'CAPITAL' ou 'METROPOLIT'
+                  ex.: CE - CAPITAL, CE - METROPOLITANA, PI - CAPITAL
+  INTERIOR:       'INTERIOR', 'SERTAO', 'LITORAL', 'VALE', 'SERRA',
+                  'BAIXADA', 'FLUVIAL', 'MARAJO'
+                  ex.: CE - SERTAO DE SOBRAL, STM-FLUVIAL, PA-MARAJO
+
+Prefixo da rota = praca/estado: CE, PI, MA, PA, RR, AM, STM (Santarem),
+IMP (Imperatriz), CAU (Caruaru), PNZ (Petrolina), DC (Duque de Caxias).
+Sufixo `(AS)` = autosservico. `AGENDAMENTO` = entrega agendada, lenta por
+natureza.
+
+### ADERENCIA MEDIDA (90 dias, 29.872 cargas com baixa)
+
+| Faixa | Cargas | % |
+|---|---|---|
+| ate 1 dia | 8.635 | 28,9% |
+| 2 a 3 dias (meta) | 7.387 | 24,7% |
+| 4 a 7 dias | 7.902 | 26,5% |
+| 8 a 15 dias | 3.818 | 12,8% |
+| 16 a 30 dias | 1.677 | 5,6% |
+| mais de 30 dias | 453 | 1,5% |
+
+**53,6% fecham dentro da meta; 46,4% passam de 3 dias.**
+
+### O CASO FORTALEZA (filial 03)
+
+Nas outras filiais a mediana alta se explica pela mistura de rotas: Duque vai
+de 1 a 10 dias entre rotas, Santarem de 0 a 21, Matriz de 3 a 17,5.
+
+Em Fortaleza NAO: a rota MAIS RAPIDA da filial leva 6 dias. `CE - CAPITAL`
+(1.288 cargas) fecha em 6 e `CE - METROPOLITANA` (622) em 7, contra meta de 2
+a 3. Por municipio confirma: Fortaleza 7, Caucaia 8, Maracanau 6, Eusebio 6.
+Nao e geografia, e processo de acerto. Teresina (`PI - CAPITAL`) tambem: 6.
+
+Sudeste dentro da meta: Taquara 1 a 2, SBC 1 a 3, Itapevi 1 a 2,5, Sao Goncalo
+1 a 3, SP 2 a 5.
+
+### CARGAS EM ABERTO (medido 27/07/2026, janela de 180 dias)
+
+1.907 cargas sem baixa, R$ 55,0 milhoes em `PCCARREG.VLTOTAL`. O risco nao esta
+no volume, esta na incoerencia com a praca:
+
+| Filial | Em aberto | Mediana aberta | Mais antiga | Valor |
+|---|---|---|---|---|
+| 03 Fortaleza | 392 | 5 d | 67 d | R$ 8,88 mi |
+| 01 Matriz | 284 | 4 d | 59 d | R$ 9,21 mi |
+| 04 Sao Luis | 206 | 3 d | 20 d | R$ 5,42 mi |
+| 14 Pirai | 148 | 3 d | 31 d | R$ 3,61 mi |
+| **05 Duque** | **142** | **12 d** | 59 d | R$ 4,22 mi |
+| **13 Taquara** | **107** | 7 d | **82 d** | R$ 2,85 mi |
+
+Duque e Taquara fecham carga em 2 dias normalmente. Carga aberta com mediana de
+12 dias em Duque, e uma de 82 dias em Taquara, nao e rota demorada — e carga
+esquecida. Por isso o alerta e RELATIVO a praca (T-LOG15), e nao um numero fixo.
