@@ -1549,3 +1549,31 @@ sistema.
 
 Outros parametros da mesma familia: DEPOSITOAUTOSERVICO (nulo em todas as
 filiais da EBD) e QUEBRAOSARMAZPORDEPOSITO (= 'N' em todas).
+
+
+## #72 - PCVOLUMEOS: so serve pra CONTAR volume, e nao tem indice em DATA
+
+39,1 milhoes de linhas, viva (115 mil volumes em 7 dias, 12 mil O.S.). Mas a
+rastreabilidade que o nome promete NAO EXISTE. Medido em 27/07/2026, 7 dias:
+
+  PREENCHIDAS:  NUMVOL 100%, CODFUNC 60%, CODENDERECO 63%,
+                DATAUTILIZACAO 36%
+  ZERADAS:      NUMPALETE, CODFUNCMONTAPALETE, DATAPALETE, DTESTORNO,
+                DTCORTE, CODFUNCCORTE, DATAAGRUPAMENTO, CODFUNCAGRUPAMENTO
+  CONSTANTES:   EMBARCADO = 'N' em 100%, VOLUMECORTADO = 'N' em 100%,
+                LETRA nula em 100%
+
+EMBARCADO e VOLUMECORTADO NAO sao flags — sao constantes. Nao da pra saber por
+esta tabela se um volume embarcou ou foi cortado. Corte continua sendo
+PCCORTEI (valor) + PCWMSCORTE (responsavel).
+
+PERFORMANCE: o unico indice e (NUMOS, NUMVOL, DTESTORNO, DATAAGRUPAMENTO).
+NAO ha indice em DATA. Filtrar so por data varre a tabela inteira.
+
+  ERRADO:  FROM EBD.PCVOLUMEOS WHERE DATA >= TRUNC(SYSDATE) - 30
+  CERTO:   JOIN EBD.PCMOVENDPEND m ON m.NUMOS = v.NUMOS
+           WHERE m.CODFILIAL = :codFilial AND m.DATA >= ...
+
+O QUE DA PRA FAZER: contar volumes por O.S., por carga e por filial — que e
+carga de trabalho de conferencia e embarque. Medido: Taquara 79,3 volumes por
+O.S. contra 27,5 em SBC. Mediana geral 2, media 9,5, maximo 1.000.

@@ -2635,12 +2635,16 @@ Medido 24/07 — filial 21 (1.814 itens de revenda): 968 saudaveis (R$ 4,18 mi),
 sujeira, 454 saindo de linha com venda e estoque (R$ 1,34 mi de escoamento).
 
 
-## T-CMP06 — Estoque invisivel na forca de vendas
+## T-CMP06 — Estoque fora da vitrine da forca de vendas
 
-Acha item que **tem estoque, e de revenda, esta em linha, mas nao aparece no app
-do RCA** porque o `ENVIARFORCAVENDAS` nao foi marcado no cadastro. Ninguem vende
-o que nao ve — o estoque fica parado por erro de cadastro, nao por falta de
-demanda.
+Acha item que **tem estoque, e de revenda, esta em linha, mas nao aparece na
+vitrine do app do RCA** porque o `ENVIARFORCAVENDAS` esta em `'N'`.
+
+⚠️ **O campo NAO bloqueia a venda.** Quem sabe o codigo digita e o pedido fatura
+normal — comprovado na filial 13, onde dois itens com `'N'` desde junho
+receberam 11 pedidos em julho, de nove RCAs, pelo canal `ORIGEMPED='F'`. O que o
+`'N'` produz e **friccao**: quem depende de ver o produto no app nao vende.
+Descreva sempre assim, nunca como "ninguem consegue vender".
 
 A coluna `NATUREZA` separa comercial de apoio. **Some so o COMERCIAL** e mostre
 o APOIO a parte, dizendo que nao entra no total. Na primeira medicao, R$ 1,28 mi
@@ -2667,13 +2671,20 @@ WHERE pf.CODFILIAL = :codFilial
 ORDER BY NATUREZA DESC, VL_PARADO DESC NULLS LAST
 ```
 
-A acao aqui NAO e queima nem devolucao: e marcar `ENVIARFORCAVENDAS = 'S'` no
-cadastro da filial (rotina 238) e o item volta a ser vendavel.
+A acao aqui NAO e queima nem devolucao: e marcar `ENVIARFORCAVENDAS = 'S'` na
+rotina 238 e o item volta para a vitrine.
 
-⚠️ **Ao diagnosticar capital parado, sempre cheque este campo antes de sugerir
-queima ou devolucao.** Item invisivel no app nao e falta de demanda — e falta de
-cadastro. Medido: em Teresina os 47 parados estavam TODOS visiveis (ali era
-demanda mesmo), mas em Duque e Taquara o problema e cadastro.
+⚠️ **Ao diagnosticar capital parado, cheque este campo antes de sugerir queima ou
+devolucao.** Item fora da vitrine gira menos por exposicao, nao necessariamente
+por falta de demanda. Medido: em Teresina os 47 parados estavam TODOS na vitrine
+(ali era demanda mesmo); em Duque e Taquara ha componente de cadastro.
+
+**Antes de remarcar, pergunte por que saiu.** As colunas de auditoria do
+`PCPRODFILIAL` sao `DTMXSALTER`, `CODFUNCULTALTER` e `CODROTINAULTALTER` — o
+`DTULTATUPCOMPRA` e "ultima atualizacao de compra" e NAO serve para auditar
+cadastro. Em Taquara a desmarcacao foi feita por dois cadastradores da propria
+filial em dias proximos; se houve motivo, remarcar recria o problema que alguem
+tentou resolver.
 
 # Logistica, expedicao e WMS — templates T-LOG
 
@@ -3071,3 +3082,37 @@ deposito nao estiver aqui, citar pelo NUMERO e nao inventar rotulo (#70).
 | 18 SBC | 4 | Camara fria (ex.: Ferrero) | Thiago, 28/07/2026 |
 
 Demais depositos e demais filiais: A LEVANTAR com a logistica.
+
+## T-LOG13 — Volumes por O.S. (carga de trabalho de conferencia)
+
+Cada volume e uma unidade que alguem confere e embarca. Volume por O.S. alto
+significa separacao fracionada e mais tempo de conferencia — conversa direto
+com a fila do T-LOG06.
+
+⚠️ Entrar SEMPRE pelo `NUMOS`: a PCVOLUMEOS nao tem indice em DATA nem coluna
+de filial (cicatriz #72). O filtro de filial e data sai da PCMOVENDPEND.
+
+```sql
+SELECT m.CODFILIAL,
+       COUNT(DISTINCT v.NUMOS)                                  AS OS,
+       COUNT(*)                                                 AS VOLUMES,
+       ROUND(COUNT(*) / NULLIF(COUNT(DISTINCT v.NUMOS),0), 1)   AS VOL_POR_OS,
+       ROUND(MEDIAN(v.NUMVOL), 0)                               AS NUMVOL_MEDIANO,
+       COUNT(DISTINCT v.CODFUNC)                                AS PESSOAS,
+       COUNT(DISTINCT v.CODENDERECO)                            AS ENDERECOS
+FROM EBD.PCVOLUMEOS v
+JOIN EBD.PCMOVENDPEND m ON m.NUMOS = v.NUMOS
+WHERE m.CODFILIAL IN (:listaFiliais)
+  AND m.DATA >= TRUNC(SYSDATE) - :dias
+  AND m.DTESTORNO IS NULL
+  AND m.TIPOOS IN (13,14,16,17,20)
+GROUP BY m.CODFILIAL
+ORDER BY VOL_POR_OS DESC
+```
+
+Leitura: medido em 7 dias, Taquara (13) faz 79,3 volumes por O.S. e SBC (18)
+faz 27,5. Nao e volume de venda — e fracionamento. Filial com muitos volumes
+por O.S. gasta mais conferencia para a mesma quantidade separada.
+
+NAO usar as colunas EMBARCADO, VOLUMECORTADO, NUMPALETE ou DTCORTE: sao
+constantes ou estao vazias (#72).

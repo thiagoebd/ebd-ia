@@ -599,6 +599,21 @@ WHERE p.ORIGEMPED = 'W'          -- origem web/portal
 | `PCPEDC.CODEMITENTE` | `7777` | Código virtual que identifica o portal B2B como emitente — presente em TODOS os pedidos B2B, independente do CODUSUR |
 | `PCCLIENT.CODATV1` | ≠ ramo "funcionário" | Cliente deve ser um estabelecimento comercial real, não um funcionário EBD |
 
+### Canal de entrada do pedido — `ORIGEMPED` completo
+
+Ate 24/07 a KB so documentava o `'W'`, e o agente inventava explicacao para os
+outros — chegou a dar duas versoes diferentes do `'F'` na mesma conversa.
+Medido na filial 13 em 60 dias:
+
+| Valor | Canal | Volume medido (fil 13, 60d) |
+|---|---|---|
+| `'F'` | Forca de vendas — o canal PRINCIPAL, RCA em campo | 23.623 pedidos, 85 RCAs |
+| `'T'` | Televendas | 489 pedidos, 36 RCAs |
+| `'W'` | Portal / e-commerce (ver secao 9) | 181 pedidos, 23 clientes |
+
+**`'F'` e venda normal, nao excecao.** Nao trate pedido com `ORIGEMPED='F'` como
+digitacao manual, contorno ou anomalia — e por onde a filial vende.
+
 ### Dois perfis de CODUSUR no canal W
 
 1. **Vendedor exclusivo B2B** — CODUSUR com nome `'ECOMMERCE B2B LOJAEBD XX'` (ex: 2611 Manaus, 2608 Caruaru, etc). Pedido digitado/gerado pela equipe do portal.
@@ -928,11 +943,20 @@ e a força de vendas migra devagar de RCA para CLT.
 inclui insumo, amostra e material administrativo e NAO serve para analise
 comercial (em Teresina eram 18.598 itens a mais).
 
-**`ENVIARFORCAVENDAS = 'S'`** e o que faz o produto aparecer no app do RCA. Se
-o cadastro esquece de marcar, o item existe, tem estoque e e de revenda, mas
-**ninguem consegue vender** — some da forca de vendas. Medido 24/07: 85 itens e
-R$ 2,69 mi parados por isso. Ao analisar capital parado, cheque este campo antes
-de sugerir queima ou devolucao (ver T-CMP06).
+**`ENVIARFORCAVENDAS = 'S'`** e o que coloca o produto na VITRINE do app do RCA.
+Com `'N'` o item **some da vitrine, mas continua vendavel** — quem sabe o codigo
+digita o pedido e ele fatura normalmente.
+
+NUNCA diga que "ninguem consegue vender": o efeito e **friccao de venda**, nao
+bloqueio. Comprovado 24/07 na filial 13 (Taquara): os produtos 16064 e 16071
+estao com `'N'` desde 23 e 25/06 e mesmo assim receberam 11 pedidos em 06 e
+07/07, de nove RCAs diferentes, todos faturados, pelo canal normal
+`ORIGEMPED = 'F'`.
+
+Medido 24/07 nas 21 filiais: 85 itens e R$ 2,69 mi com estoque fora da vitrine.
+Ao analisar capital parado, cheque este campo antes de sugerir queima ou
+devolucao — item fora da vitrine gira menos, mas nao esta impedido (ver
+T-CMP06).
 
 **`FORALINHA = 'S'` = "nao vamos mais comprar"**, mas o item continua
 `REVENDA = 'S'` e continua vendendo. Rotule como **saindo de linha**, nunca como
