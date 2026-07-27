@@ -1086,7 +1086,7 @@ vazio e devolver zero com cara de resposta.
 | Objeto | Situacao medida |
 |---|---|
 | `PCCARREG.CODFILIALSAIDA` | 0 de 1.153.949 cargas |
-| `PCCARREG.DTRETORNO` | 3 registros no total (rotina 907 nao e usada) |
+| `PCCARREG.DTRETORNO` | 3 registros — a rotina 907 nao e usada, mas a baixa e o DTFECHA (ver 17.9) |
 | `PCCARREG.DATAMAPA` / `DATAHORAMAPA` | 5,5% |
 | `PCCARREG.KMINICIAL` / `KMFINAL` | valor sempre ZERO desde 2019 |
 | `PCROTAEXP.KMROTA` / `DIASENTREGA` / `PRAZOPREVENT` / `QTENTREGA` | 0 rotas preenchidas |
@@ -1100,8 +1100,13 @@ vazio e devolver zero com cara de resposta.
 | `PCCARREGI` | 29.580 linhas contra 1,15 mi de cargas (2,5%) |
 | `PCROTA` | 0 linhas — a rota de entrega e a `PCROTAEXP` |
 
-CONSEQUENCIA DIRETA: **nao existe OTIF, nem km rodado, nem tempo de veiculo na
-rua, nem produtividade de equipamento.** Nao e falta de query, e falta de dado.
+CONSEQUENCIA DIRETA: **nao existe OTIF por cliente, nem km rodado, nem
+produtividade de equipamento.** Nao e falta de query, e falta de dado.
+
+O ciclo da carga EXISTE, porem: montagem, saida do veiculo e BAIXA DO ROMANEIO
+estao registrados (secao 17.9). O que nao existe e o evento por ENTREGA — nao
+da pra dizer se o cliente X recebeu no prazo, mas da pra dizer quanto tempo a
+carga ficou na rua e quantas estao em aberto.
 
 REGRA DE METODO: medir preenchimento na JANELA RECENTE, nunca na tabela
 inteira. `DTSAIDAVEICULO` parece morta (16,9% no historico total) e esta viva
@@ -1210,3 +1215,45 @@ serve para comparar; volume so dentro da mesma filial.
 Cancelamento de carga subiu de 35,4% (2022) para 49,9% (2026) — metade das
 cargas montadas e desfeita, e quase nenhuma tinha nota. E uso da 901 como
 rascunho, nao cancelamento fiscal.
+
+### 17.9 Ciclo da carga — montagem, saida e baixa do romaneio
+
+MEDIDO em 27/07/2026, 90 dias, 31.927 cargas nao canceladas:
+
+| Marco | Coluna | Preenchimento | Quando |
+|---|---|---|---|
+| Carga montada | `DTSAIDA` | 100% | dia 0 |
+| Veiculo sai | `DTSAIDAVEICULO` | 70,6% | +0,3 dia |
+| **Baixa do romaneio** | **`DTFECHA`** | **93,8%** | **+3 dias (mediana)** |
+| Acerto de caixa | `DTCAIXA` | 90,7% | +3 dias |
+
+Quem deu baixa: `CODFUNCFECHA` (93,8%). Hora da baixa: `HORAFECHA` e
+`MINUTOFECHA` (93,0%) — o `DTFECHA` e TRUNCADO, so tem a data.
+
+Isto e a rotina 410 (acerto de carga e caixa). NAO confundir com `DTRETORNO`,
+que e o registro da rotina 907 e tem 3 linhas em toda a tabela.
+
+NAO existe tabela separada de romaneio ou acerto: `PCACERTOMANIF`,
+`PCPREACERTO`, `PCCONTROLEDEENTREGA`, `PCENTREGA` e `PCZONASENTREGA` estao
+todas VAZIAS. E tudo na `PCCARREG`.
+
+Dispersao por filial (mediana de dias entre saida e baixa, 90 dias):
+
+| Dias | Filiais |
+|---|---|
+| 18 / 15 / 13 | 09 Juazeiro / 21 Teresina / 08 Boa Vista |
+| 10 a 11 | 22 Maraba, 03 Fortaleza, 04 Sao Luis, 12 Imperatriz |
+| 5 a 6 | 01 Matriz, 11 Santarem, 52 Petrolina, 53 Caruaru |
+| 2 a 4 | 14 Pirai, 10 Sao Goncalo, 15 Guarulhos, 05 Duque, 02 SP, 18 SBC, 07 Macapa, 13 Taquara, 06 Manaus, 16 Itapevi |
+
+A mediana da empresa (3 dias) NAO representa ninguem: o Norte e o Nordeste
+levam de 4 a 9 vezes mais que o Sudeste. Qualquer alerta de carga em aberto
+tem que usar o normal DA FILIAL, nunca um numero fixo (ver T-LOG15).
+
+Pior caso observado: 82 dias em Duque, 75 em Fortaleza, 73 em Taquara — em
+pracas cuja mediana e 2. Carga sem baixa e mercadoria e dinheiro sem prestacao
+de contas.
+
+⚠️ ARMADILHA DE CONTAGEM: contar carga em aberto DEPOIS do join com PCPEDC
+multiplica pelo numero de pedidos. Agregar por NUMCAR primeiro — o T-LOG14 e o
+T-LOG15 ja fazem isso.

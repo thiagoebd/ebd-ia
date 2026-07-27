@@ -1577,3 +1577,27 @@ NAO ha indice em DATA. Filtrar so por data varre a tabela inteira.
 O QUE DA PRA FAZER: contar volumes por O.S., por carga e por filial — que e
 carga de trabalho de conferencia e embarque. Medido: Taquara 79,3 volumes por
 O.S. contra 27,5 em SBC. Mediana geral 2, media 9,5, maximo 1.000.
+
+
+## #73 - Baixa do romaneio e DTFECHA, nao DTRETORNO
+
+Erro que eu cometi em 27/07/2026: medi 11 das 146 colunas da PCCARREG, vi
+DTRETORNO com 3 registros e conclui que o retorno da carga nao era registrado.
+Era, no DTFECHA — 93,8% das cargas validas.
+
+  DTSAIDA         montagem da carga      100%
+  DTSAIDAVEICULO  saida fisica           70,6%   (+0,3 dia)
+  DTFECHA         BAIXA DO ROMANEIO      93,8%   (+3 dias)
+  DTCAIXA         acerto de caixa        90,7%
+  CODFUNCFECHA    quem deu baixa         93,8%
+  DTRETORNO       rotina 907             3 linhas — NAO USAR
+
+ARMADILHA: DTFECHA e TRUNCADO (so data). A hora esta em HORAFECHA e
+MINUTOFECHA, colunas NUMBER separadas. Ciclo em dias funciona direto; em horas,
+montar com as tres.
+
+LICAO DE METODO: antes de declarar que um dado NAO existe, listar TODAS as
+colunas candidatas do dicionario em vez de conferir as que vieram a cabeca:
+
+  SELECT COLUMN_NAME FROM ALL_TAB_COLUMNS
+  WHERE OWNER='EBD' AND TABLE_NAME=:t AND DATA_TYPE='DATE'

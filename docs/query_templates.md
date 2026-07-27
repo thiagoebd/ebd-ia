@@ -3116,3 +3116,93 @@ por O.S. gasta mais conferencia para a mesma quantidade separada.
 
 NAO usar as colunas EMBARCADO, VOLUMECORTADO, NUMPALETE ou DTCORTE: sao
 constantes ou estao vazias (#72).
+
+
+## T-LOG14 — Ciclo da carga: montagem ate a baixa do romaneio
+
+Quanto tempo a carga fica aberta, da montagem ate o acerto (rotina 410).
+
+⚠️ A `PCCARREG` nao tem filial: ela vem do `PCPEDC` pelo `NUMCAR`, e esse join
+traz UMA LINHA POR PEDIDO. Agregar por carga ANTES de calcular a mediana,
+senao carga grande pesa mais que carga pequena.
+
+```sql
+SELECT f.CODFILIAL,
+       COUNT(*)                                        AS CARGAS,
+       ROUND(MEDIAN(f.DTFECHA - f.DTSAIDA), 1)         AS DIAS_ATE_BAIXA,
+       ROUND(AVG(f.DTFECHA - f.DTSAIDA), 1)            AS DIAS_MEDIO,
+       MAX(f.DTFECHA - f.DTSAIDA)                      AS PIOR_CASO,
+       SUM(CASE WHEN f.DTFECHA IS NULL THEN 1 ELSE 0 END) AS SEM_BAIXA
+FROM (SELECT c.NUMCAR,
+             MIN(c.DTSAIDA)   AS DTSAIDA,
+             MIN(c.DTFECHA)   AS DTFECHA,
+             MIN(p.CODFILIAL) AS CODFILIAL
+      FROM EBD.PCCARREG c
+      JOIN EBD.PCPEDC p ON p.NUMCAR = c.NUMCAR
+      WHERE c.DTSAIDA >= TRUNC(SYSDATE) - :dias
+        AND c.DTSAIDA <= SYSDATE
+        AND c.DT_CANCEL IS NULL
+        AND p.DATA >= TRUNC(SYSDATE) - :dias - 30
+      GROUP BY c.NUMCAR) f
+WHERE f.DTFECHA IS NULL OR f.DTFECHA >= f.DTSAIDA
+GROUP BY f.CODFILIAL
+ORDER BY DIAS_ATE_BAIXA DESC
+```
+
+Referencia medida (90 dias, empresa toda): mediana de 3 dias entre saida e
+baixa. `DIAS_MEDIO` bem acima da mediana indica cauda de cargas esquecidas.
+
+## T-LOG15 — Cargas em aberto (sairam e nao tiveram baixa)
+
+Carga sem baixa e mercadoria e dinheiro sem prestacao de contas. Este e o
+template para cobrar, nao para analisar.
+
+```sql
+WITH cargas AS (
+    SELECT c.NUMCAR,
+           MIN(c.DTSAIDA)      AS DTSAIDA,
+           MIN(c.DTFECHA)      AS DTFECHA,
+           MIN(c.CODMOTORISTA) AS CODMOTORISTA,
+           MIN(e.NOME)         AS MOTORISTA,
+           MIN(c.VLTOTAL)      AS VLTOTAL,
+           MIN(p.CODFILIAL)    AS CODFILIAL
+    FROM EBD.PCCARREG c
+    JOIN EBD.PCPEDC p ON p.NUMCAR = c.NUMCAR
+    LEFT JOIN EBD.PCEMPR e ON e.MATRICULA = c.CODMOTORISTA
+    WHERE c.DTSAIDA >= TRUNC(SYSDATE) - :dias
+      AND c.DTSAIDA <= SYSDATE
+      AND c.DT_CANCEL IS NULL
+      AND p.DATA >= TRUNC(SYSDATE) - :dias - 30
+    GROUP BY c.NUMCAR
+),
+normal AS (
+    SELECT CODFILIAL,
+           MEDIAN(DTFECHA - DTSAIDA) AS MEDIANA_FILIAL
+    FROM cargas
+    WHERE DTFECHA IS NOT NULL AND DTFECHA >= DTSAIDA
+    GROUP BY CODFILIAL
+)
+SELECT c.CODFILIAL,
+       c.NUMCAR,
+       TO_CHAR(c.DTSAIDA, 'DD/MM/YYYY')             AS SAIU_EM,
+       TRUNC(SYSDATE) - TRUNC(c.DTSAIDA)            AS DIAS_ABERTA,
+       ROUND(n.MEDIANA_FILIAL, 1)                   AS NORMAL_DA_FILIAL,
+       SUBSTR(NVL(c.MOTORISTA,'?'), 1, 28)          AS MOTORISTA,
+       ROUND(c.VLTOTAL, 2)                          AS VALOR
+FROM cargas c
+JOIN normal n ON n.CODFILIAL = c.CODFILIAL
+WHERE c.DTFECHA IS NULL
+  AND (TRUNC(SYSDATE) - TRUNC(c.DTSAIDA))
+      > GREATEST(NVL(n.MEDIANA_FILIAL, 3) * 2, 5)
+ORDER BY (TRUNC(SYSDATE) - TRUNC(c.DTSAIDA)) / NULLIF(n.MEDIANA_FILIAL, 0) DESC
+FETCH FIRST 40 ROWS ONLY
+```
+
+⚠️ **O corte NAO pode ser fixo.** Medido em 90 dias, a mediana de baixa vai de
+2 dias (Duque, SBC, Taquara, Manaus, Itapevi, SP, Macapa) a 18 dias (Juazeiro),
+passando por 15 em Teresina e 13 em Boa Vista. Com corte fixo em 5 dias
+Juazeiro apareceria inteira e uma carga de 82 dias em Duque sumiria no ruido.
+
+Aqui o corte e **o dobro da mediana da propria filial**, com piso de 5 dias, e a
+ordenacao e pela RAZAO em relacao ao normal da praca — nao pelo numero absoluto
+de dias.
