@@ -105,6 +105,13 @@ def _instrucao_por_erro(code: str, msg: str) -> str:
     """
     m = (msg or "").upper()
     c = (code or "").upper()
+
+    if c == "SQL_PREFLIGHT":
+        # A mensagem do pre-voo ja e a instrucao: lista o que esta errado e
+        # qual e o nome certo. Repassar inteira, sem envelope de "falhou".
+        return (f"{msg}\n\nNUNCA invente numeros e NUNCA diga ao usuario que "
+                f"o banco falhou — a consulta nem chegou no Oracle.")
+
     base = f"A consulta ao Winthor FALHOU ({code}: {msg}). NUNCA invente numeros."
 
     if c == "TIMEOUT" or "TIMEOUT" in m or "PASSOU DE" in m:

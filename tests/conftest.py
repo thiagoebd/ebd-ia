@@ -83,9 +83,15 @@ class FakeCursor:
 
     def execute(self, sql, binds=None):
         alvo = {str(v).upper() for v in (binds or {}).values()}
-        self._resultado = [r for r in self._linhas if r[0].upper() in alvo]
-        self.description = [("TABLE_NAME",), ("COLUMN_NAME",), ("NUM_DISTINCT",),
-                            ("NUM_NULLS",), ("NUM_ROWS",), ("LAST_ANALYZED",)]
+        linhas = [r for r in self._linhas if r[0].upper() in alvo]
+        if "NUM_DISTINCT" in (sql or "").upper():
+            self._resultado = linhas
+            self.description = [("TABLE_NAME",), ("COLUMN_NAME",),
+                                ("NUM_DISTINCT",), ("NUM_NULLS",),
+                                ("NUM_ROWS",), ("LAST_ANALYZED",)]
+        else:
+            self._resultado = [(r[0], r[1]) for r in linhas]
+            self.description = [("TABLE_NAME",), ("COLUMN_NAME",)]
 
     def fetchall(self):
         return list(self._resultado)
@@ -107,6 +113,7 @@ class FakePool:
         self.liberou = 0
 
     def acquire(self):
+        self.acquires = getattr(self, "acquires", 0) + 1
         if self._explode:
             raise RuntimeError("pool esgotado (simulado)")
         return FakeConn(self._linhas)

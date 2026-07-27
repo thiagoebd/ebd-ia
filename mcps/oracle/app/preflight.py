@@ -1,0 +1,180 @@
+"""Pre-voo de colunas: recusa SQL com coluna inexistente ANTES do Oracle.
+
+Motivo (medido em 27/07/2026): 74% dos erros do agente sao ORA-00904. Devolver
+a lista de colunas certas junto com o erro nao resolveu — o log mostra o agente
+recebendo os nomes corretos e mesmo assim so REMOVENDO a coluna citada e
+tentando de novo, uma por vez, ate estourar o orcamento de 3 tentativas.
+
+Aqui a validacao acontece antes: nao gasta ida ao banco, e a recusa lista TODAS
+as colunas invalidas de uma vez em vez de uma por rodada.
+
+PRINCIPIO: falso negativo e barato (o Oracle pega depois), falso positivo e
+caro (recusa query boa). Na duvida, NAO valida.
+"""
+from __future__ import annotations
+
+import difflib
+import re
+from typing import Iterable
+
+try:
+    import sqlglot
+    from sqlglot import exp
+    _SQLGLOT = True
+except Exception:  # pragma: no cover
+    _SQLGLOT = False
+
+# pseudo-colunas e fontes que nunca estao no ALL_TAB_COLUMNS
+_IGNORAR_TABELA = {"DUAL"}
+_PSEUDO_COLUNAS = {"ROWNUM", "ROWID", "LEVEL", "SYSDATE", "SYSTIMESTAMP",
+                   "USER", "NEXTVAL", "CURRVAL", "COUNT", "NULL"}
+
+
+def tabelas_fisicas(sql: str) -> list[str]:
+    """Tabelas reais citadas no SQL (exclui CTE e DUAL)."""
+    if not _SQLGLOT:
+        return []
+    try:
+        arv = sqlglot.parse_one(sql, read="oracle")
+    except Exception:
+        return []
+    ctes = {c.alias_or_name.upper() for c in arv.find_all(exp.CTE)}
+    nomes: list[str] = []
+    for t in arv.find_all(exp.Table):
+        n = (t.name or "").upper()
+        if not n or n in ctes or n in _IGNORAR_TABELA or n in nomes:
+            continue
+        nomes.append(n)
+    return nomes
+
+
+def _mapa_alias(arv, ctes: set[str]) -> dict[str, str]:
+    """alias -> TABELA FISICA. Alias de CTE/subquery fica de fora.
+
+    AMBIGUIDADE: o mesmo apelido pode designar tabelas diferentes em escopos
+    diferentes (duas CTEs usando `v`). Como este resolvedor e plano, apelido
+    ambiguo e DESCARTADO — validar contra a tabela errada recusa query boa,
+    que e o pior erro possivel aqui.
+    """
+    mapa: dict[str, str] = {}
+    ambiguos: set[str] = set()
+    for t in arv.find_all(exp.Table):
+        nome = (t.name or "").upper()
+        if not nome or nome in ctes or nome in _IGNORAR_TABELA:
+            continue
+        for chave in filter(None, (nome, (t.alias or "").upper())):
+            anterior = mapa.get(chave)
+            if anterior and anterior != nome:
+                ambiguos.add(chave)
+            mapa[chave] = nome
+    for a in ambiguos:
+        mapa.pop(a, None)
+    return mapa
+
+
+def _nomes_definidos(arv) -> set[str]:
+    """Apelidos criados pela propria query (SELECT ... AS X, CTE, subquery).
+
+    Sem isto, `SELECT SUM(A) AS TOTAL ... ORDER BY TOTAL` seria recusado.
+    """
+    definidos: set[str] = set()
+    for a in arv.find_all(exp.Alias):
+        if a.alias:
+            definidos.add(a.alias.upper())
+    for c in arv.find_all(exp.CTE):
+        definidos.add(c.alias_or_name.upper())
+        for coluna in (c.args.get("alias").columns if c.args.get("alias") else []):
+            definidos.add(str(coluna).upper())
+    for s in arv.find_all(exp.Subquery):
+        if s.alias:
+            definidos.add(s.alias.upper())
+    return definidos
+
+
+def colunas_invalidas(sql: str, dicionario: dict[str, Iterable[str]]
+                      ) -> list[tuple[str, str]]:
+    """Retorna [(TABELA, COLUNA)] das colunas que NAO existem.
+
+    `dicionario` = {TABELA: colunas}. Tabela ausente do dicionario e ignorada
+    (nao da para afirmar nada sobre ela).
+    """
+    if not _SQLGLOT or not dicionario:
+        return []
+    try:
+        arv = sqlglot.parse_one(sql, read="oracle")
+    except Exception:
+        return []
+
+    dic = {t.upper(): {c.upper() for c in cols} for t, cols in dicionario.items()}
+    ctes = {c.alias_or_name.upper() for c in arv.find_all(exp.CTE)}
+    alias = _mapa_alias(arv, ctes)
+    definidos = _nomes_definidos(arv)
+
+    fisicas = [t for t in set(alias.values()) if t in dic]
+    # so vale validar coluna sem qualificacao quando ha UMA tabela fisica e
+    # nenhuma fonte derivada — senao nao da pra saber de quem e a coluna
+    tem_derivada = bool(ctes) or any(True for _ in arv.find_all(exp.Subquery))
+    unica = fisicas[0] if (len(fisicas) == 1 and not tem_derivada) else None
+
+    ruins: list[tuple[str, str]] = []
+    vistos: set[tuple[str, str]] = set()
+    # por tabela: quantas colunas referenciadas EXISTEM. Se nenhuma existir,
+    # o suspeito e o dicionario (incompleto/desatualizado), nao o SQL —
+    # nesse caso e mais seguro deixar o Oracle decidir.
+    validas_por_tab: dict[str, int] = {}
+
+    for col in arv.find_all(exp.Column):
+        nome = (col.name or "").upper()
+        if not nome or nome in _PSEUDO_COLUNAS or nome in definidos:
+            continue
+        qualificador = (col.table or "").upper()
+
+        if qualificador:
+            if qualificador in ctes:
+                continue
+            tabela = alias.get(qualificador)
+            if not tabela or tabela not in dic:
+                continue
+        elif unica:
+            tabela = unica
+        else:
+            continue
+
+        if nome in dic[tabela]:
+            validas_por_tab[tabela] = validas_por_tab.get(tabela, 0) + 1
+        elif (tabela, nome) not in vistos:
+            vistos.add((tabela, nome))
+            ruins.append((tabela, nome))
+
+    # trava anti-dicionario-furado
+    return [(t, c) for t, c in ruins if validas_por_tab.get(t, 0) > 0]
+
+
+def mensagem_recusa(ruins: list[tuple[str, str]],
+                    dicionario: dict[str, Iterable[str]]) -> str:
+    """Mensagem acionavel: o que esta errado e qual e o nome certo."""
+    linhas = ["SQL RECUSADO ANTES DE EXECUTAR: coluna inexistente."]
+    por_tab: dict[str, list[str]] = {}
+    for tab, col in ruins:
+        por_tab.setdefault(tab, []).append(col)
+
+    for tab, cols in por_tab.items():
+        reais = sorted({c.upper() for c in dicionario.get(tab, [])})
+        linhas.append(f"\n{tab} NAO tem: {', '.join(sorted(cols))}")
+        for c in sorted(cols):
+            perto = difflib.get_close_matches(c, reais, n=4, cutoff=0.5)
+            comeca = [r for r in reais if len(c) >= 3 and r.startswith(c[:4])
+                      and r not in perto]
+            contem = [r for r in reais if len(c) >= 4 and c in r
+                      and r not in perto and r not in comeca]
+            sug = (perto + comeca + contem)[:6]
+            linhas.append(f"  {c} -> " + (", ".join(sug) if sug
+                                          else "nenhuma parecida"))
+
+    linhas.append(
+        "\nCorrija TODAS de uma vez e reenvie. NAO remova uma coluna por vez: "
+        "as outras da lista tambem estao erradas. Se a coluna que voce precisa "
+        "nao existir nesta tabela, ela pode estar em OUTRA — consulte "
+        "ALL_TAB_COLUMNS. NAO diga ao usuario que o banco falhou: o Winthor "
+        "esta no ar e a consulta nem chegou nele.")
+    return "\n".join(linhas)

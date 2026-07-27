@@ -303,6 +303,71 @@ class BearerAuthMiddleware(BaseHTTPMiddleware):
 # MCP server
 # ============================================================
 
+# ============================================================
+# Pre-voo de colunas (ver app/preflight.py)
+#
+# Medido em 27/07/2026: 74% dos erros sao ORA-00904. Devolver as colunas
+# certas junto com o erro NAO bastou — o log mostra o agente recebendo os
+# nomes corretos e apenas REMOVENDO a coluna citada, uma por rodada, ate
+# estourar as 3 tentativas. Aqui a query nem chega no Oracle: e recusada com
+# a lista COMPLETA do que esta errado.
+#
+# Cache por tabela (1h) pra nao pagar ALL_TAB_COLUMNS em toda pergunta.
+# ============================================================
+
+try:
+    from app.preflight import colunas_invalidas, mensagem_recusa, tabelas_fisicas
+except ImportError:  # pragma: no cover
+    from mcps.oracle.app.preflight import (  # type: ignore
+        colunas_invalidas, mensagem_recusa, tabelas_fisicas)
+
+_DIC_TTL_S = 3600.0
+_DIC_CACHE: dict = {}
+
+
+def _dicionario_colunas(tabelas: list) -> dict:
+    """{TABELA: {colunas}} para as tabelas pedidas. Nunca levanta.
+
+    Tabela que nao existe fica cacheada como vazia e sai do dicionario — o
+    pre-voo ignora tabela que nao conhece, entao nao ha recusa indevida.
+    """
+    if not tabelas:
+        return {}
+    agora = time.time()
+    faltando = [t for t in tabelas
+                if t not in _DIC_CACHE or (agora - _DIC_CACHE[t][0]) > _DIC_TTL_S]
+    if faltando:
+        try:
+            binds = {f"t{i}": t for i, t in enumerate(faltando)}
+            lista = ",".join(f":t{i}" for i in range(len(faltando)))
+            pool = get_pool()
+            conn = pool.acquire()
+            try:
+                conn.call_timeout = 8000
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "SELECT TABLE_NAME, COLUMN_NAME FROM ALL_TAB_COLUMNS "
+                        f"WHERE OWNER = 'EBD' AND TABLE_NAME IN ({lista})",
+                        binds)
+                    linhas = cur.fetchall()
+                conn.call_timeout = 0
+            finally:
+                try:
+                    pool.release(conn)
+                except Exception:
+                    pass
+            novo: dict = {t: set() for t in faltando}
+            for tab, col in linhas:
+                novo.setdefault(tab.upper(), set()).add(col.upper())
+            for t, cols in novo.items():
+                _DIC_CACHE[t] = (agora, cols)
+        except Exception as _e:
+            log.warning("dicionario_colunas_falhou", erro=str(_e)[:150])
+            return {}
+    return {t: _DIC_CACHE[t][1] for t in tabelas
+            if t in _DIC_CACHE and _DIC_CACHE[t][1]}
+
+
 mcp = FastMCP(
     name="mcp-oracle-ebd",
     instructions="Servidor MCP read-only para o Winthor Oracle da EBD.",
@@ -526,6 +591,28 @@ async def oracle_query(
             message=err or "SQL inválido",
             elapsed_ms=elapsed,
             user_context=user,
+        ).model_dump()
+
+    # 2.6 PRE-VOO DE COLUNAS — recusa antes de gastar ida ao Oracle
+    try:
+        _tabs = tabelas_fisicas(sql)
+        _dic = _dicionario_colunas(_tabs) if _tabs else {}
+        _ruins = colunas_invalidas(sql, _dic) if _dic else []
+    except Exception as _e:
+        log.warning("preflight_falhou", erro=str(_e)[:150])
+        _ruins = []
+    if _ruins:
+        elapsed = (time.perf_counter() - start) * 1000
+        log.warning("preflight_recusou", user_id=user.user_id,
+                    colunas=[f"{t}.{c}" for t, c in _ruins],
+                    sql_prefix=sql[:200], sql_full=sql[:2000])
+        return ToolResponse.failure(
+            tool="oracle_query",
+            code="SQL_PREFLIGHT",
+            message=mensagem_recusa(_ruins, _dic),
+            elapsed_ms=elapsed,
+            user_context=user,
+            details={"colunas_invalidas": [f"{t}.{c}" for t, c in _ruins]},
         ).model_dump()
 
     # 2.5 ESCOPO
