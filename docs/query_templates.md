@@ -3317,3 +3317,143 @@ Achou pelo FORNECEDOR: resolva a lista de codigos UMA VEZ e reaproveite em
 todas as metricas — `WHERE p.CODFORNEC IN (25277, 25324, 25498)`. NUNCA
 recalcular a CTE com `NVL()` a cada metrica: 4,23s contra 0,64s, e o `NVL()`
 no WHERE anula o indice `PCPRODUT_IDX3` (cicatriz #76).
+
+# Gestao de Metas, premio e comissao — templates T-GM
+
+Regras que valem para TODOS os templates desta familia:
+- `PCGMMETACOMB` repete VLFATURADO por indicador e por tipo de meta. Faturamento
+  = SEMPRE `CODINDICADOR = 16 AND CODTIPOMETA = 3` (cicatriz #78).
+- Premio/comissao SO no ultimo mes FECHADO: `DTPREMIACAO IS NOT NULL` e
+  `DATA < TRUNC(SYSDATE,'MM')` (cicatriz #79).
+- NUNCA comparar % de comissao entre filiais: o modelo e diferente de proposito
+  (secao 17... ver 18.4).
+- `PCGMMETA.CODENTIDADEMETA` = `CODUSUR`.
+
+## T-GM01 — Real vs Meta por RCA (mes fechado)
+
+O "Real vs Meta" que abre qualquer plano de reversao de industria.
+
+```sql
+SELECT pm.CODFILIAL,
+       m.CODENTIDADEMETA                          AS CODUSUR,
+       SUBSTR(NVL(u.NOME,'?'), 1, 26)             AS RCA,
+       SUBSTR(mc.NOMECOMBENTIDADE, 1, 26)         AS INDUSTRIA,
+       ROUND(mc.VALOR, 2)                         AS META,
+       ROUND(mc.REALIZADO, 2)                     AS REALIZADO,
+       ROUND(mc.PERCATINGIDO, 1)                  AS PCT_ATINGIDO,
+       mc.FAIXAINI, mc.FAIXAFIM,
+       ROUND(mc.PERCPESOINDNIVELATING, 2)         AS PESO_X_NIVEL,
+       ROUND(mc.VLCOMISSAO, 2)                    AS COMISSAO
+FROM EBD.PCGMMETACOMB mc
+JOIN EBD.PCGMMETA m       ON m.CODIGO  = mc.CODMETA
+JOIN EBD.PCGMPARAMMETA pm ON pm.CODIGO = m.CODPARAMMETA
+LEFT JOIN EBD.PCUSUARI u  ON u.CODUSUR = m.CODENTIDADEMETA
+WHERE mc.CODINDICADOR = 16
+  AND mc.CODTIPOMETA  = 3
+  AND mc.DTPREMIACAO IS NOT NULL
+  AND mc.DATA >= ADD_MONTHS(TRUNC(SYSDATE,'MM'), -:meses)
+  AND mc.DATA <  TRUNC(SYSDATE,'MM')
+  AND pm.CODFILIAL = :codFilial
+ORDER BY mc.PERCATINGIDO
+```
+
+## T-GM02 — Premio apurado por filial (mes fechado)
+
+```sql
+SELECT TO_CHAR(mc.DATA,'YYYY-MM')                 AS MES,
+       pm.CODFILIAL,
+       COUNT(DISTINCT mc.CODMETA)                 AS COLABORADORES,
+       ROUND(SUM(CASE WHEN mc.CODINDICADOR = 16 AND mc.CODTIPOMETA = 3
+                      THEN mc.VLFATURADO END), 2) AS FATURADO,
+       ROUND(SUM(mc.VLCOMISSAO), 2)               AS COMISSAO,
+       ROUND(100 * SUM(mc.VLCOMISSAO)
+             / NULLIF(SUM(CASE WHEN mc.CODINDICADOR = 16 AND mc.CODTIPOMETA = 3
+                               THEN mc.VLFATURADO END), 0), 3) AS PCT_SOBRE_FAT
+FROM EBD.PCGMMETACOMB mc
+JOIN EBD.PCGMMETA m       ON m.CODIGO  = mc.CODMETA
+JOIN EBD.PCGMPARAMMETA pm ON pm.CODIGO = m.CODPARAMMETA
+WHERE mc.DTPREMIACAO IS NOT NULL
+  AND mc.DATA >= ADD_MONTHS(TRUNC(SYSDATE,'MM'), -:meses)
+  AND mc.DATA <  TRUNC(SYSDATE,'MM')
+GROUP BY TO_CHAR(mc.DATA,'YYYY-MM'), pm.CODFILIAL
+ORDER BY MES DESC, COMISSAO DESC
+```
+
+⚠️ O `PCT_SOBRE_FAT` NAO serve para ranking entre filiais: o modelo de comissao
+e diferente por regiao, mercado e mix de industrias (18.4). Serve para a filial
+contra ela mesma ao longo dos meses.
+
+## T-GM03 — Conferencia: recalcular a comissao e comparar com o gravado
+
+Refaz a conta do zero e confronta com o que o GM gravou. E a rotina 111 feita
+por consulta. Diferenca diferente de zero = investigar.
+
+```sql
+WITH bruta AS (
+    SELECT cp.CODMETA,
+           cp.CODCOMBINACAO,
+           SUM(cp.VLFATPORPERCOM
+               * TO_NUMBER(REPLACE(cp.PERCOMMOV, ',', '.')) / 100) AS COM_BRUTA
+    FROM EBD.PCGMMETACOMBCOMPLE cp
+    WHERE cp.DATA >= ADD_MONTHS(TRUNC(SYSDATE,'MM'), -:meses)
+      AND cp.DATA <  TRUNC(SYSDATE,'MM')
+    GROUP BY cp.CODMETA, cp.CODCOMBINACAO
+)
+SELECT pm.CODFILIAL,
+       m.CODENTIDADEMETA                     AS CODUSUR,
+       SUBSTR(NVL(u.NOME,'?'), 1, 24)        AS RCA,
+       SUBSTR(mc.NOMECOMBENTIDADE, 1, 24)    AS INDUSTRIA,
+       ROUND(b.COM_BRUTA, 4)                 AS COMISSAO_BRUTA,
+       ROUND(mc.PERCPESOINDNIVELATING, 2)    AS PESO_X_NIVEL,
+       ROUND(b.COM_BRUTA * mc.PERCPESOINDNIVELATING / 100, 2) AS RECALCULADA,
+       ROUND(mc.VLCOMISSAO, 2)               AS GRAVADA,
+       ROUND(ABS(b.COM_BRUTA * mc.PERCPESOINDNIVELATING / 100
+                 - mc.VLCOMISSAO), 2)        AS DIFERENCA
+FROM EBD.PCGMMETACOMB mc
+JOIN bruta b              ON b.CODMETA = mc.CODMETA
+                         AND b.CODCOMBINACAO = mc.CODCOMBINACAO
+JOIN EBD.PCGMMETA m       ON m.CODIGO  = mc.CODMETA
+JOIN EBD.PCGMPARAMMETA pm ON pm.CODIGO = m.CODPARAMMETA
+LEFT JOIN EBD.PCUSUARI u  ON u.CODUSUR = m.CODENTIDADEMETA
+WHERE mc.CODINDICADOR = 16
+  AND mc.CODTIPOMETA  = 3
+  AND mc.DTPREMIACAO IS NOT NULL
+  AND pm.CODFILIAL = :codFilial
+  AND ABS(b.COM_BRUTA * mc.PERCPESOINDNIVELATING / 100 - mc.VLCOMISSAO) > 0.01
+ORDER BY DIFERENCA DESC
+FETCH FIRST 40 ROWS ONLY
+```
+
+Referencia: validado na meta 118452 com diferenca R$ 0,00 nas tres industrias.
+Se este template voltar VAZIO, esta tudo conferindo — e a resposta certa.
+
+## T-GM04 — Controle do ciclo: o que ainda nao fechou
+
+Comercial fecha a META (`DTFECHAMENTO`), G&G fecha o PREMIO (`DTPREMIACAO`).
+Premio nao fechado = extrato nao sai = ninguem recebe.
+
+```sql
+SELECT TO_CHAR(mc.DATA,'YYYY-MM')                        AS MES,
+       pm.CODFILIAL,
+       COUNT(DISTINCT mc.CODMETA)                        AS METAS,
+       COUNT(DISTINCT CASE WHEN mc.DTFECHAMENTO IS NOT NULL
+                           THEN mc.CODMETA END)          AS META_FECHADA,
+       COUNT(DISTINCT CASE WHEN mc.DTPREMIACAO IS NOT NULL
+                           THEN mc.CODMETA END)          AS PREMIO_FECHADO,
+       COUNT(DISTINCT CASE WHEN mc.DTFECHAMENTO IS NULL
+                           THEN mc.CODMETA END)          AS META_ABERTA,
+       COUNT(DISTINCT CASE WHEN mc.DTFECHAMENTO IS NOT NULL
+                            AND mc.DTPREMIACAO IS NULL
+                           THEN mc.CODMETA END)          AS AGUARDANDO_GEG,
+       ROUND(MEDIAN(mc.DTPREMIACAO - mc.DTFECHAMENTO), 1) AS DIAS_META_A_PREMIO
+FROM EBD.PCGMMETACOMB mc
+JOIN EBD.PCGMMETA m       ON m.CODIGO  = mc.CODMETA
+JOIN EBD.PCGMPARAMMETA pm ON pm.CODIGO = m.CODPARAMMETA
+WHERE mc.DATA >= ADD_MONTHS(TRUNC(SYSDATE,'MM'), -:meses)
+  AND mc.DATA <  TRUNC(SYSDATE,'MM')
+GROUP BY TO_CHAR(mc.DATA,'YYYY-MM'), pm.CODFILIAL
+ORDER BY MES DESC, META_ABERTA DESC
+```
+
+`AGUARDANDO_GEG` = comercial ja fechou a meta e o premio nao foi fechado.
+`DIAS_META_A_PREMIO` = quanto o G&G leva depois do comercial.

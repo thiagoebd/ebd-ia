@@ -1665,3 +1665,59 @@ Referencia medida: os 1.771 produtos da Alpargatas em SBC, 30 dias, saem em
 
 ALL_TABLES e ALL_TAB_COLUMNS usam TABLE_NAME; ALL_VIEWS usa VIEW_NAME. O
 pre-voo NAO pega isso: ele so valida tabelas do schema EBD, nao o dicionario.
+
+
+## #78 - PCGMMETACOMB: somar VLFATURADO sem filtro conta 2x ou 4x
+
+Cada meta tem linhas por INDICADOR (16 faturamento, 5 positivacao) e por
+TIPOMETA (3 = por industria, 4 = META GERAL). O VLFATURADO se repete em todas.
+
+Medido na meta 118452:
+  soma de tudo                       = 503.463,20   (4x)
+  so indicador 16                    = 251.731,60   (2x)
+  indicador 16 + CODTIPOMETA = 3     = 125.865,80   CERTO
+  VIEW_VENDAS_RESUMO_FATURAMENTO     = 126.189,58   (dif. 0,26%)
+
+A linha META GERAL (CODTIPOMETA=4) repete o total das industrias e NAO PAGA
+comissao — peso nulo, PESO_X_NIVEL = 0. Serve so para acompanhamento.
+
+  SEMPRE: WHERE mc.CODINDICADOR = 16 AND mc.CODTIPOMETA = 3
+
+## #79 - Nao existe apuracao de premio no MES CORRENTE
+
+A comissao so e apurada DEPOIS do fechamento do mes. No mes corrente a consulta
+RETORNA NUMERO, e o numero e lixo — sao fechamentos prematuros de algumas
+metas, nao o resultado do mes.
+
+Medido em 28/07/2026: julho tinha 1.888 metas e 13 fechadas; junho tinha 1.516
+metas, 1.401 fechadas e 1.125 premios fechados.
+
+Toda pergunta sobre premio ou comissao deve usar o ULTIMO MES FECHADO:
+
+  WHERE mc.DTPREMIACAO IS NOT NULL
+    AND mc.DATA < TRUNC(SYSDATE,'MM')
+
+Se o usuario pedir o mes corrente, RESPONDA que ainda nao ha apuracao e ofereca
+o mes anterior. NAO devolva o numero parcial.
+
+## #80 - PERCOMPORIND esta NULO: a comissao sai da PCGMMETACOMBCOMPLE
+
+Em dados de 2019 o PERCOMPORIND vinha preenchido e VLCOMISSAO = VLFATURADO x
+PERCOMPORIND/100. Nos dados atuais ele e NULO — a formula nao vem mais dali.
+
+  comissao_bruta = SOMA(VLFATPORPERCOM x PERCOMMOV/100)  [PCGMMETACOMBCOMPLE]
+  VLCOMISSAO     = comissao_bruta x PERCPESOINDNIVELATING / 100
+
+Validado ao centavo na meta 118452 (diferenca 0,0000 nas 3 industrias).
+
+A comissao varia por PRODUTO dentro da mesma industria (Alpargatas tem 3%, 4%
+e 5% na mesma meta). NAO existe "percentual da industria".
+
+## #81 - CODFORNECPRINC esta na PCFORNEC, NAO na PCPRODUT
+
+  ERRADO: SELECT ... FROM EBD.PCPRODUT pr WHERE pr.CODFORNECPRINC ...
+  CERTO:  JOIN EBD.PCFORNEC f ON f.CODFORNEC = pr.CODFORNEC
+          ... NVL(f.CODFORNECPRINC, f.CODFORNEC)
+
+A PCPRODUT tem CODFORNEC (com indice PCPRODUT_IDX3); a raiz do grupo economico
+esta na PCFORNEC.

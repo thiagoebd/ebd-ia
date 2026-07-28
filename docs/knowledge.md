@@ -1320,3 +1320,113 @@ no volume, esta na incoerencia com a praca:
 Duque e Taquara fecham carga em 2 dias normalmente. Carga aberta com mediana de
 12 dias em Duque, e uma de 82 dias em Taquara, nao e rota demorada — e carga
 esquecida. Por isso o alerta e RELATIVO a praca (T-LOG15), e nao um numero fixo.
+
+## 18. Gestao de Metas (rotina 3388/GM), premio e comissao
+
+Levantado e MEDIDO em 28/07/2026, com a regra de negocio confirmada pelo Thiago
+e a formula validada ao centavo contra um premio fechado real.
+
+### 18.1 O ciclo mensal e quem faz o que
+
+INICIO DO MES
+  1. G&G da filial cadastra a parametrizacao de Meta e Premio (mes x filial) e
+     libera para o comercial.
+  2. O time comercial sobe a meta por INDUSTRIA x RCA (planilha Excel).
+     Prazo: ate o QUINTO DIA UTIL.
+
+FIM DO MES
+  3. Apos o fechamento do mes, a comissao e apurada.
+  4. Comercial apura meta/premio, confere com a ROTINA 111 e FECHA A META.
+  5. G&G FECHA O PREMIO e integra para o RM pela ROTINA 9817 (Integracao GM-RM).
+
+A 3388 so existe no WTA (WinThor Anywhere). Acesso liberado pela rotina 530,
+que valida a rotina 131. Menus: 1 Cadastro (G&G Corporativo), 2 Configuracoes
+(TI Corporativo, mudanca exige chamado), 3 Construcao (G&G Filial + Analista
+Comercial), 4 Apuracao (Comercial fecha meta, G&G fecha premio), 5 Extrato
+(Extrato so com premio fechado; Conferencia; Relatorio Apoio com comissao
+detalhada por produto e RCA).
+
+⚠️ **NAO EXISTE APURACAO DE PREMIO NO MES CORRENTE.** A comissao so e apurada
+depois do fechamento do mes. Julho/2026 medido em 28/07: 1.888 metas e apenas
+13 fechadas — sao fechamentos prematuros, nao o resultado do mes. Perguntas
+sobre premio/comissao devem usar o ULTIMO MES FECHADO. Junho/2026: 1.516 metas,
+1.401 metas fechadas, 1.125 premios fechados.
+
+### 18.2 As tabelas (mapa confirmado pelo Thiago)
+
+| Tabela | O que e |
+|---|---|
+| `PCGMPARAMMETA` | cabecalho da meta (a "parametrizacao 867") |
+| `PCGMMETA` | a meta do colaborador; `CODENTIDADEMETA` = **CODUSUR** |
+| `PCGMMETACOMB` | **a fato**: faturado, realizado, faixa, comissao, `DTFECHAMENTO` (meta fechada) e `DTPREMIACAO` (premio fechado), a nivel de RCA x INDUSTRIA |
+| `PCGMMETACOMBCOMPLE` | o faturado quebrado por percentual de comissao (`PERCOMMOV` x `VLFATPORPERCOM`) |
+| `PCGMINDICADOR` | 22 indicadores, com `REGRACALCPREVISTO` e `REGRACALCREALIZADO`. **16 = VALOR FATURADO LIQUIDO, 5 = NUMERO DE CLIENTES POSITIVADOS** |
+| `PCGMFAIXAPADRAO` / `ITEM` | faixas **POR REGIONAL**: `PERCINICIAL`, `PERCFINAL`, `PESO` |
+| `PCGMPARAMCOMB` + `PCGMPREMIOCOMB` | peso de cada indicador na parametrizacao |
+| `PCGMMETAAPROV` | situacao da meta por RCA (`L` liberada, `A` aprovada), com quem e quando |
+| `PCGMTIPOMETA` | **3 = META POR INDUSTRIA (fornecedor principal), 4 = META GERAL** |
+| `PCGMPARAMETRO` | parametros globais |
+| `PCCOMISSAOUSUR` | comissao cadastrada por RCA x PRODUTO (7,0 mi de linhas, 2.846 RCAs) |
+
+`PCGMFILIALEMPREGADO` e `PCGMMETAOBSERV` estao VAZIAS.
+
+### 18.3 A FORMULA (validada ao centavo)
+
+```
+comissao_bruta   = SOMA(VLFATPORPERCOM x PERCOMMOV / 100)   [PCGMMETACOMBCOMPLE]
+PESO_X_NIVEL     = peso_do_indicador x (peso_da_faixa / 100)
+VLCOMISSAO       = comissao_bruta x PESO_X_NIVEL / 100
+```
+
+Validado na meta 118452 (RCA 3639, Teresina, perfil NE2, abril/2026):
+
+| Industria | Faturado | Bruta | % Ating. | Faixa | Peso x Nivel | Comissao |
+|---|---|---|---|---|---|---|
+| Alpargatas | 125.575,29 | 5.361,44 | 114,16% | 105+ → 105 | 80 x 1,05 = 84 | **4.503,61** |
+| Torrone | 75,76 | 2,65 | 7,07% | 0-84,99 → 75 | 80 x 0,75 = 60 | **1,59** |
+| Nova Foods | 214,75 | 7,11 | 23,12% | 0-84,99 → 75 | 80 x 0,75 = 60 | **4,26** |
+
+Total do vendedor: R$ 4.509,46. Diferenca do calculado para o gravado: R$ 0,00.
+
+A comissao varia POR PRODUTO dentro da mesma industria: a Alpargatas tem venda
+a 3%, 4% e 5%. Nao existe "percentual da industria" — existe mix de aliquotas,
+e e para isso que a PCGMMETACOMBCOMPLE existe.
+
+### 18.4 As politicas de faixa sao DIFERENTES por regional — DE PROPOSITO
+
+Isso NAO e erro de cadastro. As diferencas de modelo de comissao entre filiais
+sao particularidades da regiao, do mercado e do modelo de industria que a EBD
+representa naquele local.
+
+| Perfil | Faturamento (ind. 16) | Positivacao (ind. 5) |
+|---|---|---|
+| SP, N02, NE1, NE2, NO1 | 75 → 80 → 85 → 90 → 100 → 105 | **0** → 30 → 50 → 70 → 100 → 105 |
+| RJ | **faixa unica: 100** | 0 → 33,33 → 53,33 → 73,33 → 100 → 106,67 |
+| N01 | **faixa unica: 100** | — |
+
+Assimetria relevante: faturamento tem PISO 75 mesmo com 7% de atingimento;
+positivacao ZERA abaixo de 85%.
+
+**NUNCA comparar % de comissao entre filiais** e NUNCA apresentar a variacao de
+faixa como anomalia. So compare dentro da mesma parametrizacao, ou a filial
+contra a propria historia.
+
+### 18.5 Parametros globais que mudam a base de calculo
+
+`ABATER_VALOR_ST_COMISSAO = S` mas `ABATER_VALOR_ST_META = N`: o ICMS-ST e
+abatido no calculo da COMISSAO e nao no da META. As duas bases sao diferentes
+por desenho — e isso explica divergencia entre o atingimento que o vendedor ve
+e o valor que ele recebe.
+
+Outros: `UTILIZA_SOMENTE_FORNECEDOR_REVENDA = S`,
+`BLOQUEAR_APURACAO_META_COM_VENDA_MAS_SEM_META = N` (vende sem meta cadastrada
+e apura assim mesmo), `PERC_ATINGIDO_REALIZADO_POSITIVO_SEM_VALOR_PREVISTO = 100`.
+
+### 18.6 Reconciliacao com o faturamento
+
+O GM consome a view de faturamento. Medido na meta 118452: GM 125.865,80 contra
+`VIEW_VENDAS_RESUMO_FATURAMENTO` 126.189,58 — diferenca de R$ 323,78 (0,26%),
+compativel com o abatimento de ST e o filtro de fornecedor revenda.
+
+Para "Real vs Meta" a ponte esta validada, desde que se filtre corretamente
+(ver cicatriz #78).
