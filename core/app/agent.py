@@ -321,6 +321,9 @@ async def run_turn(
 
 
 
+from app.loop_policy import AVISO_CONCLUA, decidir_parada
+
+
 async def run_turn_stream(
     user_message: str,
     conversation_history: list | None = None,
@@ -377,6 +380,7 @@ async def run_turn_stream(
     tool_outcomes = []  # [(tool_name, success_bool), ...] desta turn
     _tool_contents = []
     _MAX_SQL_FAILS = 3
+    _pediu_conclusao = False
     FALHA_WINTHOR = (
         "Tentei algumas vezes e nao consegui montar uma consulta valida pra essa "
         "pergunta. Nao vou arriscar numeros sem base. Pode reformular? Dizer a "
@@ -386,6 +390,13 @@ async def run_turn_stream(
 
     while iterations < settings.max_iterations:
         iterations += 1
+
+        # ultima volta: o caminho 'max_iterations' encerra SEM TEXTO NENHUM.
+        # Em vez disso, pede o fechamento com o que ja foi apurado.
+        if (iterations >= settings.max_iterations and tool_outcomes
+                and not _pediu_conclusao):
+            _pediu_conclusao = True
+            messages.append({"role": "user", "content": AVISO_CONCLUA})
 
         # Streaming da chamada ao Claude
         text_acc = ""
@@ -537,8 +548,8 @@ async def run_turn_stream(
                 tool_results.append(_tr)
                 _tool_contents.append(result_str if isinstance(result_str, str) else str(result_str))
         messages.append({"role": "user", "content": tool_results})
-        _fails = len([1 for (n, ok) in tool_outcomes if n == "oracle_query" and not ok])
-        if _fails >= _MAX_SQL_FAILS:
+        _decisao = decidir_parada(tool_outcomes, _MAX_SQL_FAILS, _pediu_conclusao)
+        if _decisao == "abortar":
             for _i in range(0, len(FALHA_WINTHOR), 60):
                 yield {"type": "token", "text": FALHA_WINTHOR[_i:_i + 60]}
             yield {
@@ -549,6 +560,22 @@ async def run_turn_stream(
                 "iterations": iterations,
                 "usage": final_usage,
                 "stop_reason": "sql_failed",
+            }
+            return
+        if _decisao == "concluir":
+            _pediu_conclusao = True
+            messages.append({"role": "user", "content": AVISO_CONCLUA})
+            yield {"type": "status", "text": "Fechando com os dados obtidos..."}
+            continue
+        if _decisao == "parar":
+            yield {
+                "type": "done",
+                "history": messages,
+                "tool_calls": tool_calls_log,
+                "tool_outcomes": tool_outcomes,
+                "iterations": iterations,
+                "usage": final_usage,
+                "stop_reason": "sql_parcial",
             }
             return
         yield {"type": "status", "text": "Analisando os dados..."}
