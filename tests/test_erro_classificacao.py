@@ -110,3 +110,23 @@ def test_sucesso_nao_tem_marcador():
     saida = format_result_for_claude(
         {"status": "ok", "result": {"rows": [{"A": 1}]}, "elapsed_ms": 10})
     assert "__ORACLE_ERROR__" not in saida
+
+
+# ---- aviso de zero linhas chega ao agente ----
+
+def test_zero_linhas_com_aviso_chega_ao_agente():
+    """O MCP anexa o aviso; o bridge nao pode engolir."""
+    saida = format_result_for_claude({
+        "status": "ok",
+        "result": {"columns": ["CODFORNEC"], "rows": [],
+                   "aviso": "\n\n[ATENCAO] Esta consulta de CADASTRO voltou ZERO LINHAS."},
+        "elapsed_ms": 30})
+    assert "0 linhas" in saida
+    assert "ZERO LINHAS" in saida
+
+
+def test_zero_linhas_sem_aviso_continua_curto():
+    saida = format_result_for_claude(
+        {"status": "ok", "result": {"columns": [], "rows": []}, "elapsed_ms": 12})
+    assert saida.startswith("OK (0 linhas")
+    assert "ATENCAO" not in saida

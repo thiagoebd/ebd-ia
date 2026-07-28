@@ -1601,3 +1601,67 @@ colunas candidatas do dicionario em vez de conferir as que vieram a cabeca:
 
   SELECT COLUMN_NAME FROM ALL_TAB_COLUMNS
   WHERE OWNER='EBD' AND TABLE_NAME=:t AND DATA_TYPE='DATE'
+
+
+## #74 - MARCA nao e FORNECEDOR: procure nas duas tabelas
+
+Caso real (28/07/2026): pediram analise da "Havaianas em SBC". O agente buscou
+UPPER(FORNECEDOR) LIKE '%HAVAI%' na PCFORNEC, voltou ZERO linhas, e passou 7
+minutos e 18 consultas analisando um conjunto vazio.
+
+  Havaianas e MARCA:      PCMARCA.CODMARCA = 1272, MARCA = 'HAVAIANAS'
+  O fornecedor e:         ALPARGATAS S.A. (CODFORNEC 25277, 25324, 25498;
+                          raiz CODFORNECPRINC = 25277)
+  Produtos:               1.771, TODOS com PCPRODUT.CODMARCA = 1272
+
+A descricao do produto NAO contem 'HAVAIANAS' — a unica entrada por nome de
+marca e a PCMARCA (573 marcas cadastradas). A PCFORNEC tambem tem a coluna
+FANTASIA, alem de FORNECEDOR.
+
+REGRA: nome de industria dado pelo usuario pode ser marca, razao social ou
+fantasia. Procure nos QUATRO campos antes de concluir que nao existe:
+PCFORNEC.FORNECEDOR, PCFORNEC.FANTASIA, PCMARCA.MARCA, PCPRODUT.DESCRICAO.
+Ver T-RES01.
+
+## #75 - ZERO LINHAS em consulta de cadastro NAO e resposta
+
+'oracle_query_ok' significa "nao deu erro", nao "achou". Numa consulta de
+CADASTRO (PCFORNEC, PCMARCA, PCCLIENT, PCPRODUT...), zero linha quase sempre
+quer dizer que o termo esta na tabela errada.
+
+Seguir a analise sobre conjunto vazio produz o pior tipo de erro: numeros
+zerados com procedencia legitima. Nao e fabulacao — e conclusao falsa que
+passa em qualquer verificacao de origem.
+
+Em tabela de MOVIMENTO zero linha e resposta legitima ("nao houve venda no
+periodo"). A distincao e essa.
+
+O MCP passou a anexar aviso automatico quando isso acontece (funcao
+aviso_zero_linhas em app/preflight.py). Se o aviso aparecer, PARE e resolva a
+entidade antes de continuar.
+
+## #76 - Resolva CODFORNEC UMA VEZ; NVL() no WHERE mata o indice
+
+O mesmo caso: o agente recalculou esta CTE em TODA metrica, 18 vezes seguidas,
+com 3 timeouts.
+
+  LENTO (4,23s):  WITH prods AS (SELECT p.CODPROD FROM PCPRODUT p
+                    JOIN PCFORNEC f ON f.CODFORNEC = p.CODFORNEC
+                    WHERE NVL(f.CODFORNECPRINC, f.CODFORNEC) = :x)
+
+  RAPIDO (0,64s): resolver a lista de CODFORNEC UMA VEZ e depois
+                  WHERE p.CODFORNEC IN (25277, 25324, 25498)
+
+Existe indice em PCPRODUT.CODFORNEC (PCPRODUT_IDX3 e PCPRODUT_IDX_DBAONL1). O
+`NVL()` no WHERE impede o uso dele. Em 6 metricas seguidas: 7,22s contra 1,94s.
+
+Referencia medida: os 1.771 produtos da Alpargatas em SBC, 30 dias, saem em
+0,57s — 302 notas, 232 clientes, 371 SKUs, R$ 379.079,47.
+
+## #77 - ALL_VIEWS usa VIEW_NAME, nao TABLE_NAME
+
+  ERRADO: SELECT table_name FROM all_views WHERE owner='EBD'  -> ORA-00904
+  CERTO:  SELECT view_name  FROM all_views WHERE owner='EBD'
+
+ALL_TABLES e ALL_TAB_COLUMNS usam TABLE_NAME; ALL_VIEWS usa VIEW_NAME. O
+pre-voo NAO pega isso: ele so valida tabelas do schema EBD, nao o dicionario.

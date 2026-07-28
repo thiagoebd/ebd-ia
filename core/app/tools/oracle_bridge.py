@@ -165,7 +165,11 @@ def format_result_for_claude(payload: dict) -> str:
     truncated = result.get("truncated", False)
     if not rows:
         _log.info("oracle_query OK rows=0 elapsed=%.0fms", elapsed)
-        return f"OK (0 linhas, {elapsed:.0f}ms)"
+        # o MCP anexa aviso quando ZERO linhas vem de consulta de CADASTRO:
+        # seguir a analise sobre conjunto vazio produz conclusao falsa com
+        # aparencia de dado real
+        _aviso = result.get("aviso") or ""
+        return f"OK (0 linhas, {elapsed:.0f}ms){_aviso}"
     _log.info("oracle_query OK rows=%d elapsed=%.0fms truncated=%s", len(rows), elapsed, truncated)
     cols = list(rows[0].keys())
     lines = [f"OK ({len(rows)} linhas, {elapsed:.0f}ms){' [TRUNCATED]' if truncated else ''}"]

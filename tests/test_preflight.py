@@ -394,3 +394,49 @@ def test_recusa_correta_de_17h09_continua_valendo():
     sql = ("SELECT d.NUMTRANSVENDA, d.NUMNOTA, d.CODCLI, d.CODPROD, d.QT, "
            "d.PUNIT, d.DTVENDA FROM EBD.VIEW_DEVOL_RESUMO_FATURAMENTO d")
     assert {c for _, c in pf.colunas_invalidas(sql, dic)} == {"PUNIT", "DTVENDA"}
+
+
+# ---------------------------------------------------------------
+# Zero linhas em cadastro (caso HAVAIANAS, 28/07/2026)
+# ---------------------------------------------------------------
+
+def test_zero_linhas_em_cadastro_avisa():
+    sql = "SELECT CODFORNEC, FORNECEDOR FROM EBD.PCFORNEC WHERE UPPER(FORNECEDOR) LIKE '%HAVAI%'"
+    aviso = pf.aviso_zero_linhas(sql, 0)
+    assert "ZERO LINHAS" in aviso
+    assert "PCMARCA" in aviso
+    assert "PERGUNTE ao usuario" in aviso
+
+
+def test_com_linhas_nao_avisa():
+    sql = "SELECT CODFORNEC FROM EBD.PCFORNEC WHERE UPPER(FORNECEDOR) LIKE '%ALPARG%'"
+    assert pf.aviso_zero_linhas(sql, 3) == ""
+
+
+def test_zero_linhas_em_movimento_nao_avisa():
+    """Venda zero no periodo e resposta legitima, nao erro de resolucao."""
+    sql = ("SELECT SUM(VLVENDA) FROM EBD.VIEW_VENDAS_RESUMO_FATURAMENTO "
+           "WHERE CODFILIAL = '18' AND DTSAIDA >= TRUNC(SYSDATE) - 30")
+    assert pf.aviso_zero_linhas(sql, 0) == ""
+
+
+def test_cadastro_sem_busca_textual_nao_avisa():
+    """Filtro por codigo que nao acha nao e o mesmo erro de nome errado."""
+    sql = "SELECT CODFORNEC FROM EBD.PCFORNEC WHERE CODFORNEC = 999999"
+    assert pf.aviso_zero_linhas(sql, 0) == ""
+
+
+def test_join_cadastro_com_movimento_nao_avisa():
+    sql = ("SELECT p.CODPROD FROM EBD.PCPRODUT p "
+           "JOIN EBD.VIEW_VENDAS_RESUMO_FATURAMENTO v ON v.CODPROD = p.CODPROD "
+           "WHERE UPPER(p.DESCRICAO) LIKE '%X%'")
+    assert pf.aviso_zero_linhas(sql, 0) == ""
+
+
+def test_marca_tambem_e_cadastro():
+    sql = "SELECT CODMARCA, MARCA FROM EBD.PCMARCA WHERE UPPER(MARCA) LIKE '%XPTO%'"
+    assert "ZERO LINHAS" in pf.aviso_zero_linhas(sql, 0)
+
+
+def test_sql_quebrado_nao_avisa():
+    assert pf.aviso_zero_linhas("SELECT FROM WHERE (((", 0) == ""

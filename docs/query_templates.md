@@ -3263,3 +3263,57 @@ ORDER BY TIPO_ROTA, PCT_NA_META
 Referencia medida (90 dias): `CE - CAPITAL` fecha em 6 dias e
 `CE - METROPOLITANA` em 7 — os dois piores metropolitanos da empresa. Sudeste
 metropolitano fica entre 1 e 3.
+
+## T-RES01 — Resolver industria/marca/fornecedor por nome
+
+SEMPRE o primeiro passo de qualquer analise de industria. O nome que o usuario
+diz pode ser marca, razao social ou fantasia — e sao tabelas diferentes
+(cicatriz #74).
+
+```sql
+SELECT 'FORNECEDOR' AS ONDE,
+       TO_CHAR(f.CODFORNEC)                     AS CODIGO,
+       SUBSTR(f.FORNECEDOR, 1, 45)              AS NOME,
+       TO_CHAR(NVL(f.CODFORNECPRINC, f.CODFORNEC)) AS RAIZ
+FROM EBD.PCFORNEC f
+WHERE UPPER(f.FORNECEDOR) LIKE '%' || UPPER(:termo) || '%'
+UNION ALL
+SELECT 'FANTASIA', TO_CHAR(f.CODFORNEC), SUBSTR(f.FANTASIA, 1, 45),
+       TO_CHAR(NVL(f.CODFORNECPRINC, f.CODFORNEC))
+FROM EBD.PCFORNEC f
+WHERE UPPER(f.FANTASIA) LIKE '%' || UPPER(:termo) || '%'
+UNION ALL
+SELECT 'MARCA', TO_CHAR(m.CODMARCA), SUBSTR(m.MARCA, 1, 45), NULL
+FROM EBD.PCMARCA m
+WHERE UPPER(m.MARCA) LIKE '%' || UPPER(:termo) || '%'
+UNION ALL
+SELECT 'DESCRICAO PRODUTO', TO_CHAR(MIN(p.CODPROD)),
+       'produtos com o termo na descricao', TO_CHAR(COUNT(*))
+FROM EBD.PCPRODUT p
+WHERE UPPER(p.DESCRICAO) LIKE '%' || UPPER(:termo) || '%'
+HAVING COUNT(*) > 0
+```
+
+⚠️ Se voltar ZERO linhas em tudo, **PARE e pergunte ao usuario**. NAO siga
+para a analise: o resultado seria zero em todas as metricas, com aparencia de
+dado real (cicatriz #75).
+
+### Depois de resolver, use o codigo — nao repita o join
+
+Achou pela MARCA (caso Havaianas, CODMARCA 1272):
+
+```sql
+SELECT COUNT(DISTINCT v.NUMTRANSVENDA) AS NOTAS,
+       COUNT(DISTINCT v.CODCLI)        AS CLIENTES,
+       COUNT(DISTINCT v.CODPROD)       AS SKUS,
+       ROUND(SUM(v.VLVENDA), 2)        AS VENDA
+FROM EBD.VIEW_VENDAS_RESUMO_FATURAMENTO v
+WHERE v.CODFILIAL = :codFilial
+  AND v.DTSAIDA >= TRUNC(SYSDATE) - :dias
+  AND v.CODPROD IN (SELECT CODPROD FROM EBD.PCPRODUT WHERE CODMARCA = :codMarca)
+```
+
+Achou pelo FORNECEDOR: resolva a lista de codigos UMA VEZ e reaproveite em
+todas as metricas — `WHERE p.CODFORNEC IN (25277, 25324, 25498)`. NUNCA
+recalcular a CTE com `NVL()` a cada metrica: 4,23s contra 0,64s, e o `NVL()`
+no WHERE anula o indice `PCPRODUT_IDX3` (cicatriz #76).

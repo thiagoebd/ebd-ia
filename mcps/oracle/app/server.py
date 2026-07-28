@@ -316,7 +316,8 @@ class BearerAuthMiddleware(BaseHTTPMiddleware):
 # ============================================================
 
 try:
-    from app.preflight import colunas_invalidas, mensagem_recusa, tabelas_fisicas
+    from app.preflight import (aviso_zero_linhas, colunas_invalidas,
+                               mensagem_recusa, tabelas_fisicas)
 except ImportError:  # pragma: no cover
     from mcps.oracle.app.preflight import (  # type: ignore
         colunas_invalidas, mensagem_recusa, tabelas_fisicas)
@@ -686,12 +687,23 @@ async def oracle_query(
             sql_prefix=final_sql[:200],
         )
 
+        _aviso = ""
+        if not rows:
+            try:
+                _aviso = aviso_zero_linhas(sql, 0)
+            except Exception as _e:
+                log.warning("aviso_zero_falhou", erro=str(_e)[:120])
+            if _aviso:
+                log.info("zero_linhas_cadastro", user_id=user.user_id,
+                         tabelas=tabelas_fisicas(sql), sql_prefix=sql[:200])
+
         return ToolResponse.success(
             tool="oracle_query",
             result={
                 "columns": cols,
                 "rows": rows_dict,
                 "sql_executed": final_sql,
+                **({"aviso": _aviso} if _aviso else {}),
             },
             elapsed_ms=elapsed,
             user_context=user,

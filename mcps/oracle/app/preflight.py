@@ -178,3 +178,57 @@ def mensagem_recusa(ruins: list[tuple[str, str]],
         "ALL_TAB_COLUMNS. NAO diga ao usuario que o banco falhou: o Winthor "
         "esta no ar e a consulta nem chegou nele.")
     return "\n".join(linhas)
+
+
+# ============================================================
+# Zero linhas em consulta de CADASTRO.
+#
+# Caso real (28/07/2026): o agente buscou o fornecedor "HAVAIANAS" na
+# PCFORNEC, voltou ZERO linhas, o log marcou oracle_query_ok — e ele passou
+# 7 minutos e 18 consultas analisando vendas, positivacao, mix e ruptura de um
+# conjunto VAZIO. Havaianas e MARCA (PCMARCA 1272); o fornecedor e ALPARGATAS.
+#
+# 'ok' significa "nao deu erro", nao "achou". Numa consulta de cadastro, zero
+# linha quase sempre quer dizer que o termo esta na tabela errada — e seguir
+# adiante produz conclusao falsa com procedencia legitima, que e pior que erro.
+#
+# So vale para tabela de CADASTRO: em tabela de movimento, zero linha e uma
+# resposta legitima ("nao houve venda no periodo").
+# ============================================================
+
+_CADASTRO = {
+    "PCFORNEC", "PCMARCA", "PCSUBMARCA", "PCCLIENT", "PCPRODUT", "PCUSUARI",
+    "PCEMPR", "PCFILIAL", "PCPRACA", "PCROTAEXP", "PCROTACLI", "PCDEPTO",
+    "PCSECAO", "PCTABDEV", "PCTIPOOS", "PCVEICUL", "PCSUPERV", "PCPLPAG",
+    "PCCOB", "PCATIVI", "PCLINHAPROD", "PCCATEGORIA", "PCPRODFILIAL",
+}
+
+# procurar nome por texto e o padrao de uma consulta de resolucao
+_RE_BUSCA_TEXTO = re.compile(r"\b(LIKE|UPPER|LOWER|INSTR)\b", re.I)
+
+
+def aviso_zero_linhas(sql: str, n_linhas: int) -> str:
+    """Alerta quando uma consulta de RESOLUCAO volta vazia. '' se nao se aplica."""
+    if n_linhas != 0 or not sql:
+        return ""
+    tabelas = [t for t in tabelas_fisicas(sql)]
+    if not tabelas:
+        return ""
+    # todas as tabelas precisam ser de cadastro: se houver tabela de movimento
+    # junto, zero linha pode ser resposta legitima
+    if not all(t in _CADASTRO for t in tabelas):
+        return ""
+    if not _RE_BUSCA_TEXTO.search(sql):
+        return ""
+
+    return (
+        "\n\n[ATENCAO] Esta consulta de CADASTRO voltou ZERO LINHAS. Isso quase "
+        "sempre significa que o termo buscado esta em OUTRA tabela, nao que ele "
+        "nao exista. NAO prossiga com a analise assumindo que encontrou — o "
+        "resultado seria zero em tudo, com aparencia de dado real.\n"
+        "Antes de continuar, procure o termo em: PCFORNEC.FORNECEDOR, "
+        "PCFORNEC.FANTASIA, PCMARCA.MARCA e PCPRODUT.DESCRICAO. Marca e "
+        "fornecedor sao coisas diferentes (ex.: HAVAIANAS e marca da "
+        "ALPARGATAS). Se ainda assim nao achar, PERGUNTE ao usuario em vez de "
+        "seguir com conjunto vazio."
+    )
