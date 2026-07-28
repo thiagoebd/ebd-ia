@@ -1770,3 +1770,56 @@ faturado onde a pessoa tinha R$ 2,57 mi.
 
 A PCGMMETACOMBCOMPLE nao tem filial nem RCA — so CODMETA e CODCOMBINACAO.
 Sempre amarrar pelo CODMETA especifico.
+
+
+## #84 - Preco e por REGIAO: o de-para e NUMREGIAOPADRAO, nao NUMREGIAO
+
+`PCTABPR` tem chave CODPROD + NUMREGIAO e NAO tem CODFILIAL.
+
+  ERRADO: PCFILIAL.NUMREGIAO        -> NULO em todas as 21 filiais
+  CERTO:  PCFILIAL.NUMREGIAOPADRAO
+
+Erro real (28/07/2026): usei NUMREGIAO num subselect, veio nulo, e quatro
+blocos de analise voltaram vazios sem erro de SQL.
+
+E ANTES disso eu cruzei PCTABPR (88 regioes) com custo da filial 18 sem
+de-para nenhum — o resultado parecia plausivel e estava inflado.
+
+## #85 - PCTABPR.INDICEPRECO e coluna MORTA (1,0 em 100%)
+
+Vale exatamente 1,0 nas 1.919.086 linhas. NAO e o indice da formula da rotina
+201, que e calculado na hora e nao fica gravado.
+
+  ERRADO: PVENDA = CUSTOPRECIFIC / INDICEPRECO   -> bate em 812 de 204.960
+
+O indice IMPLICITO (`CUSTOPRECIFIC / PVENDA`) e o que tem significado: varia de
+0,37 a 0,88, com margem estavel em 20-23% e encargos de 21% a 63%.
+
+## #86 - O preco da EBD e formado sobre o CUSTO FINANCEIRO
+
+MEDIDO em SBC, regiao 81, 6.893 comparacoes: o CUSTOPRECIFIC bate com
+
+  CUSTOFIN           5.367   77,9%   <- este
+  CUSTOREAL          5.113   74,2%   (coincide quando nao ha custo financeiro)
+  CUSTOULTENT        2.944   42,7%
+  CUSTOREP (PCEST)   1.413   20,5%
+
+E o parametro 1907 da rotina 132 na pratica. O artigo da TOTVS confirma que o
+valor da ULTIMA ENTRADA nao entra na sugestao de preco.
+
+## #87 - Ha 4x mais regiao de preco do que filial, e as orfas distorcem
+
+Um produto de giro tem preco em 53 regioes; so 12 pertencem a alguma filial. As
+outras 41 nao tem filial vinculada.
+
+E o efeito e concreto: no NISSIN LAMEN GALINHA, as UNICAS 3 regioes com preco
+abaixo do custo de reposicao (12, 13 e 45) sao todas ORFAS. Olhando so a
+amostra, eu conclui "abaixo do custo em todas as regioes" — era falso.
+
+  SEMPRE, ao falar de preco de uma FILIAL:
+    JOIN EBD.PCFILIAL f ON t.NUMREGIAO = f.NUMREGIAOPADRAO
+
+  E ao varrer todas as regioes, dizer QUANTAS tem filial.
+
+Existe tambem a filial 70 (regiao 33, junto com Sao Luis) fora do mapa das 21
+filiais operacionais — conferir antes de somar.

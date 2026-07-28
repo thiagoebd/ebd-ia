@@ -1430,3 +1430,120 @@ compativel com o abatimento de ST e o filtro de fornecedor revenda.
 
 Para "Real vs Meta" a ponte esta validada, desde que se filtre corretamente
 (ver cicatriz #78).
+
+## 19. Custo, precificacao (rotina 201) e sugestao de compra
+
+Levantado e MEDIDO em 28/07/2026, com as formulas da TOTVS conferidas contra o
+banco da EBD.
+
+### 19.1 A taxonomia de custo — sao nove, nao um
+
+| Coluna | O que e | Onde |
+|---|---|---|
+| `CUSTOULTENT` | o que a ultima NF trouxe | PCEST |
+| `CUSTOREAL` | custo real MEDIO | PCEST |
+| `CUSTOFIN` | custo com o financeiro embutido | PCEST |
+| `CUSTOREP` | **custo de reposicao** = custo real medio + ICMS | PCPRODFILIAL (mais completo), PCEST, PCPRODUT |
+| `CUSTOULTENTFIN` | ultima entrada financeiro | PCEST |
+| `CUSTOPROXIMACOMPRA` | custo da proxima compra | PCPRODUT — **ZERADA** |
+| `CUSTOFORNEC` | custo do fornecedor (rotina 240) | PCPRODUT — **ZERADA** |
+| `PRECOFABRICA` | custo de reposicao futuro (rotina 240) | PCPRODUT — **ZERADA** |
+| `CUSTOPRECIFIC` | o custo que FORMOU o preco | PCTABPR |
+
+⚠️ `CUSTOREP` existe em TRES tabelas com o mesmo nome. Em SBC: PCPRODFILIAL
+10.733, PCEST 7.681, PCPRODUT 2.886. **Usar a PCPRODFILIAL.**
+
+A rotina 240 (politica comercial de compras) NAO e usada: custo fornecedor,
+preco fabrica, custo da proxima compra e ponto de reposicao estao todos em
+zero. `MARGEMMIN` da PCPRODUT tambem: nao ha piso de precificacao cadastrado.
+
+### 19.2 De qual custo sai o preco (parametro 1907)
+
+MEDIDO: o `CUSTOPRECIFIC` bate com o **CUSTO FINANCEIRO em 77,9%** dos casos
+(5.367 de 6.893 em SBC), custo real 74,2%, ultima entrada 42,7%, reposicao 20%.
+
+**A EBD precifica sobre o CUSTO FINANCEIRO.** O artigo da TOTVS confirma que o
+valor da ultima entrada NAO entra na sugestao de preco.
+
+### 19.3 A formula do preco sugerido (rotina 201)
+
+```
+Indice = (100 - (%impostos CMV + %CPMF + %frete KG + %frete terceiros/especial
+                 + %comissao + %margem ideal)) / 100
+Preco  = custo / Indice   (+ Comissao Freteiro, somada DEPOIS)
+Margem Zero = mesmo indice SEM a margem  ->  indice_mz = indice + margem/100
+```
+
+E MARKUP sobre o preco de venda, nao margem sobre custo. O `%frete KG` nao e
+fixo: `(Vl.FreteKg x Peso Bruto) / Custo Real x 100` — produto pesado e barato
+carrega frete proporcionalmente muito maior.
+
+⚠️ **A coluna `PCTABPR.INDICEPRECO` NAO e esse indice**: vale 1,0 em 100% das
+1,9 milhao de linhas. Coluna morta (cicatriz #85). O indice real e calculado na
+hora e nao fica gravado.
+
+O indice IMPLICITO (`CUSTOPRECIFIC / PVENDA`) tem distribuicao real, de 0,37 a
+0,88 em SBC. E a margem fica estavel em 20-23%: o que varia sao os ENCARGOS, de
+21% a 63%. Isso e ST, IPI e frete — margem e politica, imposto e circunstancia.
+
+### 19.4 A tabela de preco e por REGIAO, nao por filial
+
+`PCTABPR` tem chave `CODPROD + NUMREGIAO`. O de-para e
+**`PCFILIAL.NUMREGIAOPADRAO`** — a coluna `PCFILIAL.NUMREGIAO` esta NULA em
+todas as filiais (cicatriz #84).
+
+| Filial | Regiao | Filial | Regiao | Filial | Regiao |
+|---|---|---|---|---|---|
+| 01 Matriz | 31 | 02 SP | 1 | 03 Fortaleza | 39 |
+| 04 Sao Luis | 33 | 05 Duque | 3 | 06 Manaus | 19 |
+| 07 Macapa | 32 | 08 Boa Vista | 20 | 09 Juazeiro | 40 |
+| 10 Sao Goncalo | 5 | 11 Santarem | 21 | 12 Imperatriz | 34 |
+| 13 Taquara | 2 | 14 Pirai | 4 | 15 Guarulhos | 18 |
+| 16 Itapevi | 36 | 18 SBC | 81 | 21 Teresina | 97 |
+| 22 Maraba | 98 | 52 Petrolina | 42 | 53 Caruaru | 43 |
+
+⚠️ Ha MUITO MAIS regiao de preco do que filial: um produto de giro tem preco em
+53 regioes, e so 12 delas pertencem a alguma filial. **41 regioes sao orfas** —
+e e nelas que estao os precos abaixo do custo de reposicao. Antes de tratar
+preco baixo como problema comercial, verificar se a regiao tem filial.
+
+### 19.5 A sugestao de compra (rotina 220)
+
+```
+Sugestao = GIRO_DIA x (PRAZO_ENTREGA + TEMPO_REPOSICAO)
+         - ((ESTOQUE - RESERVADO - AVARIADO) + QT_PEDIDA)
+```
+
+Negativo = nao precisa comprar. Giro errado gera sugestao errada; recalculo nas
+rotinas 552 (diaria) e 507 (eventual, opcao Giro Mercadoria).
+
+⚠️ **`TEMREPOS` = 30 dias em 98,9% dos produtos.** E valor DEFAULT, nao gestao:
+item de giro alto e item que gira uma vez por mes tem a mesma cobertura alvo. E
+ele domina o calculo — o prazo de entrega medio e de ~10 dias.
+
+O `PRAZOENTREGA` do fornecedor esta preenchido em 39% dos SKUs de revenda de
+SBC, variando de 2,3% em Teresina a 93,6% em Sao Luis. O impacto na sugestao,
+porem, e de apenas 3,2% — o tempo de reposicao pesa muito mais.
+
+Cobertura real (`Est.Dia` = disponivel / giro dia): mediana de 24,7 dias em Sao
+Luis a 289,3 em Maraba, contra o mesmo parametro de 30 para todos.
+
+### 19.6 Preco abaixo do custo de reposicao — medido
+
+R$ 415 mil/mes de perda ESTIMADA (giro diario x 30 x diferenca), concentrada no
+Sudeste. Oito filiais com ZERO ocorrencia.
+
+| Filial | SKUs abaixo | % | Perda/mes |
+|---|---|---|---|
+| 10 Sao Goncalo | 15 | 0,9% | R$ 79.155 |
+| 05 Duque | 14 | 0,7% | R$ 78.064 |
+| 18 SBC | 46 | 2,0% | R$ 58.820 |
+| 16 Itapevi | 46 | 4,5% | R$ 52.961 |
+| 02 SP | 47 | 3,5% | R$ 50.138 |
+
+Em SBC a lista e quase toda BARILLA: massa com ovos a R$ 4,29 com reposicao de
+R$ 5,19 (-21,1%), com 621 unidades/dia de giro no espaguete.
+
+⚠️ E PROJECAO, nao realizado: multiplica giro por 30 dias e pela diferenca. Se a
+proxima compra vier mais barata, a perda nao se materializa. Serve para
+priorizar revisao de preco, NAO para lancar no resultado.

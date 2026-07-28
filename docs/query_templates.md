@@ -3515,3 +3515,170 @@ ORDER BY MES DESC, META_ABERTA DESC
 
 `AGUARDANDO_GEG` = comercial ja fechou a meta e o premio nao foi fechado.
 `DIAS_META_A_PREMIO` = quanto o G&G leva depois do comercial.
+
+# Custo, preco e sugestao de compra — templates T-PRC
+
+Regras que valem para TODOS os templates desta familia:
+- `PCTABPR` e por `CODPROD + NUMREGIAO`. O de-para e `PCFILIAL.NUMREGIAOPADRAO`
+  (a coluna `NUMREGIAO` da PCFILIAL e NULA — cicatriz #84).
+- `CUSTOREP` esta em tres tabelas: usar a **PCPRODFILIAL** (a mais completa).
+- `INDICEPRECO` e coluna morta (1,0 sempre). O indice util e o IMPLICITO,
+  `CUSTOPRECIFIC / PVENDA` (#85).
+- O preco e formado sobre o **CUSTO FINANCEIRO** (#86).
+
+## T-PRC01 — Margem real contra o custo de reposicao
+
+O preco de hoje aguenta a proxima compra? Margem cadastrada x margem real.
+
+```sql
+SELECT t.CODPROD,
+       SUBSTR(pr.DESCRICAO, 1, 26)                     AS PRODUTO,
+       ROUND(t.CUSTOPRECIFIC, 4)                       AS CUSTO_QUE_FORMOU,
+       ROUND(pf.CUSTOREP, 4)                           AS CUSTO_REPOSICAO,
+       ROUND(t.PVENDA, 4)                              AS PVENDA,
+       ROUND(t.MARGEM, 1)                              AS MARGEM_CADASTRADA,
+       ROUND(100 * (t.PVENDA - pf.CUSTOREP)
+             / NULLIF(t.PVENDA, 0), 1)                 AS MARGEM_REAL,
+       ROUND(t.CUSTOPRECIFIC / NULLIF(t.PVENDA, 0), 3) AS INDICE_IMPLICITO,
+       ROUND(e.QTGIRODIA, 1)                           AS GIRO_DIA
+FROM EBD.PCFILIAL f
+JOIN EBD.PCTABPR t       ON t.NUMREGIAO = f.NUMREGIAOPADRAO
+JOIN EBD.PCPRODFILIAL pf ON pf.CODPROD  = t.CODPROD AND pf.CODFILIAL = f.CODIGO
+JOIN EBD.PCEST e         ON e.CODPROD   = t.CODPROD AND e.CODFILIAL  = f.CODIGO
+JOIN EBD.PCPRODUT pr     ON pr.CODPROD  = t.CODPROD
+WHERE f.CODIGO = :codFilial
+  AND NVL(t.PVENDA, 0) > 0
+  AND NVL(pf.CUSTOREP, 0) > 0
+  AND NVL(e.QTGIRODIA, 0) > 0
+ORDER BY MARGEM_REAL
+FETCH FIRST 40 ROWS ONLY
+```
+
+## T-PRC02 — Preco ABAIXO do custo de reposicao (o que priorizar)
+
+```sql
+SELECT f.CODIGO                                         AS CODFILIAL,
+       t.CODPROD,
+       SUBSTR(pr.DESCRICAO, 1, 26)                      AS PRODUTO,
+       ROUND(pf.CUSTOREP, 4)                            AS REPOSICAO,
+       ROUND(t.PVENDA, 4)                               AS PVENDA,
+       ROUND(100 * (t.PVENDA - pf.CUSTOREP)
+             / NULLIF(t.PVENDA, 0), 1)                  AS MARGEM_REAL,
+       ROUND(e.QTGIRODIA, 1)                            AS GIRO_DIA,
+       ROUND(e.QTEST, 0)                                AS ESTOQUE,
+       ROUND(e.QTGIRODIA * 30 * (pf.CUSTOREP - t.PVENDA), 0) AS PERDA_MES_EST
+FROM EBD.PCFILIAL f
+JOIN EBD.PCTABPR t       ON t.NUMREGIAO = f.NUMREGIAOPADRAO
+JOIN EBD.PCPRODFILIAL pf ON pf.CODPROD  = t.CODPROD AND pf.CODFILIAL = f.CODIGO
+JOIN EBD.PCEST e         ON e.CODPROD   = t.CODPROD AND e.CODFILIAL  = f.CODIGO
+JOIN EBD.PCPRODUT pr     ON pr.CODPROD  = t.CODPROD
+WHERE f.CODIGO = :codFilial
+  AND NVL(t.PVENDA, 0) > 0
+  AND NVL(pf.CUSTOREP, 0) > 0
+  AND pf.CUSTOREP > t.PVENDA
+  AND NVL(e.QTGIRODIA, 0) > 0
+ORDER BY PERDA_MES_EST DESC
+FETCH FIRST 30 ROWS ONLY
+```
+
+⚠️ `PERDA_MES_EST` e PROJECAO: giro diario x 30 x diferenca. Se a proxima compra
+vier mais barata, nao se materializa. Serve para priorizar revisao de preco,
+NUNCA para lancar no resultado. Apresentar sempre como estimativa.
+
+Referencia medida (28/07/2026): R$ 415 mil/mes na empresa toda, com 8 filiais
+em zero. Em SBC a lista e quase toda Barilla.
+
+## T-PRC03 — Preco sugerido e ponto de equilibrio (margem zero)
+
+Reconstroi a conta da rotina 201 a partir do indice implicito.
+
+```sql
+SELECT t.CODPROD,
+       SUBSTR(pr.DESCRICAO, 1, 24)                          AS PRODUTO,
+       ROUND(t.CUSTOPRECIFIC, 4)                            AS CUSTO,
+       ROUND(t.MARGEM, 1)                                   AS MARGEM,
+       ROUND(t.CUSTOPRECIFIC / NULLIF(t.PVENDA, 0), 4)      AS INDICE,
+       ROUND(100 * (1 - t.CUSTOPRECIFIC / NULLIF(t.PVENDA, 0))
+             - t.MARGEM, 1)                                 AS ENCARGOS_PCT,
+       ROUND(t.PVENDA, 4)                                   AS PVENDA,
+       ROUND(t.CUSTOPRECIFIC
+             / NULLIF(t.CUSTOPRECIFIC / NULLIF(t.PVENDA, 0)
+                      + t.MARGEM / 100, 0), 4)              AS PRECO_MARGEM_ZERO,
+       ROUND(pf.CUSTOREP, 4)                                AS REPOSICAO
+FROM EBD.PCFILIAL f
+JOIN EBD.PCTABPR t       ON t.NUMREGIAO = f.NUMREGIAOPADRAO
+JOIN EBD.PCPRODFILIAL pf ON pf.CODPROD  = t.CODPROD AND pf.CODFILIAL = f.CODIGO
+JOIN EBD.PCPRODUT pr     ON pr.CODPROD  = t.CODPROD
+WHERE f.CODIGO = :codFilial
+  AND t.CODPROD = :codProd
+  AND NVL(t.PVENDA, 0) > 0
+  AND NVL(t.CUSTOPRECIFIC, 0) > 0
+```
+
+`PRECO_MARGEM_ZERO` e o piso: abaixo dele a venda nao cobre imposto, frete e
+comissao. `ENCARGOS_PCT` e o indice menos a margem — quanto do preco vai embora
+antes de sobrar qualquer coisa.
+
+## T-PRC04 — Dispersao de preco entre regioes (anomalia de cadastro)
+
+O mesmo produto com precos muito diferentes entre regioes costuma ser erro, nao
+politica.
+
+```sql
+SELECT t.CODPROD,
+       SUBSTR(pr.DESCRICAO, 1, 24)                      AS PRODUTO,
+       COUNT(DISTINCT t.NUMREGIAO)                      AS REGIOES,
+       SUM(CASE WHEN f.CODIGO IS NOT NULL THEN 1 ELSE 0 END) AS REGIOES_COM_FILIAL,
+       ROUND(MIN(t.PVENDA), 4)                          AS MENOR,
+       ROUND(MAX(t.PVENDA), 4)                          AS MAIOR,
+       ROUND(100 * (MAX(t.PVENDA) - MIN(t.PVENDA))
+             / NULLIF(MIN(t.PVENDA), 0), 0)             AS DISPERSAO_PCT
+FROM EBD.PCTABPR t
+JOIN EBD.PCPRODUT pr ON pr.CODPROD = t.CODPROD
+LEFT JOIN EBD.PCFILIAL f ON f.NUMREGIAOPADRAO = t.NUMREGIAO
+WHERE NVL(t.PVENDA, 0) > 0
+GROUP BY t.CODPROD, SUBSTR(pr.DESCRICAO, 1, 24)
+HAVING COUNT(DISTINCT t.NUMREGIAO) >= 10
+   AND (MAX(t.PVENDA) - MIN(t.PVENDA)) / NULLIF(MIN(t.PVENDA), 0) > 2
+ORDER BY DISPERSAO_PCT DESC
+FETCH FIRST 30 ROWS ONLY
+```
+
+Casos medidos em 28/07/2026 que sao claramente cadastro, nao politica:
+KINDER BUENO de R$ 4,29 a R$ 202,50 (4.620%), GOMETS de 0,58 a 12,19 (2.002%),
+FERRERO ROCHER de 5,79 a 78,88 (1.261%). Provavel mistura de unidade com
+embalagem master.
+
+Dispersao ate ~100% e normal e reflete politica regional: o NISSIN LAMEN varia
+101% entre a regiao mais barata e a mais cara, e isso e diferenca de mercado.
+
+## T-PRC05 — Sugestao de compra (formula da rotina 220)
+
+```sql
+SELECT e.CODPROD,
+       SUBSTR(pr.DESCRICAO, 1, 24)                          AS PRODUTO,
+       ROUND(e.QTGIRODIA, 2)                                AS GIRO_DIA,
+       NVL(pr.TEMREPOS, 0)                                  AS TEMPO_REPOS,
+       NVL(fo.PRAZOENTREGA, 0)                              AS PRAZO_ENTREGA,
+       ROUND(NVL(e.QTEST, 0), 0)                            AS ESTOQUE,
+       ROUND(NVL(e.QTRESERV, 0), 0)                         AS RESERVADO,
+       ROUND(NVL(e.QTPEDIDA, 0), 0)                         AS JA_PEDIDO,
+       ROUND((NVL(e.QTEST,0) - NVL(e.QTRESERV,0))
+             / NULLIF(e.QTGIRODIA, 0), 1)                   AS COBERTURA_DIAS,
+       ROUND(e.QTGIRODIA * (NVL(fo.PRAZOENTREGA,0) + NVL(pr.TEMREPOS,0))
+             - ((NVL(e.QTEST,0) - NVL(e.QTRESERV,0)) + NVL(e.QTPEDIDA,0)),
+             0)                                             AS SUGESTAO
+FROM EBD.PCEST e
+JOIN EBD.PCPRODFILIAL pf ON pf.CODPROD = e.CODPROD AND pf.CODFILIAL = e.CODFILIAL
+JOIN EBD.PCPRODUT pr     ON pr.CODPROD = e.CODPROD
+LEFT JOIN EBD.PCFORNEC fo ON fo.CODFORNEC = pr.CODFORNEC
+WHERE e.CODFILIAL = :codFilial
+  AND pf.REVENDA = 'S'
+  AND NVL(e.QTGIRODIA, 0) > 0
+ORDER BY SUGESTAO DESC
+FETCH FIRST 40 ROWS ONLY
+```
+
+Sugestao negativa = nao precisa comprar. `TEMREPOS` e 30 para 98,9% dos
+produtos (valor default, nao gestao) e domina o calculo — o prazo de entrega
+medio e de ~10 dias e esta preenchido em 39% dos SKUs de revenda.
