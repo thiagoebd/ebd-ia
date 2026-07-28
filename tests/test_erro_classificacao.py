@@ -130,3 +130,21 @@ def test_zero_linhas_sem_aviso_continua_curto():
         {"status": "ok", "result": {"columns": [], "rows": []}, "elapsed_ms": 12})
     assert saida.startswith("OK (0 linhas")
     assert "ATENCAO" not in saida
+
+
+# ---- ACESSO_RESTRITO: restricao de perfil, nao falha de banco ----
+
+def test_acesso_restrito_repassa_a_mensagem():
+    msg = ("ACESSO RESTRITO POR PERFIL. A consulta toca dados de 'comissao'. "
+           "NAO e falha do banco.")
+    out = _instrucao_por_erro("ACESSO_RESTRITO", msg)
+    assert "ACESSO RESTRITO POR PERFIL" in out
+    assert "FALHOU" not in out
+    assert "indispon" not in out.lower()
+
+
+def test_acesso_restrito_mantem_marcador_antifabulacao():
+    saida = format_result_for_claude(
+        {"status": "error",
+         "error": {"code": "ACESSO_RESTRITO", "message": "restrito"}})
+    assert saida.startswith("__ORACLE_ERROR__")

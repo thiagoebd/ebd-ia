@@ -316,6 +316,8 @@ class BearerAuthMiddleware(BaseHTTPMiddleware):
 # ============================================================
 
 try:
+    from app.policies import (carrega_politicas, mensagem_recusa as msg_perfil,
+                              recursos_violados)
     from app.preflight import (aviso_zero_linhas, colunas_invalidas,
                                mensagem_recusa, tabelas_fisicas)
 except ImportError:  # pragma: no cover
@@ -592,6 +594,33 @@ async def oracle_query(
             message=err or "SQL inválido",
             elapsed_ms=elapsed,
             user_context=user,
+        ).model_dump()
+
+    # 2.55 POLITICA POR PERFIL — ortogonal ao escopo de filial.
+    # O escopo diz QUAIS FILIAIS o usuario ve; isto diz QUAIS RECURSOS o
+    # PERFIL dele pode consultar. As duas se aplicam juntas.
+    try:
+        _tabs_pol = tabelas_fisicas(sql)
+        _viol = recursos_violados(_tabs_pol, getattr(user, "role", None),
+                                  carrega_politicas())
+    except Exception as _e:
+        # falha aqui NAO pode liberar: nega e registra
+        log.error("politica_perfil_falhou", erro=str(_e)[:150])
+        _viol = [{"recurso": "indeterminado", "tabelas": [],
+                  "roles_permitidos": ["admin"], "tabelas_atingidas": []}]
+    if _viol:
+        elapsed = (time.perf_counter() - start) * 1000
+        log.warning("acesso_restrito_por_perfil", user_id=user.user_id,
+                    role=getattr(user, "role", None),
+                    recursos=[v.get("recurso") for v in _viol],
+                    sql_prefix=sql[:200])
+        return ToolResponse.failure(
+            tool="oracle_query",
+            code="ACESSO_RESTRITO",
+            message=msg_perfil(_viol, getattr(user, "role", None)),
+            elapsed_ms=elapsed,
+            user_context=user,
+            details={"recursos": [v.get("recurso") for v in _viol]},
         ).model_dump()
 
     # 2.6 PRE-VOO DE COLUNAS — recusa antes de gastar ida ao Oracle

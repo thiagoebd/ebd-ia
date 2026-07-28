@@ -80,7 +80,13 @@ def _pg_lookup_user(identifier: str, canal=None):
     if not allowed:
         _pglog.warning("escopo vazio p/ %s — negando por seguranca", identifier)
         return None
-    _role = role if role in ("admin","gerente","supervisor") else "admin"
+    # fallback era "admin": role nulo ou com typo virava administrador.
+    # Agora cai no menor privilegio (analista) — ver policies.py.
+    try:
+        from app.policies import normaliza_role
+    except ImportError:  # pragma: no cover
+        from mcps.oracle.app.policies import normaliza_role  # type: ignore
+    _role = normaliza_role(role)
     _total = (filiais == "*") or (scope_kind == "brasil")
     return UserContext(
         user_id=identifier, nome=nome or identifier.split("@")[0],
