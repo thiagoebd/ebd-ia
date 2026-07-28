@@ -1681,7 +1681,23 @@ Medido na meta 118452:
 A linha META GERAL (CODTIPOMETA=4) repete o total das industrias e NAO PAGA
 comissao — peso nulo, PESO_X_NIVEL = 0. Serve so para acompanhamento.
 
-  SEMPRE: WHERE mc.CODINDICADOR = 16 AND mc.CODTIPOMETA = 3
+  PARA FATURAMENTO: WHERE mc.CODINDICADOR = 16 AND mc.CODTIPOMETA = 3
+
+⚠️ **ESTE FILTRO NAO VALE PARA COMISSAO.** O premio tem componente dos DOIS
+indicadores (16 faturamento e 5 positivacao). Filtrar CODINDICADOR = 16 ao
+somar VLCOMISSAO APAGA a parcela de positivacao.
+
+  PARA COMISSAO:    SUM(mc.VLCOMISSAO) sem filtro de indicador
+                    (mantendo DTPREMIACAO IS NOT NULL e o mes fechado)
+
+Medido em junho/2026: a positivacao vale ~15% do premio. Duque (05) R$ 546.371
+corretos contra R$ 466.195 somando so o indicador 16 — R$ 80.175 apagados.
+Fortaleza perde 19,3%, SBC 18,5%, Sao Luis 18,2%. Teresina e Santarem perdem 0%
+porque ninguem bateu 85% de positivacao — abaixo disso a faixa paga zero.
+
+Este erro JA ACONTECEU: em 28/07/2026 o agente gerou um PDF de comissionamento
+de Duque com todos os valores 15% menores, seguindo esta cicatriz ao pe da
+letra quando ela dizia so "SEMPRE".
 
 ## #79 - Nao existe apuracao de premio no MES CORRENTE
 
@@ -1721,3 +1737,36 @@ e 5% na mesma meta). NAO existe "percentual da industria".
 
 A PCPRODUT tem CODFORNEC (com indice PCPRODUT_IDX3); a raiz do grupo economico
 esta na PCFORNEC.
+
+
+## #82 - Existem DUAS bases de faturamento no GM, e elas diferem 3 a 6%
+
+O `Realizado` do indicador 16 (base da META) NAO e igual ao `Valor Faturado`
+que forma a comissao (base do PREMIO). Causa: PCGMPARAMETRO tem
+`ABATER_VALOR_ST_META = N` e `ABATER_VALOR_ST_COMISSAO = S` — o ICMS-ST fica na
+meta e sai da comissao.
+
+Medido em Duque, junho/2026, na tela do GM:
+
+  RCA        realizado da meta   base da comissao   dif
+  Rosana        2.663.616,37       2.569.535,98    -3,53%
+  Jorge           250.793,95         241.757,67    -3,60%
+  Gabriela        100.160,27          97.306,49    -2,85%
+  Renata          648.732,38         612.549,68    -5,58%
+
+REGRA:
+  "atingimento da meta"  -> PCGMMETACOMB.REALIZADO (indicador 16, tipo 3)
+  "base do premio"       -> SOMA(PCGMMETACOMBCOMPLE.VLFATPORPERCOM) por meta
+
+NUNCA chamar o realizado da meta de "faturamento base premio": o percentual de
+comissao sobre faturamento sai diluido. E a COMBCOMPLE tambem carrega linhas
+NEGATIVAS (devolucao) com PERCOMMOV = 0.
+
+## #83 - Subconsulta em PCGMMETACOMBCOMPLE precisa filtrar A META, nao a filial
+
+Erro real (28/07/2026): ao conferir uma RCA, o `IN (SELECT ... WHERE CODFILIAL
+= '05')` trouxe TODAS as metas da filial. Resultado: R$ 20,5 milhoes de
+faturado onde a pessoa tinha R$ 2,57 mi.
+
+A PCGMMETACOMBCOMPLE nao tem filial nem RCA — so CODMETA e CODCOMBINACAO.
+Sempre amarrar pelo CODMETA especifico.

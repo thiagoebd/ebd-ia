@@ -3383,6 +3383,64 @@ ORDER BY MES DESC, COMISSAO DESC
 e diferente por regiao, mercado e mix de industrias (18.4). Serve para a filial
 contra ela mesma ao longo dos meses.
 
+⚠️ E o denominador aqui e o REALIZADO DA META, que inclui ST. A base real do
+premio (sem ST) e 3 a 6% menor — vem da PCGMMETACOMBCOMPLE (cicatriz #82).
+Para o percentual exato, use o T-GM05.
+
+⚠️ A comissao soma TODOS os indicadores. NUNCA filtrar CODINDICADOR = 16 ao
+somar VLCOMISSAO: isso apaga a positivacao, que vale ~15% do premio (#78).
+
+## T-GM05 — Comissao sobre a base REAL do premio (sem ST)
+
+O percentual honesto: comissao dividida pela base que a formou, nao pelo
+realizado da meta.
+
+```sql
+WITH metas AS (
+    SELECT m.CODIGO AS CODMETA, pm.CODFILIAL, pe.MES, pe.ANO
+    FROM EBD.PCGMMETA m
+    JOIN EBD.PCGMPARAMMETA pm ON pm.CODIGO = m.CODPARAMMETA
+    JOIN EBD.PCGMPERIODO pe   ON pe.CODIGO = pm.CODPERIODO
+    WHERE pm.CODFILIAL = :codFilial
+),
+base AS (
+    SELECT cp.CODMETA, SUM(cp.VLFATPORPERCOM) AS BASE_PREMIO
+    FROM EBD.PCGMMETACOMBCOMPLE cp
+    JOIN metas mt ON mt.CODMETA = cp.CODMETA
+    GROUP BY cp.CODMETA
+),
+comissao AS (
+    SELECT mc.CODMETA,
+           SUM(mc.VLCOMISSAO) AS COMISSAO,
+           SUM(CASE WHEN mc.CODINDICADOR = 16 THEN mc.VLCOMISSAO END) AS POR_FATURAMENTO,
+           SUM(CASE WHEN mc.CODINDICADOR = 5  THEN mc.VLCOMISSAO END) AS POR_POSITIVACAO,
+           SUM(CASE WHEN mc.CODINDICADOR = 16 AND mc.CODTIPOMETA = 3
+                    THEN mc.REALIZADO END)                            AS REALIZADO_META
+    FROM EBD.PCGMMETACOMB mc
+    JOIN metas mt ON mt.CODMETA = mc.CODMETA
+    WHERE mc.DTPREMIACAO IS NOT NULL
+    GROUP BY mc.CODMETA
+)
+SELECT m.CODENTIDADEMETA                                  AS CODUSUR,
+       SUBSTR(NVL(u.NOME,'?'), 1, 26)                     AS RCA,
+       ROUND(b.BASE_PREMIO, 2)                            AS BASE_PREMIO,
+       ROUND(c.REALIZADO_META, 2)                         AS REALIZADO_META,
+       ROUND(c.COMISSAO, 2)                               AS COMISSAO,
+       ROUND(c.POR_FATURAMENTO, 2)                        AS POR_FATURAMENTO,
+       ROUND(c.POR_POSITIVACAO, 2)                        AS POR_POSITIVACAO,
+       ROUND(100 * c.COMISSAO / NULLIF(b.BASE_PREMIO, 0), 3) AS PCT_SOBRE_BASE
+FROM comissao c
+JOIN base b        ON b.CODMETA = c.CODMETA
+JOIN EBD.PCGMMETA m ON m.CODIGO = c.CODMETA
+LEFT JOIN EBD.PCUSUARI u ON u.CODUSUR = m.CODENTIDADEMETA
+WHERE c.COMISSAO > 0
+ORDER BY c.COMISSAO DESC
+```
+
+Referencia medida (Duque 05, junho/2026): Rosana COD 228 tem base de premio
+R$ 2.569.535,98, realizado de meta R$ 2.663.616,37, comissao total
+R$ 38.928,47 (32.761,58 de faturamento + 6.166,89 de positivacao).
+
 ## T-GM03 — Conferencia: recalcular a comissao e comparar com o gravado
 
 Refaz a conta do zero e confronta com o que o GM gravou. E a rotina 111 feita
