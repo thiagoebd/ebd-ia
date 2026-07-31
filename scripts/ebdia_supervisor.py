@@ -33,6 +33,7 @@ from dataclasses import dataclass, field
 REPO = os.environ.get("EBDIA_REPO", "/home/thiago/projects/ebd-ia")
 CONTAINERS = ("ebdia_postgres", "ebdia_redis", "ebdia_mcp_oracle")
 UNIDADE_GATEWAY = "ebdia-gateway"
+UNIDADE_TELEGRAM = "ebdia-telegram"
 URL_GATEWAY = "http://127.0.0.1:8000/health"
 ESPERA_APOS_ACAO = 8
 
@@ -151,6 +152,29 @@ def checa_gateway(consertar: bool) -> Resultado:
                      acoes=[f"systemctl {acao} {UNIDADE_GATEWAY}"])
 
 
+def checa_telegram(consertar: bool) -> Resultado:
+    """O bot faz polling: nao tem porta. Vale unidade ativa + processo vivo."""
+    rc_u, estado = sh(["systemctl", "is-active", UNIDADE_TELEGRAM], timeout=15)
+    if "could not be found" in estado or estado == "inactive" and rc_u == 4:
+        return Resultado("telegram", True, "unidade nao instalada (ignorado)")
+    rc_p, _ = sh(["pgrep", "-f", "telegram_bot/main.py"], timeout=10)
+    vivo = rc_p == 0
+    if estado == "active" and vivo:
+        return Resultado("telegram", True, "active, processo vivo")
+    detalhe = f"systemd={estado} processo={'vivo' if vivo else 'morto'}"
+    if not consertar:
+        return Resultado("telegram", False, detalhe)
+    acao = "restart" if estado == "active" else "start"
+    sh(["sudo", "-n", "systemctl", acao, UNIDADE_TELEGRAM], timeout=90)
+    time.sleep(ESPERA_APOS_ACAO)
+    _, estado2 = sh(["systemctl", "is-active", UNIDADE_TELEGRAM], timeout=15)
+    rc_p2, _ = sh(["pgrep", "-f", "telegram_bot/main.py"], timeout=10)
+    ok = estado2 == "active" and rc_p2 == 0
+    return Resultado("telegram", ok, f"{estado2}, processo "
+                     f"{'vivo' if rc_p2 == 0 else 'morto'}", consertado=ok,
+                     acoes=[f"systemctl {acao} {UNIDADE_TELEGRAM}"])
+
+
 def checa_nginx(consertar: bool) -> Resultado:
     if not shutil.which("nginx"):
         return Resultado("nginx", True, "nao instalado (ignorado)")
@@ -205,6 +229,7 @@ def main() -> int:
     if r_docker.ok:
         res.extend(checa_containers(consertar))
     res.append(checa_gateway(consertar))
+    res.append(checa_telegram(consertar))
     res.append(checa_nginx(consertar))
     res.extend(checa_disco_memoria())
 

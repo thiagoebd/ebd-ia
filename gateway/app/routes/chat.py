@@ -57,6 +57,22 @@ def _title_from(text: str) -> str:
     return (t[:42] + "…") if len(t) > 42 else (t or "Nova conversa")
 
 
+def _e_uuid(valor) -> bool:
+    """True se o id e um UUID de verdade.
+
+    O frontend manda `tmp-<timestamp>` para conversa nova (App.tsx). Sem esta
+    checagem o asyncpg levanta ValueError e o stream morre em silencio.
+    """
+    if not valor:
+        return False
+    try:
+        import uuid as _uuid
+        _uuid.UUID(str(valor))
+        return True
+    except (ValueError, AttributeError, TypeError):
+        return False
+
+
 @router.post("/chat")
 async def chat(body: ChatRequest, claims: dict = Depends(verify_token)):
     oid = claims.get("oid")
@@ -73,6 +89,12 @@ async def chat(body: ChatRequest, claims: dict = Depends(verify_token)):
         conv_id = body.conversation_id
         new_conv = False
         try:
+            if conv_id and not _e_uuid(conv_id):
+                # frontend manda tmp-<timestamp> em conversa nova: nao e UUID,
+                # e passar isso ao Postgres derruba o stream inteiro
+                logger.info("conversation_id nao-UUID (%r): tratando como nova",
+                            str(conv_id)[:40])
+                conv_id = None
             if conv_id:
                 conv = await db.get_conversation(conv_id, user_id)
                 if not conv:
@@ -214,6 +236,15 @@ async def chat(body: ChatRequest, claims: dict = Depends(verify_token)):
                                          {"text": assistant_text, "tools": tools_used})
         except Exception as e:
             logger.exception("Erro no /api/chat stream")
+            # NAO deixar o stream morrer mudo: ate 31/07/2026 uma excecao aqui
+            # terminava o stream sem emitir nada e o usuario via bolha vazia
+            try:
+                yield _sse({"type": "token", "text":
+                            "Tive um erro interno ao processar essa pergunta. "
+                            "Tente de novo; se persistir, avise a TI."})
+                yield _sse({"type": "done", "stop_reason": "erro_interno"})
+            except Exception:
+                pass
             yield _sse({"type": "error", "detail": str(e)})
 
     return StreamingResponse(

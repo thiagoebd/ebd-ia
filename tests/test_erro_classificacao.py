@@ -6,7 +6,7 @@ tentativa e o _MAX_SQL_FAILS=3 nunca era usado. Erro de SQL e RECUPERAVEL.
 """
 import pytest
 
-from conftest import BRIDGE
+from conftest import BRIDGE, RAIZ
 
 _instrucao_por_erro = BRIDGE._instrucao_por_erro
 format_result_for_claude = BRIDGE.format_result_for_claude
@@ -148,3 +148,35 @@ def test_acesso_restrito_mantem_marcador_antifabulacao():
         {"status": "error",
          "error": {"code": "ACESSO_RESTRITO", "message": "restrito"}})
     assert saida.startswith("__ORACLE_ERROR__")
+
+
+# ---- conversation_id nao-UUID (bug de 31/07/2026) ----
+
+def _e_uuid_do_projeto():
+    import re as _re
+    from pathlib import Path as _P
+    src = (RAIZ / "gateway" / "app" / "routes" / "chat.py").read_text(encoding="utf-8")
+    i = src.index("def _e_uuid")
+    j = src.index("@router.post", i)
+    ns = {}
+    exec(src[i:j], ns)
+    return ns["_e_uuid"]
+
+
+def test_tmp_id_do_frontend_nao_e_uuid():
+    """`tmp-<timestamp>` derrubava o stream inteiro com ValueError."""
+    f = _e_uuid_do_projeto()
+    assert f("tmp-1785244800403") is False
+    assert f("tmp-1") is False
+
+
+def test_uuid_valido_passa():
+    f = _e_uuid_do_projeto()
+    assert f("4d8da97c-e441-440c-82cf-15b86aed8413") is True
+    assert f("4D8DA97C-E441-440C-82CF-15B86AED8413") is True
+
+
+def test_vazio_e_lixo_nao_sao_uuid():
+    f = _e_uuid_do_projeto()
+    for v in (None, "", "  ", 0, [], {}, "abc", "12345"):
+        assert f(v) is False, v
