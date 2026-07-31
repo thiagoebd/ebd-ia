@@ -321,7 +321,9 @@ async def run_turn(
 
 
 
-from app.loop_policy import AVISO_CONCLUA, decidir_parada
+from app.loop_policy import (AVISO_CONCLUA, MOTIVO_MAX_ITERACOES,
+                             MOTIVO_PARCIAL, MOTIVO_SEM_TEXTO,
+                             decidir_parada, mensagem_silencio)
 
 
 async def run_turn_stream(
@@ -447,6 +449,22 @@ async def run_turn_stream(
             _sql = [ok for (n, ok) in tool_outcomes if n == "oracle_query"]
             if _sql and not any(_sql):
                 text_acc = FALHA_WINTHOR
+
+            # SILENCIO A: o modelo pode encerrar sem escrever nada (ex.: so
+            # ThinkingBlock). Como o texto e emitido AQUI e em nenhum outro
+            # lugar, text_acc vazio = bolha vazia para o usuario.
+            # So age quando esta vazio: NUNCA altera resposta que funcionou.
+            if not (text_acc or "").strip():
+                text_acc = mensagem_silencio(MOTIVO_SEM_TEXTO, tool_outcomes)
+                logger.warning(
+                    "SILENCIO A: modelo terminou sem texto. model=%s "
+                    "iterations=%s stop_reason=%s output_tokens=%s tools=%s",
+                    _m, iterations,
+                    getattr(final_message, "stop_reason", "?"),
+                    getattr(getattr(final_message, "usage", None),
+                            "output_tokens", "?"),
+                    [n for (n, _o) in tool_outcomes])
+
             try:
                 from app.grounding import check_grounding, log_grounding
                 log_grounding(check_grounding(text_acc, _tool_contents),
@@ -568,6 +586,15 @@ async def run_turn_stream(
             yield {"type": "status", "text": "Fechando com os dados obtidos..."}
             continue
         if _decisao == "parar":
+            # SILENCIO C: este ramo nunca emitiu token — o texto so sai na
+            # saida A, que nao foi alcancada. Sempre mudo ate agora.
+            _msg_c = mensagem_silencio(MOTIVO_PARCIAL, tool_outcomes)
+            logger.warning(
+                "SILENCIO C: encerrou parcial sem texto. model=%s "
+                "iterations=%s tools=%s", _m, iterations,
+                [n for (n, _o) in tool_outcomes])
+            for _i in range(0, len(_msg_c), 60):
+                yield {"type": "token", "text": _msg_c[_i:_i + 60]}
             yield {
                 "type": "done",
                 "history": messages,
@@ -581,6 +608,13 @@ async def run_turn_stream(
         yield {"type": "status", "text": "Analisando os dados..."}
 
     # Esgotou iteracoes
+    # SILENCIO D: idem — nenhum token foi emitido neste caminho.
+    _msg_d = mensagem_silencio(MOTIVO_MAX_ITERACOES, tool_outcomes)
+    logger.warning(
+        "SILENCIO D: esgotou %s iteracoes sem texto. tools=%s",
+        iterations, [n for (n, _o) in tool_outcomes])
+    for _i in range(0, len(_msg_d), 60):
+        yield {"type": "token", "text": _msg_d[_i:_i + 60]}
     yield {
         "type": "done",
         "history": messages,
