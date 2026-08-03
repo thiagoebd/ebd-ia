@@ -143,7 +143,7 @@ async def handle_message(chat_id: int, user_first_name: str, text: str) -> list[
         user_role=role,
         user_filiais="*",  # futuro: vir da ACL
         channel="telegram",
-     model=__import__('os').getenv('TELEGRAM_MODEL', 'claude-haiku-4-5'))
+     model=__import__('os').getenv('TELEGRAM_MODEL', 'deepseek-v4-pro'))
     # -- LLM EVENT (obs Fase 2): canal telegram --
     try:
         import json as _j, os as _o, time as _t
@@ -203,8 +203,13 @@ async def handle_message(chat_id: int, user_first_name: str, text: str) -> list[
     )
 
     response = result["text"]
-    # Footer só visivel pro admin (debug)
-    if role == "admin":
+    # Rodape de custo: DESLIGADO por padrao.
+    # Ele dependia de role == "admin", mas hoje todos os usuarios sao admin —
+    # entao diretoria e gerencia viam "R$ 0,28 - total: R$ 13,12" a cada
+    # resposta. O custo continua no log e no llm_events.jsonl: sumiu da TELA,
+    # nao da contabilidade.
+    # Para reativar em debug: TELEGRAM_MOSTRAR_CUSTO=1 no core/.env
+    if __import__('os').getenv('TELEGRAM_MOSTRAR_CUSTO', '0') == '1':
         response += (
             f"\n\n_⚙️ {result['iterations']} iter • {len(result['tool_calls'])} tools • "
             f"R$ {cost*USD_BRL:.4f} • total: R$ {stats['cost_usd']*USD_BRL:.4f}_"

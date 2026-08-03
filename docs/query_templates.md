@@ -3682,3 +3682,54 @@ FETCH FIRST 40 ROWS ONLY
 Sugestao negativa = nao precisa comprar. `TEMREPOS` e 30 para 98,9% dos
 produtos (valor default, nao gestao) e domina o calculo — o prazo de entrega
 medio e de ~10 dias e esta preenchido em 39% dos SKUs de revenda.
+
+## T-PAINEL01 — Painel Diretoria (padrao de conteudo)
+
+Quando pedirem "painel da diretoria", trazer SEMPRE estes dados, do mes que for
+pedido. **Sem excecao e sem negociacao**: mes fechado ou mes com uma unica nota
+emitida, monta o painel com o que existir. NAO perguntar qual mes, NAO oferecer
+opcoes, NAO propor correcao de mapa, NAO recusar por dado parcial.
+
+Se o usuario nao disser o mes, e o **mes corrente**.
+
+### O que o painel traz
+
+**Operacional**
+notas emitidas · SKUs vendidos · clientes unicos · RCAs ativos · ticket medio ·
+unidades · media por dia
+
+**Financeiro**
+bruto · devolucoes (valor e % sobre o bruto) · liquido · meta · atingimento
+
+**Top 10 Industrias** por faturamento bruto
+
+**Regionais** com % de atingimento e semaforo
+✅ >= 100% · 🟡 97 a 99,9% · 🔴 < 97%
+
+**Analise critica** — 2 a 4 frases sobre os dados acima: o que explica o
+resultado, quem puxou para cima, onde esta o problema. Direta e sem rodeio,
+citando SO numeros que estao no proprio painel. Nao inventar, nao projetar.
+
+**Fonte** no rodape: `Faturamento Liquido EBD · {mes}/{ano}`
+
+### As tres regras de dado
+
+1. Faturamento e **LIQUIDO**: `VIEW_VENDAS_RESUMO_FATURAMENTO` com
+   **`CONDVENDA = 1`** (valor `VLATEND`, data `DTSAIDA`), menos
+   `VIEW_DEVOL_RESUMO_FATURAMENTO` (CONDVENDA = 1) e
+   `VIEW_DEVOL_RESUMO_FATURAVULSA`.
+
+2. **`CONDVENDA = 1` e obrigatorio.** Sem ele entram transferencias entre
+   filiais: 17, 23 e 70 aparecem com R$ 12,7 mi que nao e venda — todas com
+   `CONDVENDA = 10` e 1 ou 2 "clientes" que sao o proprio grupo.
+
+3. Meta: `PCMETA` com **`TIPOMETA = 'FL'`** apenas. F, FL e M trazem o MESMO
+   valor por filial — somar mais de um triplica. Referencia: julho/2026 =
+   R$ 328.435.838,79 nas 21 filiais.
+
+Filiais comerciais sao **21**. Mapa regional: secao 4 do knowledge.md.
+
+### Formatacao
+
+Valores em milhoes com uma casa (R$ 344,7M); contagens com separador de milhar
+(152.346); percentuais com uma casa (100,6%).

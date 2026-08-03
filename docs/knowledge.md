@@ -1547,3 +1547,40 @@ R$ 5,19 (-21,1%), com 621 unidades/dia de giro no espaguete.
 ⚠️ E PROJECAO, nao realizado: multiplica giro por 30 dias e pela diferenca. Se a
 proxima compra vier mais barata, a perda nao se materializa. Serve para
 priorizar revisao de preco, NAO para lancar no resultado.
+
+
+## Filial 70 — ARMAZEM GERAL SL KIBON (nao e filial comercial)
+
+MEDIDO no banco em 03/08/2026. **Correcao:** a informacao inicial de que a
+filial 70 teria "faturamento zero em 2026" estava ERRADA — ela tem notas.
+
+| | |
+|---|---|
+| Fantasia | ARMAZEM GERAL SL KIBON |
+| **Razao social** | **SOL NASCENTE LTDA** (diferente das demais, que sao EMPRESA BRASILEIRA DE DISTRIBUICAO) |
+| Local | Sao Luis/MA, `NUMREGIAOPADRAO` = 33 (mesma da filial 04) |
+| Notas em julho/2026 | **200** (R$ 1.042.568,04) |
+| Especie | 113 `TP` (transferencia) + 87 `NF` |
+| CONDVENDA | **10 em todas** — nenhuma com 1 |
+| Clientes | SOL NASCENTE LTDA (a propria) e EMPRESA BRASILEIRA DE DISTRIBUICAO |
+
+As duas pontas sao do grupo: e movimentacao entre CNPJs, nao venda a terceiro.
+Por isso a 70 nao entra em ranking de filial, meta nem regional — o mapa
+oficial tem 21 filiais comerciais e ela nao esta entre elas.
+
+### CONDVENDA = 10 separa movimentacao de venda
+
+Este e o achado que importa alem da filial 70. Medido em julho/2026:
+
+| Filial | Nome | Notas | Valor | CONDVENDA | Clientes |
+|---|---|---|---|---|---|
+| 17 | EBD SAO PEDRO ALDEIA | 687 | R$ 7,83 mi | **10** | 1 |
+| 23 | EBD PETROPOLIS | 392 | R$ 3,85 mi | **10** | 1 |
+| 70 | ARMAZEM GERAL SL KIBON | 200 | R$ 1,04 mi | **10** | 2 |
+
+Com `CONDVENDA = 1` as tres devolvem ZERO. Sem o filtro, entram R$ 12,7 mi de
+movimentacao interna no faturamento.
+
+⚠️ PENDENTE: o significado completo de cada `CONDVENDA` nao esta mapeado.
+Sabemos que **1 = venda** (regra ja documentada) e que **10 = movimentacao
+intragrupo**. Os demais codigos precisam ser levantados.

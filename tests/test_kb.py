@@ -49,7 +49,7 @@ def test_secoes_do_knowledge_unicas():
 
 
 def test_todo_template_tem_sql():
-    for tid in re.findall(r"^## (T-[A-Z]+\d\d) ", KB, re.M):
+    for tid in set(re.findall(r"^## (T-[A-Z]+\d\d) ", KB, re.M)) - SEM_SQL:
         corpo = re.search(rf"^## {tid} .*?\n(.*?)(?=^## |\Z)", KB, re.M | re.S)
         assert corpo and "```sql" in corpo.group(1), f"{tid} sem bloco sql"
 
@@ -80,9 +80,14 @@ def test_sql_do_template_parseia(tid, sql):
         pytest.fail(f"{tid} nao parseia em Oracle: {str(e)[:160]}")
 
 
+# Templates que sao PADRAO DE CONTEUDO, nao consulta: definem o que a resposta
+# deve trazer e deixam o modelo montar a query. Nao tem bloco SQL de proposito.
+SEM_SQL = {"T-PAINEL01"}
+
+
 def test_todos_os_templates_cobertos():
     """Se um template ficar sem SQL, o parametrize acima o ignora em silencio."""
-    titulos = set(re.findall(r"^## (T-[A-Z]+\d\d) ", KB, re.M))
+    titulos = set(re.findall(r"^## (T-[A-Z]+\d\d) ", KB, re.M)) - SEM_SQL
     cobertos = {t for t, _ in _template_sql()}
     assert titulos == cobertos, f"template sem SQL: {sorted(titulos - cobertos)}"
 
