@@ -82,7 +82,7 @@ def test_sql_do_template_parseia(tid, sql):
 
 # Templates que sao PADRAO DE CONTEUDO, nao consulta: definem o que a resposta
 # deve trazer e deixam o modelo montar a query. Nao tem bloco SQL de proposito.
-SEM_SQL = {"T-PAINEL01", "T-LOJA-PAINEL01"}
+SEM_SQL = {"T-PAINEL01", "T-LOJA-PAINEL01", "T-POTENCIAL01"}
 
 
 def test_todos_os_templates_cobertos():

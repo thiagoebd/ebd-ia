@@ -1834,6 +1834,7 @@ denominador (faturamento total da companhia).
 FROM EBD.PCPEDC p
 WHERE p.DATA >= :inicio AND p.DATA < :fim
   AND p.POSICAO = 'F'                    -- FATURADO (secao 11.6)
+  AND p.DTCANCEL IS NULL                 -- cancelado NUNCA conta como venda
   -- canal:       AND p.ORIGEMPED='W' AND p.CODEMITENTE=7777
   -- B2B:         AND NVL(cl.CODATV1,0) <> 31   (B2E e = 31, funcionarios)
   -- tradicional: AND NVL(p.ORIGEMPED,'X') <> 'W'

@@ -3803,6 +3803,21 @@ supervisor e RCA. O objetivo e achar **maturidade digital**, nao faturamento
 absoluto: participacao digital da carteira, novos clientes digitais,
 recorrentes e recuperados.
 
+**7.1 Representatividade no B2B por filial** — BLOCO OBRIGATORIO, logo apos o
+ranking:
+
+    Rep% da filial = Fat. Loja EBD B2B (filial) / Fat. B2B TOTAL da filial
+
+Denominador: faturamento B2B da filial (clientes externos, `CODATV1 <> 31`),
+incluindo a propria loja. Os dois lados excluem devolucao, cancelamento e
+bonificacao — mesmos criterios contabeis. Ordenar por Rep% decrescente, com
+`% de pedidos digitais` e os dois tickets ao lado.
+
+Referencia ago/2026 (parcial ate 28/08): **BR 0,46%** e 1,63% dos pedidos ·
+topo SP 1,99% · Itapevi 1,63% · SBC 1,48% · Guarulhos 1,00% · alerta **Duque
+0,05%** (R$ 35M de B2B com 20 clientes online) · Teresina 0,04% · Macapa e
+Maraba 0%.
+
 **8. Produtos e industrias** — por fornecedor, departamento, categoria, marca
 e SKU: faturamento, margem, pedidos, clientes, unidades, participacao,
 crescimento e o comparativo online x offline. Objetivo: achar o que tem
@@ -3827,9 +3842,24 @@ numeros do proprio painel.
 - Margem: variacao abaixo de 1 ponto percentual e **estavel**, nao "queda".
 - Concentracao: Top 10 clientes ate ~15% do canal e saudavel; acima disso e
   dependencia.
+- **Ticket da Loja em torno de 1/3 do ticket offline e PADRAO SAUDAVEL** de
+  e-commerce (pedidos menores e mais frequentes). Nao reportar como problema.
+- Benchmark do setor (ABAD/NielsenIQ 2026, base 2025, distribuidor com
+  entrega): **~6% dos pedidos** via e-commerce — referencia de espaco a
+  ocupar, nao meta.
+- Rep% alto com base pequena = qualidade de cliente no canal. Filial grande
+  com Rep% perto de zero = alerta de adocao digital.
 - Mes corrente sai marcado como **parcial**.
 - Se um indicador depender de dado que nao existe, **dizer que nao existe** —
   nunca estimar. Limitacao de dado se declara, nao se contorna.
+
+### Variante YTD
+
+"painel YTD da loja", "acumulado do ano" -> mesmo painel, periodo 01/01 ate
+hoje, comparado com o MESMO periodo do ano anterior. Estrutura em 7 blocos:
+visao executiva YTD · evolucao mensal 2025 x 2026 · saudabilidade ·
+performance por filial · representatividade no B2B (7.1) · industrias e
+produtos · diagnostico. Mesmos filtros e mesmas regras de leitura.
 
 ### Escopo — ENTREGAR OS 11 BLOCOS, SEMPRE
 
@@ -3857,3 +3887,65 @@ causa de um bloco.
 recompra e retencao: tudo na cicatriz #88.** Ela tem os totais medidos para
 conferir antes de escrever, e a regra de que `ticket x pedidos` precisa fechar
 com o total.
+
+## T-POTENCIAL01 — Potencial de Vendas por Comportamento de Canal
+
+Disparo: "potencial de vendas por canal", "comparar quem compra online com
+quem nao compra", "relatorio de potencial por comportamento de canal".
+
+Mede e compara o potencial entre quem compra na Loja EBD, quem compra so no
+tradicional e quem compra nos dois. **A comparacao so vale equalizada** — sem
+isso, comparar um atacadista de Sao Paulo com um mercadinho de Macapa nao diz
+nada.
+
+### Nomenclatura OBRIGATORIA
+
+**"So Loja EBD"** (NUNCA "so-lojista") · **"So Tradicional"** · **"Hibrido"**.
+
+### Duas janelas distintas
+
+- **Classificacao** (quem e o que): ultimos 12 meses.
+- **Metricas**: periodo selecionado, default mes corrente, marcado "parcial
+  X de Y dias".
+
+So considerar clientes ativos na janela de classificacao.
+
+### Equalizacao — o que torna a comparacao justa
+
+Calcular por **CELULA = ramo de atividade x faixa de porte x regional**, e
+comparar SOMENTE dentro da mesma celula.
+
+Faixas de porte (faturamento anual): **A** ate R$ 10 mil · **B** R$ 10 a
+50 mil · **C** R$ 50 a 200 mil · **D** acima de R$ 200 mil.
+
+### Metricas por celula
+
+faturamento medio por cliente · pedidos por cliente · ticket medio · mix de
+SKUs · recencia media · evolucao decomposta em base x frequencia x ticket ·
+concentracao (top 10% do faturamento)
+
+### Os 11 blocos — entregar TODOS
+
+1. **Resumo executivo** — os 3 segmentos lado a lado, COM e SEM equalizacao
+2. **Matriz ramo x porte** — onde cada segmento concentra clientes
+3. **Potencial equalizado por celula** — o comparativo justo
+4. **Hibridos em profundidade** — o que o digital adiciona; % digital da carteira
+5. **So Loja EBD** — perfil, ticket, potencial de upgrade
+6. **Incrementalidade** — antes/depois da adocao, janela de 90 dias
+7. **Performance por filial e regional** — maturidade digital da carteira
+8. **Segmentacao RFM** — novos, recorrentes, em risco, inativos
+9. **Alertas** — concentracao, queda de frequencia, inativos crescendo
+10. **Diagnostico executivo** — 3 a 6 frases citando so numeros do relatorio
+11. **Anexo metodologico** — as regras de segmentacao e equalizacao, auditavel
+
+### Fonte e conferencia
+
+Canal, colunas e criterio contabil: **cicatriz #88** (PCPEDC, `POSICAO='F'`,
+`DTCANCEL IS NULL`, `VLATEND`). Tradicional = as demais vendas reais, sem
+bonificacao, transferencia, consignacao nem cancelado.
+
+⚠️ **Conferencia anti-fabulacao: `ticket x numero de pedidos` tem que dar o
+total do segmento.** Nao escrever total sem fazer essa conta.
+
+Saida: PDF executivo + Excel com as celulas equalizadas + as tabelas na
+resposta. Rodape de fonte em linguagem de negocio, sem schema tecnico.
