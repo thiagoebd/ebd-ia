@@ -3852,3 +3852,8 @@ Dois indicadores respondem a pergunta central e NUNCA podem faltar:
 Se a consulta de um bloco falhar ou estourar tempo, seguir com os demais e
 listar no fim o que nao foi possivel apurar. NUNCA abortar o painel inteiro por
 causa de um bloco.
+
+**Fonte, colunas, numeros de referencia, incrementalidade e a diferenca entre
+recompra e retencao: tudo na cicatriz #88.** Ela tem os totais medidos para
+conferir antes de escrever, e a regra de que `ticket x pedidos` precisa fechar
+com o total.

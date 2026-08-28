@@ -1824,17 +1824,76 @@ amostra, eu conclui "abaixo do custo em todas as regioes" — era falso.
 Existe tambem a filial 70 (regiao 33, junto com Sao Luis) fora do mapa das 21
 filiais operacionais — conferir antes de somar.
 
+## #88 - Canal Loja EBD: fonte, colunas e metricas
 
-## #88 - A view de faturamento NAO isola o canal Loja EBD
+`VIEW_VENDAS_RESUMO_FATURAMENTO` **nao tem** `ORIGEMPED` nem `CODEMITENTE`
+(ORA-00904). O canal so e isolavel pela **PCPEDC**; a view serve so como
+denominador (faturamento total da companhia).
 
-`VIEW_VENDAS_RESUMO_FATURAMENTO` nao tem `ORIGEMPED` nem `CODEMITENTE`.
-Filtrar por elas ali devolve ORA-00904.
+```sql
+FROM EBD.PCPEDC p
+WHERE p.DATA >= :inicio AND p.DATA < :fim
+  AND p.POSICAO = 'F'                    -- FATURADO (secao 11.6)
+  -- canal:       AND p.ORIGEMPED='W' AND p.CODEMITENTE=7777
+  -- B2B:         AND NVL(cl.CODATV1,0) <> 31   (B2E e = 31, funcionarios)
+  -- tradicional: AND NVL(p.ORIGEMPED,'X') <> 'W'
+```
 
-  ERRADO: FROM VIEW_VENDAS_RESUMO_FATURAMENTO WHERE ORIGEMPED = 'W'
-  CERTO:  o canal sai da PCPEDC (ORIGEMPED='W' AND CODEMITENTE=7777)
+⚠️ A coluna e **`VLATEND`**, nao `VLTOTAL` — divergem 7,5%.
 
-A view serve para o DENOMINADOR — faturamento total da companhia, para calcular
-a participacao da Loja. O recorte do canal vem da PCPEDC.
+### Numeros de referencia (medidos 28/08/2026, 01 a 28/08)
 
-B2B x B2E: `CODATV1 <> 31` e B2B; `= 31` e B2E (funcionarios). Regra completa
-na secao 1 do knowledge.md.
+| | Pedidos | Clientes | VLATEND |
+|---|---|---|---|
+| Loja B2B | 1.810 | 908 | R$ 1.172.905,55 |
+| Tradicional | 122.134 | 43.197 | R$ 250.210.633,41 |
+| Companhia | 125.704 | — | R$ 254.670.705,83 |
+
+Participacao da Loja: **0,46%**.
+
+**CONFERENCIA OBRIGATORIA: `ticket x pedidos` tem que bater com o total.** Em
+28/08/2026 o painel declarou R$ 3,60 bi de tradicional — 13x o real —, e o
+proprio painel se contradizia (0,46% no bloco 1 contra 0,03% no bloco 5).
+Multiplicar ticket por pedidos teria pego na hora.
+
+### Incrementalidade e recuperados SAO calculaveis
+
+Em 28/08/2026 o agente declarou os dois como "nao disponivel na base atual".
+**E falso.** A PCPEDC tem `CODCLI`, `DATA`, `ORIGEMPED`, `POSICAO` e `VLATEND`
+na mesma tabela — tudo que a analise antes/depois precisa. Rodam em < 8s.
+
+Incrementalidade (1.111 adotantes jan-mai/2026, janela 90 dias):
+faturamento R$ 5,16 mi → R$ 7,88 mi (**+52,8%**), pedidos 5.846 → 9.458
+(**+61,8%**), ticket R$ 922,40 → R$ 873,23 (-5,3%). O cliente compra mais
+vezes, um pouco menor por vez — saldo incremental.
+
+Recuperados (90+ dias parado, voltou pelo portal): **135** em agosto/2026.
+
+⚠️ Declarar "dado nao disponivel" e pior que omitir: encerra a pergunta. So
+declarar depois de tentar.
+
+### Recompra NAO e retencao
+
+RECOMPRA = 2a compra dentro de N dias da 1a. **CRESCE** com a janela:
+30d 50,7% · 60d 63,5% · 90d 68,4% (3.355 clientes em 2026).
+
+RETENCAO = quem comprou no mes e tambem comprou antes. **DECRESCE**.
+
+O painel de 28/08 entregou 61,8% / 54,9% / 48,0% chamando de recompra — era
+retencao. **Se o numero CAI quando a janela aumenta, e retencao.**
+
+```sql
+WITH ped AS (
+    SELECT p.CODCLI, p.DATA,
+           ROW_NUMBER() OVER (PARTITION BY p.CODCLI ORDER BY p.DATA) AS SEQ,
+           MIN(p.DATA) OVER (PARTITION BY p.CODCLI)                  AS DT_1A
+    FROM EBD.PCPEDC p
+    WHERE p.ORIGEMPED='W' AND p.CODEMITENTE=7777 AND p.POSICAO='F'
+      AND p.DATA >= :inicio
+)
+SELECT COUNT(DISTINCT CODCLI) AS CLIENTES,
+       COUNT(DISTINCT CASE WHEN SEQ=2 AND DATA-DT_1A <= 30 THEN CODCLI END) AS R30,
+       COUNT(DISTINCT CASE WHEN SEQ=2 AND DATA-DT_1A <= 60 THEN CODCLI END) AS R60,
+       COUNT(DISTINCT CASE WHEN SEQ=2 AND DATA-DT_1A <= 90 THEN CODCLI END) AS R90
+FROM ped
+```
