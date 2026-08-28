@@ -3733,3 +3733,106 @@ Filiais comerciais sao **21**. Mapa regional: secao 4 do knowledge.md.
 
 Valores em milhoes com uma casa (R$ 344,7M); contagens com separador de milhar
 (152.346); percentuais com uma casa (100,6%).
+
+## T-LOJA-PAINEL01 — Painel Diretoria da Loja EBD (padrao de conteudo)
+
+Disparo: "painel diretoria da loja EBD", "painel da loja", "como esta a loja
+EBD", "painel executivo da loja". **Montar e entregar** — nao perguntar B2B ou
+B2E, nao perguntar filial, nao perguntar bruto ou liquido, nao oferecer opcoes.
+
+Padroes quando o usuario nao disser: **B2B** (`CODATV1 <> 31`), **Brasil
+inteiro**, **mes corrente**. Se o mes tiver pouco dado, monta com o que ha e
+marca "parcial: X de Y dias" no titulo.
+
+### O canal (regra ja documentada na secao 1 do knowledge.md)
+
+`ORIGEMPED = 'W' AND CODEMITENTE = 7777`, com `CODATV1 <> 31` para B2B.
+
+⚠️ **A view de faturamento NAO tem `ORIGEMPED` nem `CODEMITENTE`** — tentar
+filtrar por elas ali da ORA-00904. O canal so e isolavel pela **PCPEDC**; a
+view serve para o denominador (faturamento total da companhia), nao para o
+recorte do canal.
+
+Pedido cancelado nao conta como venda. Comparativos online x offline usam os
+MESMOS criterios contabeis (faturamento liquido, sem devolucao, cancelamento
+nem bonificacao).
+
+### A pergunta que o painel responde
+
+*A Loja EBD esta crescendo de forma saudavel, recorrente, rentavel e
+incremental — aumentando valor e frequencia de compra sem comprometer margem e
+qualidade da receita?*
+
+### O que o painel traz
+
+**1. Visao Executiva** — sempre contra o mes anterior E o mesmo mes do ano
+anterior, com sinal de evolucao:
+faturamento (bruto e liquido) · crescimento vs mes anterior · crescimento vs
+ano anterior · pedidos · clientes positivados · ticket medio por pedido ·
+ticket medio por cliente · margem bruta (R$ e %) · frequencia media de compra ·
+mix de SKUs por pedido e por cliente · receita media por cliente ·
+**participacao da Loja no faturamento total da companhia** · novos clientes ·
+recorrentes · reativados · taxa de recompra
+
+**2. Saudabilidade** — a qualidade da venda, nao so o volume:
+frequencia media · taxa de recompra (30/60/90 dias) · clientes recorrentes ·
+retencao por coorte · inativos e churn (30/60/90 dias sem comprar) · margem
+mensal comparada com offline e com a filial · ticket medio Loja x offline ·
+mix (SKUs e categorias por cliente) · **concentracao no Top 10/20/50/100
+clientes**
+
+**3. Base de clientes e adocao digital** — o funil:
+base elegivel → cadastrados → ativados → 1a compra → recompra → recorrentes,
+com a taxa de conversao de cada etapa. Mais: clientes so offline, clientes
+hibridos (RCA + Loja) e quanto do hibrido ja migrou para o digital.
+
+**4. Novos e recuperados** — primeira compra pela Loja no periodo; e clientes
+com 90+ dias sem comprar da EBD que voltaram pelo canal. Para cada grupo:
+quantidade, faturamento, margem, ticket, frequencia posterior e participacao.
+
+**5. Loja x canal tradicional** — segmentar em `so offline`, `so Loja` e
+`hibridos`, comparando faturamento, pedidos, ticket, frequencia, mix, margem e
+categorias. Para hibridos, o % digital da carteira.
+
+**6. Incrementalidade** — a pergunta que mais importa: a Loja **gera venda
+nova ou so transfere** o pedido que o RCA pegaria? Comparar o cliente antes e
+depois da adocao em faturamento total, frequencia, ticket e mix.
+
+**7. Performance comercial** — ranking por regional, filial, gerente,
+supervisor e RCA. O objetivo e achar **maturidade digital**, nao faturamento
+absoluto: participacao digital da carteira, novos clientes digitais,
+recorrentes e recuperados.
+
+**8. Produtos e industrias** — por fornecedor, departamento, categoria, marca
+e SKU: faturamento, margem, pedidos, clientes, unidades, participacao,
+crescimento e o comparativo online x offline. Objetivo: achar o que tem
+afinidade com o canal.
+
+**9. Segmentacao RFM** — novos · recorrentes · alta frequencia · alto ticket ·
+alto valor · em risco · inativos · recuperados.
+
+**10. Alertas** — queda de faturamento, de clientes, de frequencia, de ticket
+ou de margem; aumento de concentracao; crescimento de inativos; queda na
+recompra; filiais com baixa adocao; carteiras com muitos elegiveis que nunca
+compraram online.
+
+**11. Diagnostico executivo** — 3 a 6 frases sobre os dados acima: o que
+explica o resultado, o que esta saudavel, onde esta o risco. Citando SO
+numeros do proprio painel.
+
+### Regras de leitura
+
+- Crescimento se decompoe em **base x frequencia x ticket** — dizer qual dos
+  tres puxou, nao so o total.
+- Margem: variacao abaixo de 1 ponto percentual e **estavel**, nao "queda".
+- Concentracao: Top 10 clientes ate ~15% do canal e saudavel; acima disso e
+  dependencia.
+- Mes corrente sai marcado como **parcial**.
+- Se um indicador depender de dado que nao existe, **dizer que nao existe** —
+  nunca estimar. Limitacao de dado se declara, nao se contorna.
+
+### Escopo
+
+Nem todo bloco cabe numa resposta de chat. Entregar do 1 ao 3 mais o
+diagnostico como padrao, e abrir os demais quando o usuario pedir ou quando o
+proprio dado justificar (ex.: concentracao alta puxa o bloco 5).

@@ -1823,3 +1823,18 @@ amostra, eu conclui "abaixo do custo em todas as regioes" — era falso.
 
 Existe tambem a filial 70 (regiao 33, junto com Sao Luis) fora do mapa das 21
 filiais operacionais — conferir antes de somar.
+
+
+## #88 - A view de faturamento NAO isola o canal Loja EBD
+
+`VIEW_VENDAS_RESUMO_FATURAMENTO` nao tem `ORIGEMPED` nem `CODEMITENTE`.
+Filtrar por elas ali devolve ORA-00904.
+
+  ERRADO: FROM VIEW_VENDAS_RESUMO_FATURAMENTO WHERE ORIGEMPED = 'W'
+  CERTO:  o canal sai da PCPEDC (ORIGEMPED='W' AND CODEMITENTE=7777)
+
+A view serve para o DENOMINADOR — faturamento total da companhia, para calcular
+a participacao da Loja. O recorte do canal vem da PCPEDC.
+
+B2B x B2E: `CODATV1 <> 31` e B2B; `= 31` e B2E (funcionarios). Regra completa
+na secao 1 do knowledge.md.
