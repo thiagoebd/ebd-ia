@@ -3831,8 +3831,24 @@ numeros do proprio painel.
 - Se um indicador depender de dado que nao existe, **dizer que nao existe** —
   nunca estimar. Limitacao de dado se declara, nao se contorna.
 
-### Escopo
+### Escopo — ENTREGAR OS 11 BLOCOS, SEMPRE
 
-Nem todo bloco cabe numa resposta de chat. Entregar do 1 ao 3 mais o
-diagnostico como padrao, e abrir os demais quando o usuario pedir ou quando o
-proprio dado justificar (ex.: concentracao alta puxa o bloco 5).
+Este painel e consumido pela WEB (e vira PDF), nao por mensagem de celular.
+**Nao ha limite de tela: entregar os 11 blocos completos, sempre.** Nao
+resumir, nao escolher os principais, nao perguntar quais o usuario quer.
+
+Se um indicador nao tiver dado disponivel, **entregar o bloco assim mesmo e
+escrever que aquele indicador nao esta disponivel** — bloco ausente e pior que
+bloco incompleto, porque o leitor nao sabe se foi omitido ou se nao existe.
+
+Dois indicadores respondem a pergunta central e NUNCA podem faltar:
+
+- **MARGEM BRUTA** (R$ e %) — sem ela nao da para dizer se o canal cresce "sem
+  comprometer margem", que e metade da pergunta do painel.
+- **CONCENTRACAO NO TOP 10/20/50/100 CLIENTES** — a concentracao que importa e
+  de CLIENTE, nao de filial. Top 10 ate ~15% do canal e saudavel; acima disso e
+  dependencia e tem que aparecer no diagnostico.
+
+Se a consulta de um bloco falhar ou estourar tempo, seguir com os demais e
+listar no fim o que nao foi possivel apurar. NUNCA abortar o painel inteiro por
+causa de um bloco.

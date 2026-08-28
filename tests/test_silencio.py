@@ -118,3 +118,26 @@ def test_texto_e_acumulado_nao_transmitido_ao_vivo():
     """text_acc += delta.text sem yield: e por isso que C e D sao sempre mudas."""
     fonte = _fonte_agent()
     assert "text_acc += delta.text" in fonte
+
+
+# ---------------------------------------------------------------
+# o logger do modulo (bug de 28/08/2026)
+# ---------------------------------------------------------------
+
+def test_agent_define_logger_no_modulo():
+    """As linhas de SILENCIO A/C/D chamam logger.warning no fluxo do stream.
+    O arquivo so tinha `import logging` DENTRO de funcoes — NameError em toda
+    resposta, e o usuario recebia 'erro interno ao processar essa pergunta'."""
+    fonte = _fonte_agent()
+    cabecalho = fonte.split("async def")[0]
+    assert "logger = " in cabecalho, "logger nao esta definido no nivel do modulo"
+
+
+def test_nenhum_uso_de_logger_antes_da_definicao():
+    fonte = _fonte_agent()
+    i = fonte.find("logger = ")
+    assert i > 0
+    for metodo in ("logger.warning", "logger.info", "logger.exception"):
+        j = fonte.find(metodo)
+        if j >= 0:
+            assert j > i, f"{metodo} usado antes da definicao do logger"

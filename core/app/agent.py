@@ -88,6 +88,12 @@ from app.tools.knowledge_append import (
     tool_list_proposals,
 )
 
+# logger do modulo. O arquivo usava `import logging` DENTRO de cada funcao,
+# mas o fluxo do stream tambem loga (SILENCIO A/C/D) e ali nao havia import —
+# NameError em toda resposta.
+import logging as _logging
+logger = _logging.getLogger("uvicorn.error")
+
 _client = AsyncAnthropic(api_key=settings.anthropic_api_key)
 _deepseek_client = (
     AsyncAnthropic(api_key=settings.deepseek_api_key, base_url=settings.deepseek_base_url)
