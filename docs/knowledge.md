@@ -1584,3 +1584,49 @@ movimentacao interna no faturamento.
 ⚠️ PENDENTE: o significado completo de cada `CONDVENDA` nao esta mapeado.
 Sabemos que **1 = venda** (regra ja documentada) e que **10 = movimentacao
 intragrupo**. Os demais codigos precisam ser levantados.
+
+
+## Mapa REGIONAL x FILIAL — a fonte e o BANCO, nao este documento
+
+⚠️ **NUNCA escrever o mapa a mao.** Ele sai de:
+
+```sql
+SELECT rf.FANTASIAREGIONAL AS REGIONAL, rf.CODFILIAL
+FROM EBD.EBD_REGIONAISFILIAIS rf
+WHERE rf.PARTICIPAGERENCIAL = 'S'
+```
+
+`PARTICIPAGERENCIAL = 'S'` e o filtro que separa as **9 regionais
+operacionais** dos agrupamentos maiores (NORTE, NORDESTE, SAO PAULO, RIO DE
+JANEIRO, ORIGEM RJ), que tem `= 'N'` e NAO devem entrar no painel.
+
+⚠️ `EBD_REGIONAISFILIAIS.CODREGIONAL` **nao** e o mesmo codigo da
+`PCREGIONAL.CODREGIONAL` — juntar as duas por esse campo produz lixo
+(NE1 = Fortaleza, RJ1 = Sao Luis). A sigla ja vem em `FANTASIAREGIONAL`:
+nao precisa de join.
+
+### O mapa (medido 01/09/2026, para conferencia — a fonte continua sendo o banco)
+
+| Regional | Filiais |
+|---|---|
+| **N1** | 06 Manaus · 08 Boa Vista |
+| **N2** | 01 Matriz · 07 Macapa · 11 Santarem · 22 Maraba |
+| **NE1** | 04 Sao Luis · 12 Imperatriz |
+| **NE2** | 03 Fortaleza · 09 Juazeiro · 21 Teresina |
+| **NE3** | 52 Petrolina · 53 Caruaru |
+| **RJ1** | 10 Sao Goncalo · 13 Taquara |
+| **RJ2** | 05 Duque · 14 Pirai |
+| **SP1** | 02 SP · 16 Itapevi |
+| **SP2** | 15 Guarulhos · 18 SBC |
+
+O Norte usa **`N1` e `N2`** — nao `NO1`/`NO2`.
+
+Confere com o GM: os perfis da `PCGMPERFIL` (NE1, NE2, N1...) batem com este
+mapa. Duas fontes independentes, mesmo resultado.
+
+### O que ja saiu errado por causa disso
+
+Ate 01/09/2026 o `T-PAINEL01` tinha um mapa escrito a mao, com NE1/NE2/NE3
+trocadas e o Norte como NO1/NO2. **O total do painel batia** (soma as 21
+filiais de qualquer jeito), entao o erro so aparecia na quebra por regional —
+e passou despercebido em varios paineis entregues a diretoria.

@@ -3727,7 +3727,14 @@ citando SO numeros que estao no proprio painel. Nao inventar, nao projetar.
    valor por filial — somar mais de um triplica. Referencia: julho/2026 =
    R$ 328.435.838,79 nas 21 filiais.
 
-Filiais comerciais sao **21**. Mapa regional: secao 4 do knowledge.md.
+Filiais comerciais sao **21**.
+
+⚠️ **Mapa regional sai do BANCO, nunca escrito a mao:**
+`EBD_REGIONAISFILIAIS` com `PARTICIPAGERENCIAL = 'S'` — a sigla vem em
+`FANTASIAREGIONAL`. Nao juntar com PCREGIONAL (os CODREGIONAL divergem e o
+join produz lixo). Sao 9: N1, N2, NE1, NE2, NE3, RJ1, RJ2, SP1, SP2 — o Norte
+e `N1`/`N2`, nao NO1/NO2. Detalhe e historico do erro na secao "Mapa REGIONAL
+x FILIAL" do knowledge.md.
 
 ### Formatacao
 
