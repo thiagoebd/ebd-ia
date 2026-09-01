@@ -275,13 +275,20 @@ async def run_turn(
     while iterations < settings.max_iterations:
         iterations += 1
         _cli, _m = _client_for(model)
-        response = await _cli.messages.create(
+        # streaming obrigatorio: o SDK recusa create quando max_tokens e
+        # alto ("Streaming is required for operations that may take longer
+        # than 10 minutes"). Subimos MAX_TOKENS para 80.000 em 28/08/2026 e
+        # isso derrubou o Telegram, que usa run_turn (o web usa run_turn_stream).
+        async with _cli.messages.stream(
             model=_m,
             max_tokens=settings.max_tokens,
             system=system_blocks,
             tools=_tools,
             messages=messages,
-        )
+        ) as _stream:
+            async for _ in _stream:
+                pass
+            response = await _stream.get_final_message()
         messages.append({"role": "assistant", "content": response.content})
 
         if response.stop_reason != "tool_use":

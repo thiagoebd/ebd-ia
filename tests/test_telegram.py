@@ -47,3 +47,31 @@ def test_custo_continua_no_log_do_servidor():
 def test_saldo_continua_disponivel():
     """O comando /saldo segue existindo para quem quiser consultar."""
     assert "/saldo" in _fonte()
+
+
+# ---------------------------------------------------------------
+# streaming no run_turn (bug de 28/08/2026)
+# ---------------------------------------------------------------
+
+def _agent() -> str:
+    return (RAIZ / "core" / "app" / "agent.py").read_text(encoding="utf-8")
+
+
+def test_run_turn_usa_streaming():
+    """O Telegram usa run_turn (o web usa run_turn_stream). Com MAX_TOKENS
+    alto o SDK recusa messages.create: 'Streaming is required for operations
+    that may take longer than 10 minutes'."""
+    assert "messages.create(" not in _agent(), \
+        "sobrou um messages.create — quebra o bot com max_tokens alto"
+
+
+def test_as_duas_funcoes_montam_a_mensagem_final():
+    assert _agent().count("get_final_message()") >= 2
+
+
+def test_retorno_do_run_turn_preservado():
+    """O adapter do Telegram le estes campos — nao podem sumir."""
+    fonte = _agent()
+    for campo in ("response.stop_reason", "response.usage.input_tokens",
+                  "response.usage.output_tokens"):
+        assert campo in fonte, campo
