@@ -18,10 +18,10 @@ from app.tools.knowledge_append import approve_proposal, discard_proposal
 
 console = Console()
 
-PRICE_INPUT = 3.00 / 1_000_000
-PRICE_OUTPUT = 15.00 / 1_000_000
+PRICE_INPUT = 0.28 / 1_000_000
+PRICE_OUTPUT = 0.42 / 1_000_000
 PRICE_CACHE_WRITE = 3.75 / 1_000_000
-PRICE_CACHE_READ = 0.30 / 1_000_000
+PRICE_CACHE_READ = 0.028 / 1_000_000
 USD_BRL = 5.20
 
 # Hardcoded enquanto nao tem ACL real

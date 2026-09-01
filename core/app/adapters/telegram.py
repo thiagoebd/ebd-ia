@@ -31,10 +31,10 @@ _history: dict[int, list[dict]] = {}
 _session_stats: dict[int, dict] = {}
 
 # Pricing Sonnet 4.6 (US$/MTok)
-PRICE_INPUT = 3.00 / 1_000_000
-PRICE_OUTPUT = 15.00 / 1_000_000
+PRICE_INPUT = 0.28 / 1_000_000
+PRICE_OUTPUT = 0.42 / 1_000_000
 PRICE_CACHE_WRITE = 3.75 / 1_000_000
-PRICE_CACHE_READ = 0.30 / 1_000_000
+PRICE_CACHE_READ = 0.028 / 1_000_000
 USD_BRL = 5.20
 
 TELEGRAM_MAX_LEN = 4000  # margem dos 4096
