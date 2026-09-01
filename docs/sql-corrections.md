@@ -1898,3 +1898,50 @@ SELECT COUNT(DISTINCT CODCLI) AS CLIENTES,
        COUNT(DISTINCT CASE WHEN SEQ=2 AND DATA-DT_1A <= 90 THEN CODCLI END) AS R90
 FROM ped
 ```
+
+
+## #89 - COMPRA x VENDA: tabelas parecidas que trazem numero errado calado
+
+O Winthor tem pares de tabelas com nomes proximos e as MESMAS chaves
+(`NUMPED`, `CODPROD`). Confundir nem sempre da erro — as vezes traz numero de
+compra num relatorio de venda, sem nenhum aviso. E o pior tipo de engano.
+
+| Preciso de | Cabecalho | Item |
+|---|---|---|
+| **VENDA** (pedido de cliente) | `PCPEDC` | `PCPEDI` |
+| **COMPRA** (pedido ao fornecedor) | `PCPEDIDO` | `PCITEM` |
+
+Como saber de qual voce esta lendo, sem decorar:
+
+- `PCPEDI` tem **`PVENDA`**, `QT`, `CODUSUR`, `CODCLI` -> e VENDA
+- `PCITEM` tem **`PCOMPRA`**, `QTPEDIDA`, `QTENTREGUE`, `DTULTENT` -> e COMPRA
+
+Se a coluna que voce quer e preco de venda e voce esta na PCITEM, esta na
+tabela errada.
+
+### Valor: cada tabela tem o seu
+
+| Tabela | Coluna de valor |
+|---|---|
+| `PCPEDC` (pedido) | **`VLATEND`** |
+| `PCNFSAID` (nota) | **`VLTOTAL`** |
+| `PCPEDI` (item de venda) | `PVENDA` x `QT` |
+| `PCITEM` (item de compra) | `PCOMPRA` x `QTPEDIDA` |
+
+⚠️ A `PCNFSAID` **nao tem `VLATEND`** nem `DTEMISSAO` (a data e `DTSAIDA`).
+Faturamento sai da PCPEDC com VLATEND — ver cicatriz #88.
+
+### Outras confusoes de nome vistas em producao (ago/2026)
+
+| Tentaram | O certo |
+|---|---|
+| `PCEST.QTUNITCX` | esta na **`PCPRODUT`** |
+| `PCCLIENT.FONE` | **`TELENT`** (entrega) ou **`TELCOB`** (cobranca) |
+| `PCCATEGORIA.DESCRICAO` | **`CATEGORIA`** (mas `PCDEPTO` e `PCSECAO` usam `DESCRICAO`) |
+| `PCREDECLIENTE.CODCLI` | o vinculo e `PCCLIENT.CODREDE` |
+| `PCSERVICOCLIENTETELEFONE.CODCLI` | **`CODCLIENTE`** |
+| `PCPEDI.CODFILIAL` | nao tem — a filial vem da `PCPEDC` |
+
+Estas o pre-voo ja recusa antes de executar. A distincao compra/venda NAO —
+ali as colunas existem nas duas, e so o contexto do negocio diz qual e a
+certa.
