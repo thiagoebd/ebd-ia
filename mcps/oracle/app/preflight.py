@@ -91,12 +91,33 @@ def _nomes_definidos(arv) -> set[str]:
     return definidos
 
 
+def _em_contexto_apelido(col) -> bool:
+    """True se a coluna esta em ORDER BY / GROUP BY / HAVING.
+
+    So nesses contextos o Oracle aceita apelido do SELECT. No SELECT e no
+    WHERE, o nome e sempre coluna de tabela — foi por confundir isso que
+    `ROUND(VLTOTCOM,2) AS VLTOTCOM` escapou da validacao.
+    """
+    no = col.parent
+    while no is not None:
+        if isinstance(no, (exp.Order, exp.Group, exp.Having)):
+            return True
+        if isinstance(no, exp.Select):
+            return False
+        no = no.parent
+    return False
+
+
 def colunas_invalidas(sql: str, dicionario: dict[str, Iterable[str]]
                       ) -> list[tuple[str, str]]:
     """Retorna [(TABELA, COLUNA)] das colunas que NAO existem.
 
     `dicionario` = {TABELA: colunas}. Tabela ausente do dicionario e ignorada
     (nao da para afirmar nada sobre ela).
+
+    UNION: cada ramo e validado SEPARADAMENTE. Um `SELECT a FROM T1 UNION
+    SELECT a FROM T2` tem 2 tabelas no total, o que impedia validar coluna
+    sem qualificacao — mas cada ramo tem uma tabela so.
     """
     if not _SQLGLOT or not dicionario:
         return []
@@ -104,6 +125,18 @@ def colunas_invalidas(sql: str, dicionario: dict[str, Iterable[str]]
         arv = sqlglot.parse_one(sql, read="oracle")
     except Exception:
         return []
+
+    # quebra o UNION em ramos e valida um por um
+    if isinstance(arv, exp.Union):
+        ruins_union: list[tuple[str, str]] = []
+        vistos_u: set[tuple[str, str]] = set()
+        for ramo in arv.flatten() if hasattr(arv, "flatten") else []:
+            for t, c in colunas_invalidas(ramo.sql(dialect="oracle"),
+                                          dicionario):
+                if (t, c) not in vistos_u:
+                    vistos_u.add((t, c))
+                    ruins_union.append((t, c))
+        return ruins_union
 
     dic = {t.upper(): {c.upper() for c in cols} for t, cols in dicionario.items()}
     ctes = {c.alias_or_name.upper() for c in arv.find_all(exp.CTE)}
@@ -125,9 +158,20 @@ def colunas_invalidas(sql: str, dicionario: dict[str, Iterable[str]]
 
     for col in arv.find_all(exp.Column):
         nome = (col.name or "").upper()
-        if not nome or nome in _PSEUDO_COLUNAS or nome in definidos:
+        if not nome or nome in _PSEUDO_COLUNAS:
             continue
         qualificador = (col.table or "").upper()
+
+        # FURO DO ALIAS HOMONIMO: `ROUND(n.VLATEND,2) AS VLATEND` registrava
+        # VLATEND em `definidos` e a coluna passava batido — que e exatamente
+        # como o agente escreve.
+        #
+        # Regra do Oracle: apelido do SELECT so pode ser referenciado em
+        # ORDER BY / GROUP BY / HAVING. Dentro do proprio SELECT ou no WHERE,
+        # o nome e SEMPRE coluna de tabela. Logo `definidos` so vale nesses
+        # tres contextos — e nunca para coluna qualificada.
+        if nome in definidos and not qualificador and _em_contexto_apelido(col):
+            continue
 
         if qualificador:
             if qualificador in ctes:
@@ -232,3 +276,41 @@ def aviso_zero_linhas(sql: str, n_linhas: int) -> str:
         "ALPARGATAS). Se ainda assim nao achar, PERGUNTE ao usuario em vez de "
         "seguir com conjunto vazio."
     )
+
+
+def sintaxe_arriscada(sql: str) -> list[str]:
+    """Erros de ESTRUTURA que o dicionario de colunas nao pega.
+
+    Diferente de `colunas_invalidas`: aqui a coluna existe, o problema e onde
+    ela foi usada. Casos vistos em producao entre 03/08 e 01/09/2026.
+    """
+    if not _SQLGLOT:
+        return []
+    try:
+        arv = sqlglot.parse_one(sql, read="oracle")
+    except Exception:
+        return []
+
+    avisos: list[str] = []
+
+    # ORDER BY por APELIDO em UNION — o Oracle exige POSICAO (ORDER BY 1).
+    # Visto 2x seguidas: 'ORDER BY ONDE' e depois 'ORDER BY TIPO'.
+    if isinstance(arv, exp.Union):
+        ordem = arv.args.get("order")
+        if ordem is not None:
+            ramos = list(arv.flatten()) if hasattr(arv, "flatten") else []
+            primeiro = ramos[0] if ramos else None
+            saida = set()
+            if isinstance(primeiro, exp.Select):
+                for e in primeiro.expressions:
+                    if isinstance(e, exp.Alias) and e.alias:
+                        saida.add(e.alias.upper())
+            for o in ordem.find_all(exp.Column):
+                nome = (o.name or "").upper()
+                if nome in saida:
+                    avisos.append(
+                        f"ORDER BY '{nome}' em UNION: o Oracle nao aceita "
+                        f"apelido do SELECT aqui (ORA-00904). Use a POSICAO "
+                        f"da coluna — ex.: ORDER BY 1."
+                    )
+    return avisos

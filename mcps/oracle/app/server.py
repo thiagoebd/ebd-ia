@@ -318,7 +318,7 @@ class BearerAuthMiddleware(BaseHTTPMiddleware):
 try:
     from app.policies import (carrega_politicas, mensagem_recusa as msg_perfil,
                               recursos_violados)
-    from app.preflight import (aviso_zero_linhas, colunas_invalidas,
+    from app.preflight import (aviso_zero_linhas, colunas_invalidas, sintaxe_arriscada,
                                mensagem_recusa, tabelas_fisicas)
 except ImportError:  # pragma: no cover
     from mcps.oracle.app.preflight import (  # type: ignore
@@ -622,6 +622,13 @@ async def oracle_query(
             user_context=user,
             details={"recursos": [v.get("recurso") for v in _viol]},
         ).model_dump()
+
+    # 2.65 SINTAXE ARRISCADA — avisa sem recusar (a coluna existe;
+    # o problema e onde foi usada). Ex.: ORDER BY apelido em UNION.
+    try:
+        _avisos_sintaxe = sintaxe_arriscada(sql)
+    except Exception:
+        _avisos_sintaxe = []
 
     # 2.6 PRE-VOO DE COLUNAS — recusa antes de gastar ida ao Oracle
     try:

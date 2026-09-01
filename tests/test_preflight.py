@@ -440,3 +440,107 @@ def test_marca_tambem_e_cadastro():
 
 def test_sql_quebrado_nao_avisa():
     assert pf.aviso_zero_linhas("SELECT FROM WHERE (((", 0) == ""
+
+
+# ===================================================================
+# Os furos descobertos em 01/09/2026 pelos 24 ORA-00904 do log
+# ===================================================================
+
+DIC_REAL = {
+    "PCNFSAID": ["NUMNOTA", "CODFILIAL", "VLTOTAL", "CODCLI", "DTSAIDA",
+                 "NUMTRANSVENDA", "NUMPED", "CONDVENDA", "CODUSUR"],
+    "PCCLIENT": ["CODCLI", "CLIENTE", "TELENT", "TELCOB", "EMAIL", "CODREDE"],
+    "PCROTACLI": ["CODUSUR", "CODCLI", "DIASEMANA", "DTFINAL"],
+    "PCITEM": ["CODPROD", "NUMPED", "PCOMPRA", "QTPEDIDA", "QTENTREGUE"],
+    "PCPEDI": ["NUMPED", "CODCLI", "CODPROD", "QT", "PVENDA"],
+    "PCEST": ["CODFILIAL", "CODPROD", "QTESTGER", "CUSTOFIN"],
+    "PCPRODUT": ["CODPROD", "DESCRICAO", "QTUNITCX", "CODFORNEC"],
+    "PCCATEGORIA": ["CODSEC", "CODCATEGORIA", "CATEGORIA"],
+    "PCSECAO": ["CODSEC", "DESCRICAO", "CODEPTO"],
+    "PCPEDC": ["NUMPED", "VLATEND", "CODCLI", "DATA", "CODFILIAL"],
+}
+
+
+def test_alias_homonimo_nao_anula_a_validacao():
+    """O FURO GRAVE: `ROUND(n.VLATEND,2) AS VLATEND` registrava VLATEND como
+    apelido e a coluna passava batido — e e assim que o agente escreve.
+    O pre-voo ficou praticamente desligado de julho a setembro/2026."""
+    sql = ("SELECT n.NUMNOTA, ROUND(n.VLATEND,2) AS VLATEND "
+           "FROM EBD.PCNFSAID n")
+    assert ("PCNFSAID", "VLATEND") in pf.colunas_invalidas(sql, DIC_REAL)
+
+
+def test_alias_homonimo_sem_qualificador_tambem():
+    sql = "SELECT NUMNOTA, ROUND(VLTOTCOM,2) AS VLTOTCOM FROM EBD.PCNFSAID"
+    assert ("PCNFSAID", "VLTOTCOM") in pf.colunas_invalidas(sql, DIC_REAL)
+
+
+def test_union_e_validado_ramo_a_ramo():
+    """2 tabelas no total impediam validar coluna sem qualificacao — mas cada
+    ramo do UNION tem uma tabela so. SQL real do log (31/08/2026)."""
+    sql = ("SELECT 'CATEGORIA' AS NIVEL, TO_CHAR(CODCATEGORIA) AS CODIGO, "
+           "DESCRICAO FROM EBD.PCCATEGORIA "
+           "UNION ALL "
+           "SELECT 'SECAO', TO_CHAR(CODSEC), DESCRICAO FROM EBD.PCSECAO")
+    ruins = pf.colunas_invalidas(sql, DIC_REAL)
+    assert ("PCCATEGORIA", "DESCRICAO") in ruins       # nao tem: e CATEGORIA
+    assert ("PCSECAO", "DESCRICAO") not in ruins        # esta tem
+
+
+def test_trava_anti_dicionario_furado_continua_valendo():
+    """Se NENHUMA coluna da tabela existir no dicionario, o suspeito e o
+    dicionario — nao recusar. Vale por ramo do UNION tambem."""
+    sql = "SELECT 'C' AS N, DESCRICAO FROM EBD.PCCATEGORIA"
+    assert pf.colunas_invalidas(sql, DIC_REAL) == []
+
+
+@pytest.mark.parametrize("sql,esperado", [
+    ("SELECT c.CODCLI, NVL(c.FONE,'') AS FONE FROM EBD.PCROTACLI r "
+     "JOIN EBD.PCCLIENT c ON c.CODCLI = r.CODCLI", ("PCCLIENT", "FONE")),
+    ("SELECT i.NUMPED, NVL(i.PVENDA,0) AS PVENDA FROM EBD.PCITEM i",
+     ("PCITEM", "PVENDA")),
+    ("SELECT e.CODPROD, NVL(e.QTUNITCX,0) AS QTUNITCX FROM EBD.PCEST e",
+     ("PCEST", "QTUNITCX")),
+])
+def test_casos_reais_do_log(sql, esperado):
+    assert esperado in pf.colunas_invalidas(sql, DIC_REAL)
+
+
+# --- o conserto NAO pode recusar SQL bom ---
+
+@pytest.mark.parametrize("sql", [
+    "SELECT SUM(p.VLATEND) AS TOTAL FROM EBD.PCPEDC p GROUP BY p.CODCLI "
+    "ORDER BY TOTAL",
+    "SELECT p.CODCLI AS CLI, COUNT(*) FROM EBD.PCPEDC p GROUP BY CLI",
+    "SELECT p.CODCLI, SUM(p.VLATEND) AS T FROM EBD.PCPEDC p "
+    "GROUP BY p.CODCLI HAVING T > 100",
+    "SELECT i.CODPROD, i.QTPEDIDA FROM EBD.PCITEM i",
+    "SELECT pr.QTUNITCX FROM EBD.PCPRODUT pr",
+])
+def test_sql_valido_continua_passando(sql):
+    """Apelido em ORDER/GROUP/HAVING e legitimo — o Oracle aceita."""
+    assert pf.colunas_invalidas(sql, DIC_REAL) == []
+
+
+def test_coluna_inexistente_no_where_e_pega():
+    sql = "SELECT p.NUMPED FROM EBD.PCPEDC p WHERE p.XPTO = 1"
+    assert ("PCPEDC", "XPTO") in pf.colunas_invalidas(sql, DIC_REAL)
+
+
+# --- sintaxe: ORDER BY por apelido em UNION ---
+
+def test_order_by_apelido_em_union_avisa():
+    """Erro visto 2x seguidas em producao (18/08/2026)."""
+    sql = ("SELECT 'A' AS ONDE, CODCLI FROM EBD.PCCLIENT "
+           "UNION ALL SELECT 'B', CODCLI FROM EBD.PCROTACLI ORDER BY ONDE")
+    avisos = pf.sintaxe_arriscada(sql)
+    assert avisos and "ONDE" in avisos[0] and "POSICAO" in avisos[0]
+
+
+@pytest.mark.parametrize("sql", [
+    "SELECT 'A' AS ONDE, CODCLI FROM EBD.PCCLIENT "
+    "UNION ALL SELECT 'B', CODCLI FROM EBD.PCROTACLI ORDER BY 1",
+    "SELECT SUM(VLATEND) AS TOTAL FROM EBD.PCPEDC ORDER BY TOTAL",
+])
+def test_sintaxe_valida_nao_avisa(sql):
+    assert pf.sintaxe_arriscada(sql) == []
