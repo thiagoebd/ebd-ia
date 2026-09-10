@@ -239,10 +239,14 @@ async def run_turn(
     user_role: str = "admin",
     user_filiais: str = "*",
     channel: str = "cli",
- model: str | None = None) -> dict:
+ model: str | None = None,
+    imagens: list | None = None) -> dict:
     messages = list(conversation_history or [])
     messages = _trim_history(messages)
-    messages.append({"role": "user", "content": user_message})
+    # com anexo, o content vira lista de blocos (imagem antes do texto)
+    from app.anexos import monta_conteudo
+    messages.append({"role": "user",
+                     "content": monta_conteudo(user_message, imagens)})
 
     ctx_suffix = (
         f"\n\n## CONTEXTO DA CONVERSA ATUAL\n"
@@ -348,6 +352,7 @@ async def run_turn_stream(
     channel: str = "web",
     model: str | None = None,
     user_email: str | None = None,
+    imagens: list | None = None,
 ):
     """Versao streaming de run_turn. Em vez de retornar dict no fim,
     da yield de eventos conforme processa:
@@ -360,7 +365,9 @@ async def run_turn_stream(
     """
     messages = list(conversation_history or [])
     messages = _trim_history(messages)
-    messages.append({"role": "user", "content": user_message})
+    from app.anexos import monta_conteudo
+    messages.append({"role": "user",
+                     "content": monta_conteudo(user_message, imagens)})
 
     ctx_suffix = (
         f"\n\n## CONTEXTO DA CONVERSA ATUAL\n"

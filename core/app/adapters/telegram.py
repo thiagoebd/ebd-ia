@@ -31,10 +31,12 @@ _history: dict[int, list[dict]] = {}
 _session_stats: dict[int, dict] = {}
 
 # Pricing Sonnet 4.6 (US$/MTok)
-PRICE_INPUT = 0.28 / 1_000_000
-PRICE_OUTPUT = 0.42 / 1_000_000
-PRICE_CACHE_WRITE = 3.75 / 1_000_000
-PRICE_CACHE_READ = 0.028 / 1_000_000
+# DeepSeek V4.1 Flash, precos off-peak (comunicado 09/09/2026).
+# Pico (22h-1h e 3h-7h BRT) e o dobro; o uso da EBD e comercial.
+PRICE_INPUT = 0.15 / 1_000_000
+PRICE_OUTPUT = 0.60 / 1_000_000
+PRICE_CACHE_WRITE = 0.15 / 1_000_000
+PRICE_CACHE_READ = 0.003 / 1_000_000
 USD_BRL = 5.20
 
 TELEGRAM_MAX_LEN = 4000  # margem dos 4096
@@ -74,7 +76,8 @@ def chunk_message(text: str, max_len: int = TELEGRAM_MAX_LEN) -> list[str]:
     return chunks
 
 
-async def handle_message(chat_id: int, user_first_name: str, text: str) -> list[str]:
+async def handle_message(chat_id: int, user_first_name: str, text: str,
+                         imagens: list | None = None) -> list[str]:
     """Processa uma mensagem do Telegram e retorna lista de strings pra enviar."""
     role = get_user_role(chat_id)
     text = text.strip()
@@ -143,7 +146,8 @@ async def handle_message(chat_id: int, user_first_name: str, text: str) -> list[
         user_role=role,
         user_filiais="*",  # futuro: vir da ACL
         channel="telegram",
-     model=__import__('os').getenv('TELEGRAM_MODEL', 'deepseek-v4-pro'))
+        imagens=imagens,
+     model=__import__('os').getenv('TELEGRAM_MODEL', 'deepseek-flash'))
     # -- LLM EVENT (obs Fase 2): canal telegram --
     try:
         import json as _j, os as _o, time as _t

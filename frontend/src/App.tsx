@@ -29,7 +29,7 @@ function App() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [me, setMe] = useState<MeInfo | null>(null);
-  const [selectedModel, setSelectedModel] = useState<string>("deepseek-v4-flash");
+  const [selectedModel, setSelectedModel] = useState<string>("deepseek-flash");
   const [modelOpen, setModelOpen] = useState(false);
   const [showAccess, setShowAccess] = useState(false);
   const [mercado, setMercado] = useState<{

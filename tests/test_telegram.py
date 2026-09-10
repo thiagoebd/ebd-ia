@@ -19,7 +19,7 @@ def _fonte() -> str:
 def test_modelo_padrao_e_deepseek_pro():
     m = re.search(r"getenv\('TELEGRAM_MODEL',\s*'([^']+)'\)", _fonte())
     assert m, "nao achei o default de TELEGRAM_MODEL"
-    assert m.group(1) == "deepseek-v4-pro"
+    assert m.group(1) == "deepseek-flash"
 
 
 def test_rodape_nao_depende_mais_de_role_admin():

@@ -19,7 +19,7 @@ class Settings(BaseSettings):
     # DeepSeek (endpoint Anthropic-compativel; .env ja tem DEEPSEEK_API_KEY/MODEL)
     deepseek_api_key: str = Field("", alias="DEEPSEEK_API_KEY")
     deepseek_base_url: str = Field("https://api.deepseek.com/anthropic", alias="DEEPSEEK_BASE_URL")
-    deepseek_model: str = Field("deepseek-v4-flash", alias="DEEPSEEK_MODEL")
+    deepseek_model: str = Field("deepseek-flash", alias="DEEPSEEK_MODEL")
 
     # MCP Oracle
     mcp_oracle_url: str = Field(..., alias="MCP_ORACLE_URL")
