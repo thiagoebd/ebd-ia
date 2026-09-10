@@ -268,46 +268,10 @@ Aplicável a:
 
 A diferença é a **fonte do filtro**, NUNCA a presença dele.
 
-## 10. Views GD_* — DESATIVADAS (legado GoodData)
+## 10. Views GD_* — DESATIVADAS
 
-As views `GD_FATO_*` e `GD_DIM_*` sao resquicio do **GoodData**, ferramenta de BI
-que a EBD **nao usa mais**. Sao views (nao tabelas): cada consulta reexecuta os
-joins de baixo, e agregacao por RCA ou fornecedor no mes **estoura o timeout**.
-
-**NAO USE NENHUMA VIEW `GD_*`.** De-para obrigatorio:
-
-| Em vez de | Use |
-|---|---|
-| `GD_FATO_VENDAFATURAMENTO` | `VIEW_VENDAS_RESUMO_FATURAMENTO` |
-| `GD_DIM_RCA` | ja vem na view (`CODUSUR`, `CODSUPERVISOR`); nome via `PCUSUARI.NOME`, `PCSUPERV.NOME`, `PCGERENTE.NOMEGERENTE` |
-| `GD_DIM_CLIENTE` | ja vem na view (`CODCLI`, `CLIENTE`, `CODATIV`, `UF`); ramo via `PCATIVI.RAMO` |
-| `GD_DIM_PRODUTO` | ja vem na view (`CODPROD`, `DESCRICAO`, `FORNECPRINC`, `CODEPTO`) |
-| `GD_FATO_ROTACLIENTE` | `PCROTACLI` |
-| `GD_FATO_CONTASRECEBER` | `PCPREST` (aberto = `DTPAG IS NULL`; vencido = `DTVENC < TRUNC(SYSDATE)`) |
-| `GD_FATO_ESTOQUEATUAL` | `PCEST` (livre = `QTESTGER - QTRESERV - QTBLOQUEADA`) |
-
-### A view de faturamento ja e desnormalizada
-
-`VIEW_VENDAS_RESUMO_FATURAMENTO` traz, na mesma linha: `CODUSUR`,
-`CODSUPERVISOR`, `CODGERENTELOCAL`, `CODCLI`, `CLIENTE`, `CODATIV`, `UF`,
-`CODPROD`, `DESCRICAO`, `CODFORNEC`, `FORNECPRINC`, `CODEPTO`, `CODSEC`,
-`CODCATEGORIA`, `ROTA`, `CODPRACA`, `VIP`, `NUMPED`, `NUMTRANSVENDA`, `QT` e
-`VLATEND`. **Nao precisa de join para agrupar por nenhuma dessas dimensoes.**
-
-Colunas-chave: data = `DTSAIDA` (**DATE**, sem TO_CHAR), valor = `VLATEND`,
-filtro obrigatorio `CONDVENDA = 1`.
-
-### Custo medido (23/07/2026)
-
-| Consulta | Tempo |
-|---|---|
-| Ranking por RCA, BR, mes (com joins GD_*) | estourava 85s |
-| Ranking por RCA, BR, mes (so a view) | **9,1s** |
-| Ranking por RCA, **uma filial**, mes | **0,7s** |
-| Ranking por RCA, BR, ultimos 7 dias | **3,3s** |
-
-O custo depende do **volume de linhas varridas**, nao da coluna do `GROUP BY`.
-Agrupar por fornecedor, departamento ou categoria custa o mesmo.
+Legado GoodData, fora do ar. Substitutas na cicatriz #38 do
+sql-corrections.md. Nao consultar, nao sugerir, nao citar ao usuario.
 
 ## 11. Definições oficiais de negócio (vindas das views)
 

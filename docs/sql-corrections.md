@@ -571,26 +571,24 @@ financeiro, preso comercial, em digitacao).
 
 ---
 
-## #38 — SEMPRE buscar GD_FATO/GD_DIM antes de derivar de PC* (20/05/2026)
+## #38 — NAO usar GD_FATO / GD_DIM (views desativadas)
 
-**Sintoma:** Tentei derivar carteira BR de PCCLIENT chutando filtros (bloqueio, datas, RCA1/2/3). Errado por 6 horas.
+⚠️ Esta cicatriz dizia o CONTRARIO ate 10/09/2026: mandava buscar as views do
+DW antes de derivar de PC*. As views `GD_*` sao **legado GoodData e estao
+desativadas** — a instrucao ficou meses em conflito com a secao 10 do
+knowledge.md, no mesmo prompt.
 
-**Causa:** Não verifiquei se Winthor já expõe a métrica via view DW.
+| Em vez de | Use |
+|---|---|
+| `GD_FATO_VENDAFATURAMENTO` | `VIEW_VENDAS_RESUMO_FATURAMENTO` |
+| `GD_FATO_ROTACLIENTE` | `PCROTACLI` + `PCMOVROTACLI` (respeita periodicidade) |
+| `GD_DIM_CLIENTE` | `PCCLIENT` |
+| `GD_DIM_RCA` | `PCUSUARI` |
+| `GD_DIM_FILIAL` | `PCFILIAL` |
 
-**Solução:** ANTES de qualquer query derivativa em tabela PC*, executar:
-
-```sql
-SELECT view_name FROM all_views
-WHERE owner='EBD' AND view_name LIKE 'GD_FATO_%';
-
-SELECT table_name FROM all_tables
-WHERE owner='EBD' AND table_name LIKE 'GD_DIM_%';
-```
-
-**Padrão Winthor DW:** GD_DIM_* = dimensões, GD_FATO_* = fatos. Métricas usadas no BI estão lá prontas.
-
-**Caso concreto:** carteira BR (77.315 do BI) vem de `GD_FATO_ROTACLIENTE` direto — 1 linha de SQL, não 6h de chute de filtros.
-
+A licao que sobrevive: antes de derivar metrica de tabela PC* com filtros
+chutados, procurar se ja existe view oficial pronta. So que a oficial hoje e
+a familia `VIEW_*`, nao a `GD_*`.
 
 ---
 
@@ -704,580 +702,87 @@ Para derivar filiais por Supervisor/Gerente:
   GROUP BY dr.CODIGOSUPERVISOR (ou GERENTE)
   DISTINCT u.CODFILIAL
 
-## #54 - Mix Disponivel: regra final validada
+## #54 - Mix disponivel: os filtros validados
 
-Filtros corretos do "mix disponivel":
-  pf.REVENDA = 'S'
-  AND pf.ATIVO = 'S'
-  AND pf.PROIBIDAVENDA = 'N'    <- nome com 'IDA', nao PROIBVENDA
-  AND pf.FORALINHA = 'N'
-  AND EXISTS (PCEST com QTESTGER > 0)
-
-NAO ADICIONAR filtro de DTULTENT (gera efetividade > 100%).
-PCPRODUT nao tem coluna DTULTENT - so PCEST tem.
-
-
-
-<!-- AUTO-APPEND PROP-6687F4E3 aprovado por thiago -->
-
-
-### 2026-05-21 — GD_DIM_CLIENTE: aliases reais confirmados
-
-Tentativas com `SITUACAO` e `FANTASIA` quebraram com ORA-00904.
-Executado `SELECT *` pra confirmar schema real.
-
-**Colunas confirmadas (nomes exatos):**
-
-| Campo assumido (errado) | Campo real (correto) |
-|---|---|
-| `SITUACAO` | `STATUS` |
-| `FANTASIA` | `NOMEFANTASIA` |
-| — | `NOMEFANTASIACLIENTEPRINCIPAL` |
-| — | `CLIENTEPRINCIPAL` |
-| — | `DIASINATIVOS` (texto, ex: "DE 31 A 45 DIAS") |
-
-**Schema completo confirmado:**
-```
-CODIGOCLIENTE, CLIENTE, CPJCNPJ, TIPOCLIENTE, CODIGOIBGE,
-BAIRRO, CEP, ENDERECO, NOMEFANTASIA, CLASSE, CLASSIFICACAO,
-EMAILCLIENTE, CODIGORAMOATIVIDADE, RAMOATIVIDADE, GRUPO,
-PRACA, CODIGOROTA, ROTA, CODIGOREDE, REDE, REGIAO, UFREGIAO,
-CIDADE, UF, NOMEFANTASIACLIENTEPRINCIPAL, CLIENTEPRINCIPAL,
-STATUS, DIASINATIVOS, DTCADASTRO, DTULTCOMP, LATITUDE, LONGITUDE
-```
-
-**Exemplo de uso correto:**
 ```sql
-SELECT dc.CODIGOCLIENTE, dc.CLIENTE, dc.NOMEFANTASIA,
-       dc.CIDADE, dc.UF, dc.RAMOATIVIDADE,
-       dc.STATUS, dc.DIASINATIVOS
-FROM EBD.GD_DIM_CLIENTE dc
-WHERE dc.CODIGOCLIENTE = :codCli
+pf.REVENDA = 'S' AND pf.ATIVO = 'S'
+AND pf.PROIBIDAVENDA = 'N'      -- com 'IDA': nao e PROIBVENDA
+AND pf.FORALINHA = 'N'
+AND EXISTS (PCEST com QTESTGER > 0)
 ```
 
-**Observações:**
-- `STATUS` = 'ATIVO' | 'INATIVO' | 'EXCLUÍDO' (conforme knowledge.md seção 11.1)
-- `DIASINATIVOS` é string descritiva: 'ATÉ 30 DIAS', 'DE 31 A 45 DIAS', etc.
-- `CODIGOCLIENTE` = número (INTEGER), não string
-- `TIPOCLIENTE` = 'F' (Físico) | 'J' (Jurídico)
-- `LATITUDE`/`LONGITUDE` podem ser NULL (nem todos os clientes têm geolocalização)
-
-
-
-<!-- AUTO-APPEND PROP-505AB8E9 aprovado por thiago -->
-
-
-### 2026-05-21 — TRUNC() em DATAFATURAMENTO causa ORA-01722 — usar SUBSTR pra agrupar por mês
-
-Tentativa de usar `TRUNC(vf.DATAFATURAMENTO, 'MM')` quebrou com
-`ORA-01722: invalid number` porque `DATAFATURAMENTO` é **string VARCHAR2**
-no formato `YYYYMMDD`, não um tipo DATE.
-
-**Errado:**
-```sql
-SELECT TRUNC(vf.DATAFATURAMENTO, 'MM') AS MES  -- ORA-01722
-FROM EBD.GD_FATO_VENDAFATURAMENTO vf
-```
-
-**Certo — agrupar por mês (YYYYMM):**
-```sql
-SELECT SUBSTR(vf.DATAFATURAMENTO, 1, 6) AS MES_ANO  -- ex: '202605'
-FROM EBD.GD_FATO_VENDAFATURAMENTO vf
-GROUP BY SUBSTR(vf.DATAFATURAMENTO, 1, 6)
-ORDER BY MES_ANO DESC
-```
-
-**Certo — agrupar por ano (YYYY):**
-```sql
-SELECT SUBSTR(vf.DATAFATURAMENTO, 1, 4) AS ANO  -- ex: '2026'
-FROM EBD.GD_FATO_VENDAFATURAMENTO vf
-GROUP BY SUBSTR(vf.DATAFATURAMENTO, 1, 4)
-```
-
-**Certo — converter pra DATE quando precisar de aritmética:**
-```sql
-TO_DATE(vf.DATAFATURAMENTO, 'YYYYMMDD') AS DT_DATE
-```
-
-**Regra geral:** qualquer função que espera DATE (TRUNC, ADD_MONTHS, etc.)
-**não pode** ser aplicada diretamente nas colunas das views GD_*. Sempre
-converter com `TO_DATE(col, 'YYYYMMDD')` antes, ou usar `SUBSTR` pra
-agrupamentos simples por mês/ano.
-
-Isso reforça a cicatriz de 19/05/2026 "Datas nas views GD_* são STRINGS YYYYMMDD".
-
-
-
-<!-- AUTO-APPEND PROP-AD8844AA aprovado por Thiago -->
-
-
-## Cicatriz: Projeção de Fechamento Mensal EBD — Fórmula Validada
-
-> Descoberta e validada em 28/05/2026 com base em dados reais jan-mai/2026.
-> Erro anterior: uso de ritmo médio diário ignorava o padrão de fechamento em lote.
+NAO acrescentar filtro de `DTULTENT` — gera efetividade acima de 100%. E a
+`PCPRODUT` nao tem `DTULTENT`; so a `PCEST` tem.
 
 ---
 
-### ⚠️ O problema (por que os 3 cenários anteriores erraram)
+## #90 - RCA de campo: o filtro canonico (unico e obrigatorio)
 
-O modelo de projeção usava **ritmo médio diário × dias restantes**.
-Esse modelo FALHA porque ignora que o faturamento EBD é **fortemente não-linear**:
-os últimos 1-2 dias do mês concentram 19-31% do total mensal em lote.
-
----
-
-### 📊 Padrão histórico confirmado (bruto EBD sem excluir loja)
-
-| Mês | Total Mês | Penúltimo dia (R$) | Último dia (R$) | % último dia |
-|---|---|---|---|---|
-| Jan/2026 | ~R$280M | Sex 30/01: R$30,0M | Sáb 31/01: R$61,5M | ~22% |
-| Fev/2026 | R$329,8M | Sex 27/02: R$36,7M | Sáb 28/02: R$62,4M | ~19% |
-| Mar/2026 | R$360,4M | Seg 30/03: R$10,1M | Ter 31/03: R$86,4M | ~24% |
-| Abr/2026 | R$289,1M | Qua 29/04: R$24,0M | Qui 30/04: R$88,9M | ~31% |
-| Mai/2026 | ~R$332,9M | Sex 29/05: R$38,5M | Sáb 30/05: R$62,6M | ~19% |
-
-**Faixa do último dia útil do mês: R$60M–R$89M** (independente do dia da semana).
-
-**Faixa do penúltimo dia útil:** R$10M–R$38,5M (mais variável).
-
-**Aceleração começa na quinta-feira da última semana** — não só no último dia.
-
----
-
-### 🔵 Exceção crítica: Loja EBD (ORIGEMPED='W' + CODEMITENTE=7777)
-
-A loja EBD (B2B + B2E) tem **comportamento LINEAR** — NÃO segue o padrão de fechamento em lote.
-
-| Mês | Total Loja | Média diária útil |
-|---|---|---|
-| Jan/2026 | R$799K | ~R$37K/dia útil |
-| Fev/2026 | R$1,02M | ~R$48K/dia útil |
-| Mar/2026 | R$1,21M | ~R$57K/dia útil |
-| Abr/2026 | R$1,13M | ~R$54K/dia útil |
-| Mai/2026 | R$1,16M | ~R$54K/dia útil |
-
-Nos últimos 7 dias da loja, **nenhum dia foge da faixa normal** — confirma linearidade.
-
-**REGRA:**
-> Quando o usuário perguntar "previsão de fechamento" ou "projeção do mês":
-> - O faturamento da loja NÃO usa a fórmula de lote — usa **ritmo médio linear**.
-> - O faturamento da loja **pode permanecer incluído no total geral** (não precisa ser excluído da visão macro).
-> - Separar apenas quando o usuário pedir análise específica da loja.
-
----
-
-### 🎯 Fórmula de projeção EBD (corrigida)
-
-```
-PREVISÃO_FECHAMENTO = ACUMULADO_ATÉ_HOJE
-                    + PROJEÇÃO_DIAS_RESTANTES_NORMAIS
-                    + BÔNUS_FECHAMENTO_LOTE
-```
-
-#### Componentes:
-
-**1. Acumulado até hoje**
-```sql
-SELECT SUM(v.VLATEND)
-FROM EBD.VIEW_VENDAS_RESUMO_FATURAMENTO v
-WHERE v.DTSAIDA BETWEEN TRUNC(SYSDATE,'MM') AND SYSDATE
-  AND v.CONDVENDA = 1
-```
-
-**2. Projeção dias restantes normais** (excluindo os 2 últimos dias do mês)
-```
-ritmo_medio = acumulado / dias_uteis_passados
-projecao_normal = ritmo_medio × dias_uteis_restantes_excluindo_ultimos_2
-```
-> "Dias úteis" = dias com faturamento > R$1M (exclui dom e feriados automaticamente)
-
-**3. Bônus de fechamento em lote** (constante histórica):
-- Penúltimo dia útil do mês: usar **mediana histórica = R$24M** (faixa R$10M–R$38M)
-- Último dia útil do mês: usar **mediana histórica = R$75M** (faixa R$60M–R$89M)
-
-> Se já passaram esses dias, usar o valor real já incluído no acumulado.
-
-#### Cenários recomendados:
-
-| Cenário | Último dia | Penúltimo | Uso |
-|---|---|---|---|
-| Conservador | R$62M | R$15M | Piso |
-| Base | R$75M | R$24M | Referência |
-| Otimista | R$89M | R$38M | Teto |
-
----
-
-### 📐 Cálculo de dias úteis
+Consolida quatro regras que estavam soltas dentro da #54 e se contradiziam
+(jul/2026) — uma delas ensinava `NOT IN` sem `IS NOT NULL`, que zera o
+resultado. Usar ESTE filtro em toda metrica de força de vendas: checkin,
+cobertura, efetividade, positivacao, rota, produtividade.
 
 ```sql
--- Dias com faturamento real > R$1M no mês corrente (proxy de "dia útil")
-SELECT COUNT(*) AS DIAS_UTEIS_PASSADOS,
-       SUM(BRUTO) AS ACUMULADO
-FROM (
-  SELECT TRUNC(v.DTSAIDA) AS DT, SUM(v.VLATEND) AS BRUTO
-  FROM EBD.VIEW_VENDAS_RESUMO_FATURAMENTO v
-  WHERE v.DTSAIDA BETWEEN TRUNC(SYSDATE,'MM') AND SYSDATE
-    AND v.CONDVENDA = 1
-  GROUP BY TRUNC(v.DTSAIDA)
-  HAVING SUM(v.VLATEND) > 1000000
-)
-```
-
----
-
-### ⚠️ Anti-padrões a evitar
-
-- ❌ **Nunca usar média simples × 31** para projetar meses com fechamento em lote
-- ❌ **Nunca projetar a loja com o mesmo modelo** do faturamento tradicional
-- ❌ **Nunca assumir que sábado é fraco** — sábado de fechamento é o maior dia do mês
-- ❌ **Não usar o ritmo da 3ª semana** para projetar a última — a última semana acelera ~40-60% vs semanas anteriores
-
----
-
-### 📅 Comportamento da última semana (padrão)
-
-| Dia | Comportamento típico |
-|---|---|
-| Segunda | Baixo (R$4M–R$8M) |
-| Terça | Médio (R$13M–R$14M) |
-| Quarta | Médio-alto (R$17M–R$24M) |
-| Quinta | Alto (R$21M–R$27M) |
-| Penúltimo dia útil | Muito alto (R$10M–R$38M) |
-| Último dia útil | Explosivo (R$60M–R$89M) |
-
-
-
-
-<!-- AUTO-APPEND PROP-2D5EAF8D aprovado por Thiago -->
-
-
-## Filtro correto para excluir supervisores da base de RCAs
-
-> Confirmado por Thiago (admin) em 06/07/2026.
-
-### Problema
-Ao contar RCAs de campo, supervisores eram incluídos no denominador porque
-estão cadastrados em `PCUSUARI` como qualquer outro usuário. Isso inflava
-o total de RCAs ativos e distorcia métricas de checkin, cobertura e efetividade.
-
-### Query correta — excluir supervisores de PCUSUARI
-
-```sql
-SELECT * FROM EBD.PCUSUARI
-WHERE CODUSUR NOT IN (
-    SELECT CODUSUR FROM EBD.PCUSUARI
-    WHERE PCUSUARI.CODUSUR IN (
-        SELECT COD_CADRCA FROM EBD.PCSUPERV
-    )
-)
-```
-
-### Explicação
-
-| Tabela | Campo | Papel |
-|---|---|---|
-| `PCUSUARI` | `CODUSUR` | Todos os usuários (RCAs + supervisores + outros) |
-| `PCSUPERV` | `COD_CADRCA` | Código do usuário que É supervisor (vínculo supervisor→PCUSUARI) |
-
-O campo `PCSUPERV.COD_CADRCA` aponta para o `CODUSUR` do supervisor em `PCUSUARI`.
-Excluindo esses CODUSURs, ficamos apenas com RCAs de campo puros.
-
-### Anti-padrão evitado
-
-❌ Filtrar por `TIPOVEND` ('E','I','R') não é suficiente — supervisores também
-têm esses tipos e continuam aparecendo no resultado.
-
-❌ Filtrar por `CODSUPERVISOR IS NULL` em `PCUSUARI` não funciona — campo
-se refere ao supervisor DO RCA, não se o usuário é um supervisor.
-
-### Aplicação obrigatória
-
-Usar este filtro em **toda métrica que conta "RCAs de campo"**:
-- Checkin / cobertura de rota
-- Efetividade de mix
-- Positivação por RCA
-- Qualquer denominador que represente "força de vendas ativa"
-
-### Impacto medido (06/07/2026)
-
-| | Sem filtro | Com filtro correto |
-|---|---:|---:|
-| Total RCAs BR | 1.465 | 1.362 |
-| Supervisores removidos | — | ~103 |
-
-
-
-<!-- AUTO-APPEND PROP-B306AB16 aprovado por Thiago -->
-
-
-## Cicatriz: Filtro canônico de RCA ativo em PCUSUARI (corrigido 06/07/2026)
-
-### Problema
-Queries de força de vendas (checkin, cobertura, efetividade, positivação) estavam contando:
-1. **Supervisores** como RCAs de campo — identificados via `PCSUPERV.COD_CADRCA`
-2. **RCAs desligados** — com `DTTERMINO` preenchido e no passado
-
-Impacto: base inflada de 1.362 → real de **1.205 RCAs ativos** (-157 desligados, -103 supervisores removidos em etapa anterior).
-
-### Investigação de campos de atividade em PCUSUARI
-
-| Campo | Comportamento | Serve como filtro? |
-|---|---|---|
-| `DTEXCLUSAO` | 100% NULL para RCAs | ❌ Não |
-| `DTTERMINO` | NULL = ativo, data passada = desligado | ✅ Sim |
-
-### Filtro canônico FINAL de RCA ativo
-
-```sql
-WHERE CODUSUR NOT IN (
-    SELECT COD_CADRCA FROM EBD.PCSUPERV WHERE COD_CADRCA IS NOT NULL
-)
-AND (DTTERMINO IS NULL OR DTTERMINO >= TRUNC(SYSDATE))
-```
-
-### Por que `NOT IN` precisa do `WHERE COD_CADRCA IS NOT NULL`
-
-Oracle: `NOT IN` com qualquer NULL no subselect retorna **zero linhas** (comportamento silencioso).
-Sempre filtrar NULLs no subselect de `NOT IN`.
-
-### Distribuição confirmada (06/07/2026)
-
-| Grupo | Qtd |
-|---|---:|
-| `DTTERMINO IS NULL` (ativos sem prazo) | 1.203 |
-| `DTTERMINO >= SYSDATE` (contrato vigente) | — |
-| `DTTERMINO < SYSDATE` (desligados) | 2.095 |
-| `DTEXCLUSAO` preenchido | 0 |
-
-### Números de referência validados (06/07/2026)
-
-| Métrica | Valor |
-|---|---:|
-| RCAs ativos BR (filtro correto) | 1.205 |
-| Com checkin hoje (9h segunda) | 483 (40,1%) |
-| Sem checkin | 722 (59,9%) |
-
-### Aplicação obrigatória
-
-Em **todas** as queries de força de vendas que usam `PCUSUARI` como base de RCAs:
-- Checkin / cobertura de rota
-- Positivação por RCA
-- Efetividade de mix
-- Aproveitamento de rota
-- Ranking de vendedores
-
-### Anti-padrões a evitar
-
-```sql
--- ❌ ERRADO: DTEXCLUSAO é sempre NULL, não filtra nada
-WHERE DTEXCLUSAO IS NULL
-
--- ❌ ERRADO: NOT IN com NULL no subselect retorna zero linhas silenciosamente
-WHERE CODUSUR NOT IN (SELECT COD_CADRCA FROM EBD.PCSUPERV)
-
--- ❌ ERRADO: filtra desligados mas não exclui supervisores
-WHERE DTTERMINO IS NULL
-
--- ✅ CORRETO: exclui supervisores (sem NULL no subselect) + exclui desligados
-WHERE CODUSUR NOT IN (
-    SELECT COD_CADRCA FROM EBD.PCSUPERV WHERE COD_CADRCA IS NOT NULL
-)
-AND (DTTERMINO IS NULL OR DTTERMINO >= TRUNC(SYSDATE))
-```
-
-
-
-<!-- AUTO-APPEND PROP-2A1C061D aprovado por Thiago -->
-
-## Cicatriz: Contagem de vendedores deve excluir supervisores e cadastros de sistema
-
-> Confirmado por usuário admin em 14/07/2026.
-> Erro detectado: resumo retornou 12 "vendedores sem pedido" em Itapevi, detalhe retornou apenas 6 — divergência causada por inclusão de cadastros não-vendedores no resumo.
-
-### Problema
-Ao contar ou listar vendedores (com/sem pedido, em campo, em rota etc.), cadastros de sistema e supervisores eram incluídos no numerador/denominador, gerando números inconsistentes entre resumo e detalhe.
-
-### Filtro canônico OBRIGATÓRIO para "vendedores de campo"
-
-```sql
--- Exclui supervisores (via PCSUPERV.COD_CADRCA)
-AND u.CODUSUR NOT IN (
-    SELECT COD_CADRCA FROM EBD.PCSUPERV WHERE COD_CADRCA IS NOT NULL
-)
--- Exclui desligados
-AND (u.DTTERMINO IS NULL OR u.DTTERMINO >= TRUNC(SYSDATE))
--- Exclui cadastros operacionais/sistema (e-commerce, GM-RM, fantasmas)
-AND UPPER(NVL(u.NOME, '')) NOT LIKE '%ECOMMERCE%'
-AND UPPER(NVL(u.NOME, '')) NOT LIKE '%GM-RM%'
-AND UPPER(NVL(u.NOME, '')) NOT LIKE 'ORFAO%'
-AND UPPER(NVL(u.NOME, '')) NOT LIKE 'RCA VAGO%'
-AND UPPER(NVL(u.NOME, '')) NOT LIKE '%B2B%'
-AND UPPER(NVL(u.NOME, '')) NOT LIKE '%GERENTE%'
-```
-
-### Regra de consistência obrigatória
-
-> O **mesmo filtro** aplicado no resumo ("X vendedores sem pedido") DEVE ser aplicado no detalhe ("quais são esses X vendedores"). Resumo e detalhe **sempre** devem bater.
-
-### Anti-padrões a evitar
-
-- ❌ Usar `COUNT(DISTINCT CODUSUR)` sem filtrar supervisores e cadastros de sistema
-- ❌ Aplicar filtro rigoroso só no detalhe e filtro frouxo no resumo
-- ❌ Contar cadastros com nome `ECOMMERCE B2B LOJAEBD XX`, `GM-RM`, `ORFAO*`, `RCA VAGO*` como vendedores de campo
-
-### Aplicação obrigatória
-
-Em **todas** as perguntas do tipo:
-- "Quantos vendedores saíram em campo hoje?"
-- "Quantos vendedores sem pedido?"
-- "Lista os vendedores que não visitaram clientes"
-- "Ranking de vendedores por visitas/pedidos/faturamento"
-- Qualquer contagem ou listagem de força de vendas
-
-
-
-<!-- AUTO-APPEND PROP-F1EF0E45 aprovado por Thiago -->
-
-
-## Cicatriz: Produtividade em Rota — pedidos NA rota vs FORA da rota (15/07/2026)
-
-### Problema detectado
-Ao exibir produtividade de RCAs em rota (15/07/2026, EBD MATRIZ filial 01), o valor
-total mostrado para ANTONIO KELVEN SOARES DA SILVA (1343) foi **R$ 1.208,30** — número
-incorreto. O valor real dos pedidos do dia era **R$ 14.152,77**.
-
-**Causa raiz:** o cruzamento considerou apenas pedidos cujos clientes estavam na rota
-planejada do dia (`GD_FATO_ROTACLIENTE + DIASEMANA`), ignorando pedidos digitados para
-clientes **fora da rota planejada**. O valor residual (R$ 1.208,30) era apenas a fatia
-de pedidos "dentro da rota", não o total real de produção do vendedor.
-
-### Regra de negócio corrigida
-
-> Em qualquer análise de produtividade de campo (rota, roteiro, visita, venda na rua),
-> o valor total de pedidos do RCA no dia é a **soma de TODOS os pedidos digitados**,
-> independente de o cliente estar ou não na rota planejada daquele dia.
-> A rota serve como **denominador de cobertura**, não como filtro de pedidos.
-
-### Colunas obrigatórias em relatórios de rota
-
-Todo relatório de produtividade em rota DEVE exibir as colunas abaixo separadas:
-
-| Coluna | Definição |
-|---|---|
-| `CLIENTES_ROTA` | Clientes planejados para o dia (GD_FATO_ROTACLIENTE + DIASEMANA) |
-| `POSITIVADOS_ROTA` | Clientes da rota que tiveram pedido hoje |
-| `PEDIDOS_ROTA` | Pedidos cujo cliente está na rota do dia |
-| `VALOR_ROTA` | Valor dos pedidos dentro da rota |
-| `PEDIDOS_FORA_ROTA` | Pedidos cujo cliente NÃO está na rota do dia |
-| `VALOR_FORA_ROTA` | Valor dos pedidos fora da rota |
-| `TOTAL_PEDIDOS` | `PEDIDOS_ROTA + PEDIDOS_FORA_ROTA` |
-| `VALOR_TOTAL` | `VALOR_ROTA + VALOR_FORA_ROTA` ← **este é o número correto de produção** |
-| `PCT_POSITIVACAO` | `POSITIVADOS_ROTA / CLIENTES_ROTA` |
-
-### Aplicação obrigatória
-
-Sempre que a pergunta envolver qualquer um desses termos:
-- "produtividade em rota", "produtividade de campo"
-- "pedidos em roteiro", "vendas na rua"
-- "RCAs em campo hoje", "resultado do dia do vendedor"
-- "cobertura de rota", "aproveitamento de rota"
-
-### SQL base (lógica correta)
-
-```sql
-WITH rota_dia AS (
-    -- clientes planejados para o dia da semana atual
-    SELECT r.CODIGORCA, r.CODIGOCLIENTE
-    FROM EBD.GD_FATO_ROTACLIENTE r
-    JOIN EBD.GD_DIM_RCA dr ON dr.CODIGORCA = r.CODIGORCA
-    JOIN dia_ref d ON UPPER(r.DIASEMANA) IN (d.NOME, REPLACE(d.NOME,'C','Ç'))
-    JOIN EBD.PCUSUARI u ON u.CODUSUR = r.CODIGORCA
-    WHERE u.CODFILIAL = :codFilial
-      AND UPPER(NVL(dr.RCA,'')) NOT LIKE 'ORFAO%'
-      AND UPPER(NVL(dr.RCA,'')) NOT LIKE 'RCA VAGO%'
-),
-pedidos_dia AS (
-    SELECT p.CODUSUR,
-           p.CODCLI,
-           p.NUMPED,
-           p.VLATEND,
-           CASE WHEN r.CODIGOCLIENTE IS NOT NULL THEN 1 ELSE 0 END AS NA_ROTA
-    FROM EBD.PCPEDC p
-    LEFT JOIN rota_dia r ON r.CODIGORCA = p.CODUSUR AND r.CODIGOCLIENTE = p.CODCLI
-    WHERE p.CODFILIAL = :codFilial
-      AND TRUNC(p.DATA) = TRUNC(SYSDATE)
-      AND p.POSICAO != 'C'
-      AND p.DTCANCEL IS NULL
-      AND p.CONDVENDA NOT IN (4,5,6,8,10,11,12,13,20,98,99)
-)
-SELECT
-    pd.CODUSUR,
-    SUBSTR(NVL(u.NOME,'?'),1,40)               AS VENDEDOR,
-    COUNT(DISTINCT rd.CODIGOCLIENTE)            AS CLIENTES_ROTA,
-    COUNT(DISTINCT CASE WHEN pd.NA_ROTA=1 THEN pd.CODCLI END) AS POSITIVADOS_ROTA,
-    SUM(CASE WHEN pd.NA_ROTA=1 THEN 1 ELSE 0 END) AS PEDIDOS_ROTA,
-    SUM(CASE WHEN pd.NA_ROTA=1 THEN pd.VLATEND ELSE 0 END) AS VALOR_ROTA,
-    SUM(CASE WHEN pd.NA_ROTA=0 THEN 1 ELSE 0 END) AS PEDIDOS_FORA_ROTA,
-    SUM(CASE WHEN pd.NA_ROTA=0 THEN pd.VLATEND ELSE 0 END) AS VALOR_FORA_ROTA,
-    COUNT(pd.NUMPED)                            AS TOTAL_PEDIDOS,
-    SUM(pd.VLATEND)                             AS VALOR_TOTAL,
-    ROUND(COUNT(DISTINCT CASE WHEN pd.NA_ROTA=1 THEN pd.CODCLI END)
-          / NULLIF(COUNT(DISTINCT rd.CODIGOCLIENTE),0)*100,1) AS PCT_POSITIVACAO
-FROM pedidos_dia pd
-JOIN EBD.PCUSUARI u ON u.CODUSUR = pd.CODUSUR
-LEFT JOIN rota_dia rd ON rd.CODIGORCA = pd.CODUSUR
-GROUP BY pd.CODUSUR, u.NOME
-ORDER BY VALOR_TOTAL DESC
-```
-
-### Anti-padrão a evitar
-
-❌ **NUNCA** usar apenas `SUM(VLATEND) WHERE CODCLI IN (clientes da rota)` como valor total
-do RCA — isso corta pedidos fora da rota e gera número errado (caso ANTONIO KELVEN: R$ 1.208
-em vez de R$ 14.152).
-
-❌ **NUNCA** apresentar `VALOR_ROTA` como se fosse a produção total do vendedor.
-
-
-
-<!-- AUTO-APPEND PROP-5F84A956 aprovado por Thiago -->
-
-### 2026-07-23 — RCAs desligados ainda aparecem na rota (PCROTACLI) com clientes órfãos — filtrar SEMPRE por DTTERMINO
-
-**Contexto:** análise de performance de atendimento em EBD SBC (18) no mês de julho/2026. Ao listar vendedores com rota ativa (PCROTACLI + DTFINAL futuro), encontramos 7 vendedores com rota (368 clientes) mas ZERO vendas no mês — todos eram ex-funcionários desligados há meses/anos.
-
-**Erro anterior:** queries de rota/produtividade (T182, T270, T271) não filtravam `u.DTTERMINO` no JOIN com PCROTACLI, inflando o número de "vendedores da filial" e gerando métricas distorcidas de cobertura/aproveitamento.
-
-**Correção OBRIGATÓRIA em TODAS as queries de rota (PCROTACLI):**
-
-```sql
-JOIN EBD.PCUSUARI u ON u.CODUSUR = r.CODUSUR
-WHERE (u.DTTERMINO IS NULL OR u.DTTERMINO >= TRUNC(SYSDATE))
-  -- mais filtros de exclusão padrão (supervisor, ORFAO, VAGO, ECOMMERCE etc.)
-```
-
-**Impacto medido (EBD SBC, 23/07/2026):**
-- Sem filtro DTTERMINO: 34+ "vendedores" listados
-- Com filtro correto: 27 vendedores de campo ativos
-- Clientes órfãos removidos: 368 (em 7 ex-funcionários)
-- Caso mais crítico: CLOVIS MAURILIO BROCARDO — desligado out/2025, ainda com 129 clientes na rota
-
-**Regra de negócio:** PCROTACLI NÃO é automaticamente limpa quando o RCA é desligado. O cadastro de rota só é atualizado manualmente pelo supervisor/gerente. Portanto, filtro de `DTTERMINO` no JOIN com PCUSUARI é obrigatório — não confiar que PCROTACLI só contenha RCAs ativos.
-
-**Anti-padrão a evitar:**
-```sql
--- ❌ ERRADO: confia que PCROTACLI só tem vendedores ativos
-JOIN EBD.PCUSUARI u ON u.CODUSUR = r.CODUSUR
-WHERE u.CODFILIAL = :codFilial
-
--- ✅ CORRETO: filtra desligados explicitamente
-JOIN EBD.PCUSUARI u ON u.CODUSUR = r.CODUSUR
-WHERE u.CODFILIAL = :codFilial
+FROM EBD.PCUSUARI u
+WHERE u.CODUSUR NOT IN (SELECT COD_CADRCA FROM EBD.PCSUPERV
+                         WHERE COD_CADRCA IS NOT NULL)
   AND (u.DTTERMINO IS NULL OR u.DTTERMINO >= TRUNC(SYSDATE))
+  AND UPPER(NVL(u.NOME,'')) NOT LIKE '%ECOMMERCE%'
+  AND UPPER(NVL(u.NOME,'')) NOT LIKE '%GM-RM%'
+  AND UPPER(NVL(u.NOME,'')) NOT LIKE 'ORFAO%'
+  AND UPPER(NVL(u.NOME,'')) NOT LIKE 'RCA VAGO%'
+  AND UPPER(NVL(u.NOME,'')) NOT LIKE '%B2B%'
+  AND UPPER(NVL(u.NOME,'')) NOT LIKE '%GERENTE%'
 ```
 
-**Aplicação:** revisar template T182 (Produtividade em Rota) e templates T270-T272 (Rota de Visitas) para incluir este filtro.
+### As tres armadilhas
 
+1. **`NOT IN` sem `IS NOT NULL` devolve ZERO linhas.** Comportamento do Oracle
+   com NULL no subselect — silencioso, sem erro.
+2. **`DTEXCLUSAO` e sempre NULL na PCUSUARI** — nao filtra nada. Quem marca
+   desligamento e `DTTERMINO`.
+3. **`PCROTACLI` nao e limpa quando o RCA sai.** O cadastro de rota fica e o
+   desligado reaparece com clientes orfaos. Sempre juntar com PCUSUARI.
+
+### Referencia (jul/2026)
+
+| | |
+|---|---|
+| `DTTERMINO IS NULL` | 1.203 |
+| desligados | 2.095 |
+| **RCAs ativos BR, filtro completo** | **1.205** |
+| EBD SBC sem filtro / com filtro | 34+ / **27** |
+
+⚠️ O MESMO filtro no resumo e no detalhe. Resumo com "X vendedores sem pedido"
+e detalhe com outro criterio gera numero que nao fecha.
+
+---
+
+## #91 - Projecao de faturamento do mes
+
+Validada em 28/05/2026 com jan-mai:
+
+- Projecao linear simples ERRA — o faturamento nao e uniforme no mes.
+- A ultima semana concentra volume acima da media; projetar sem considerar
+  isso subestima o fechamento.
+- **Loja EBD (`ORIGEMPED='W'` + `CODEMITENTE=7777`) tem curva propria** e nao
+  segue o padrao do canal tradicional.
+- Dias uteis: contar seg a sab (domingo nao conta).
+
+---
+
+## #92 - Produtividade em rota: o valor vem do PEDIDO
+
+O valor faturado sai de `PCPEDC.VLATEND`, nao e derivado da visita.
+
+Relatorio de rota precisa trazer, alem do RCA: clientes na rota, visitados,
+com pedido, valor e percentual de efetividade. Resumo sem essas colunas nao
+permite conferir.
+
+Aplicar o filtro de RCA de campo da cicatriz #90.
+
+---
 
 ## #55 - PCCARREG NAO tem CODFILIAL nem coluna DATA
 
