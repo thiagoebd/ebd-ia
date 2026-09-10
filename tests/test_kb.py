@@ -124,3 +124,22 @@ def test_nao_usa_tabela_fotografia():
     ruins = [s[:80] for s in _blocos_sql(KB)
              if re.search(r"\bPC[A-Z]+\d{6}\b", s)]
     assert not ruins, f"template usando tabela-fotografia: {ruins}"
+
+
+# --- regra de imagem (10/09/2026) ---
+
+def test_claude_md_tem_regra_de_imagem():
+    """O agente le imagem desde 10/09. Sem regra, ele DESCREVE a foto em vez
+    de oferecer a analise comercial."""
+    c = (DOCS / "CLAUDE.md").read_text(encoding="utf-8")
+    assert "## 5.10" in c and "IMAGEM" in c
+
+
+def test_regra_de_imagem_proibe_afirmar_sem_consultar():
+    """Caso real: disse 'nada disso esta no Winthor' sem consultar; o produto
+    existia com 1.080 unidades."""
+    c = (DOCS / "CLAUDE.md").read_text(encoding="utf-8")
+    i = c.index("## 5.10")
+    bloco = c[i:i + 2500]
+    assert "sem ter consultado" in bloco.lower()
+    assert "pergunte" in bloco.lower()
