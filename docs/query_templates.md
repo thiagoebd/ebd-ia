@@ -1037,11 +1037,7 @@ ORDER BY PCT_APROVEITAMENTO DESC NULLS LAST
 JOIN com rota_rca cruzado com PCPEDC e VIEW_VENDAS pra atribuir
 visitas/fat aos clientes da rota DO RCA (mesmo se outro coberto).
 
-**Cicatriz #40:** RCA pode cobrir rota de colega. Não restringir visitas
-ao mesmo CODUSUR; usar conjunto de clientes da rota do RCA.
-
-
----
+> Ver **cicatriz #40** em sql-corrections.md.
 
 # Parte 9 — Família Ruptura (T130+) — descoberta 21/05/2026
 
@@ -1407,34 +1403,22 @@ SELECT PCPEDC.CODFILIAL,
 - SEMPRE adicionar `AND PCPEDC.CODFILIAL = :userFilial` (obrigatório por regra #9)
 
 
-**Cicatriz #46:** PCUSUARI NÃO tem coluna FUNCAO (ORA-00904 — "FUNCAO": invalid identifier, 15/07). Para função/cargo/tipo do vendedor usar TIPOVEND (validada 31x em produção). DTTERMINO EXISTE e está validada (31x ok) — usar `(DTTERMINO IS NULL OR DTTERMINO >= TRUNC(SYSDATE))` para "equipe ativa". Colunas de PCUSUARI validadas em prod: CODUSUR, NOME, CODFILIAL, TIPOVEND, DTTERMINO.
+> Ver **cicatriz #46** em sql-corrections.md.
 
 # Parte 12 — Família Equipe em Campo / Check-in (T170-T174) — 08/07/2026
 Origem: mineração do queries.jsonl (177 queries; padrões ok=7/3/3/2/2). SQLs reconstruídos de
 prefixos validados em produção — confirmar cada um na 1ª execução. Não confundir com a
 Parte 11 (T160-T163 = Funil/Motivos de Não-Venda): aqui é PRESENÇA/CHECK-IN da equipe.
 
-**Cicatriz #41:** PCVISITAFV NÃO tem CODFILIAL. A filial vem SEMPRE via JOIN:
-`PCVISITAFV v JOIN PCUSUARI u ON u.CODUSUR = v.CODUSUR` → `u.CODFILIAL`.
-Usar `v.CODFILIAL` = ORA-00904 (causa real dos erros do relatório de 08/07).
+> Ver **cicatriz #46** em sql-corrections.md.
 
-**Cicatriz #42:** a coluna de data da PCVISITAFV é `DATA` (tipo DATE) — confirmada ok em
-produção (`vf.DATA >=`, `DATA = TRUNC(SYSDATE)-1`). Não usar DTVISITA/DTCHECKIN.
+> Ver **cicatriz #46** em sql-corrections.md.
 
-**Cicatriz #43 (v2, provada pelo Oracle em 15/07):** PCUSUARI — colunas que EXISTEM:
-CODFILIAL, CODUSUR, NOME, DTTERMINO, TIPOVEND, CODSUPERVISOR.
-NAO EXISTEM: `ATIVO` (ORA-00904, 2x) e `FUNCAO` (ORA-00904) — para "equipe ativa" use
-`(DTTERMINO IS NULL OR DTTERMINO >= TRUNC(SYSDATE))`; para função/tipo use TIPOVEND;
-o supervisor é `CODSUPERVISOR` (não SUPERVISOR).
-Filial: `LEFT JOIN EBD.PCFILIAL pf ON pf.CODIGO = u.CODFILIAL`.
+> Ver **cicatriz #46** em sql-corrections.md.
 
-**Cicatriz #44:** excluir cadastros fantasma da equipe (ORFAO / RCA VAGO / ECOMMERCE):
-`AND UPPER(u.NOME) NOT LIKE '%ORFAO%' AND UPPER(u.NOME) NOT LIKE '%VAGO%' AND UPPER(u.NOME) NOT LIKE '%ECOMMERCE%'`
+> Ver **cicatriz #90** em sql-corrections.md.
 
-**Cicatriz #45:** NÃO misturar vocabulário VIEW × FATO (ORA-00904 dentro da fonte canônica):
-VIEW_VENDAS_RESUMO_FATURAMENTO → data=DTSAIDA, valor=VLATEND.
-VIEW_VENDAS_RESUMO_FATURAMENTO → data=DTSAIDA (DATE), valor=VLATEND, filtro CONDVENDA=1.
-Nunca usar o par de uma na outra.
+> Ver **cicatriz #45** em sql-corrections.md.
 
 ## T170 — Equipe: cadastro de RCAs por filial (reconstruído 08/07 — validar 1ª execução)
 Pergunta: "quais vendedores temos na filial X?" · padrão ok=7 no log
@@ -1529,27 +1513,15 @@ Origem: mineração do queries.jsonl (86 queries PCPRODUT, 52 padrões) + veredi
 prova do Oracle (mine_cols.py). Motivo: família responsável pelo eixo dos ORA-00904 do ciclo 2
 e pelos turns mais caros (Excel de EAN: R$ 10,83 em 8 tools — discovery repetida de schema).
 
-**Cicatriz #47:** o EAN do produto é `PCPRODUT.CODAUXILIAR` (7+ usos ok). `CODEAN` NÃO EXISTE
-(ORA-00904 — alucinação recorrente). Variantes fiscais existentes: GTINCODAUXILIAR,
-GTINCODAUXILIAR2, GTINCODAUXILIARTRIB.
+> Ver **cicatriz #46** em sql-corrections.md.
 
-**Cicatriz #48:** PCPRODUT é cadastro NACIONAL do produto — NÃO tem CODFILIAL, ATIVO nem
-FORALINHA (ORA-00904 provado). O status comercial por filial vive em `PCPRODFILIAL`
-(fórmula universal #5: REVENDA='S' + ATIVO='S' + PROIBIDAVENDA='N' + FORALINHA='N').
-Produto "ativo/disponível" = JOIN com PCPRODFILIAL por CODPROD+CODFILIAL, nunca filtro na PCPRODUT.
+> Ver **cicatriz #46** em sql-corrections.md.
 
-**Cicatriz #49:** `DTULTENT` NÃO está em PCPRODUT (ORA-00904, 8x — campeão de erro da família).
-Última entrada vive em `PCEST` (confirma cicatriz #21).
+> Ver **cicatriz #46** em sql-corrections.md.
 
-**Cicatriz #50:** `CODFORNECPRINC` NÃO está em PCPRODUT (ORA-00904, 2x) — é coluna de `PCFORNEC`.
-Fornecedor raiz: `PCPRODUT p JOIN PCFORNEC f ON f.CODFORNEC = p.CODFORNEC` e então
-`NVL(f.CODFORNECPRINC, f.CODFORNEC)`.
+> Ver **cicatriz #46** em sql-corrections.md.
 
-**Cicatriz #51:** `QUANTIDADE` existe em GD_FATO_VENDAFATURAMENTO (`vf.QUANTIDADE`, ok) e NÃO na
-VIEW_VENDAS_RESUMO_FATURAMENTO (ORA-00904) — caso particular da cicatriz #45 (vocabulário VIEW×FATO).
-
-**Colunas de PCPRODUT validadas em produção:** CODPROD, DESCRICAO, CODAUXILIAR, CODFORNEC,
-CODMARCA, CODEPTO, REVENDA, DTEXCLUSAO, GTINCODAUXILIAR, GTINCODAUXILIAR2, GTINCODAUXILIARTRIB.
+> Ver **cicatriz #46** em sql-corrections.md.
 
 ## T190 — Catálogo de produtos com EAN, fornecedor e departamento (minerado de padrão ok=4)
 Pergunta: "lista de EANs por fornecedor / categoria" · a pergunta do Excel caro de 15/07
@@ -1964,17 +1936,11 @@ Origem: mineração do queries.jsonl (211 queries PCPEDC/PCMETA, padrões ok=8/7
 validados em produção; veredito de coluna provado pelo Oracle (mine_cols.py). Fecha o
 T-CARTEIRA-01 que existia só como prosa + a família meta-dia.
 
-**Cicatriz #52:** carteira de pedidos usa PCPEDC com os filtros canônicos:
-`POSICAO IN ('L','M')` (livre/montado) + `DTCANCEL IS NULL` + `CONDVENDA NOT IN (4,8,10,13,20,98,99)`.
-Valor = VLATEND (atendido). Pedido BLOQUEADO = `POSICAO = 'B'`. Faturado = `POSICAO = 'F'`.
+> Ver **cicatriz #102** em sql-corrections.md.
 
-**Cicatriz #53:** PCPEDC — colunas validadas: CODFILIAL, DATA, VLATEND, NUMPED, POSICAO,
-CODCLI, DTCANCEL, VLTOTAL, ORIGEMPED, CODUSUR, CONDVENDA, CODEMITENTE, CODCOB.
-NÃO EXISTEM: VLPESO, BLOQUEIO (ORA-00904). Data do pedido = DATA (não DTSAIDA — essa é da VIEW).
+> Ver **cicatriz #103** em sql-corrections.md.
 
-**Cicatriz #54:** meta usa PCMETA — colunas: CODFILIAL, DATA, VLVENDAPREV (valor previsto),
-TIPOMETA ('FL' = filial). Meta do mês corrente:
-`TIPOMETA='FL' AND DATA BETWEEN TRUNC(SYSDATE,'MM') AND LAST_DAY(SYSDATE)`.
+> Ver **cicatriz #104** em sql-corrections.md.
 
 ## T220 — Carteira de pedidos por filial (T-CARTEIRA-01 transcrito · ok=7)
 Pergunta: "qual a carteira / pedidos em aberto por filial?"
@@ -2068,14 +2034,9 @@ ORDER BY VALOR_TOTAL DESC
 Origem: mineração do queries.jsonl (31 queries PCFALTA). Colunas provadas pelo Oracle.
 Fecha a família ruptura, que estava só como prosa (T130v2/T133/T134/T136).
 
-**Cicatriz #55:** ruptura = PCFALTA, valor perdido = `SUM(QT * PVENDA)`. Colunas validadas:
-CODFILIAL, DATA, QT, PVENDA, CODUSUR, CODPROD, NUMPED. NÃO EXISTE DTFALTA (data é DATA).
+> Ver **cicatriz #42** em sql-corrections.md.
 
-**Cicatriz #56 (CRÍTICA — pegadinha do BI):** PCFALTA NÃO tem filtro natural de CODFILIAL e
-o BI inclui os CDs. Para ruptura POR FILIAL DE VENDA, restringir explicitamente às filiais
-comerciais, excluindo CDs: `CODFILIAL IN ('01','02','03','04','05','06','07','08','09','10','11','12','13','14','15','16')`.
-Sem esse filtro os números vêm inflados com estoque de CD E a query fica lenta (varre tudo).
-Ajustar a lista às filiais comerciais vigentes do Grupo EBD.
+> Ver **cicatriz #42** em sql-corrections.md.
 
 ## T230 — Ruptura total do mês por filial (ok=3 · rápido com filtro de filial)
 Pergunta: "qual a ruptura / quebra por filial este mês?"
@@ -2127,24 +2088,11 @@ FETCH FIRST 30 ROWS ONLY
 Origem: mineração (79 queries regional_map, ok=54) + MAPA OFICIAL filial→regional fornecido
 pelo Enrico (20/07). Fecha a família executivos BR que estava só como prosa (T201/T202/T204).
 
-**Cicatriz #57 (MAPA OFICIAL filial→regional — fonte de negócio, não reconstruir):**
-O Grupo EBD tem 9 regionais. Mapa canônico (usar este CTE, não reconstruir por chute — evita
-ORA-01790 de tipo e a lentidão de 21s da versão ad-hoc):
-NE1={04,12} · NE2={21,03,09} · NE3={52,53} · SP1={02,16} · SP2={18,15} ·
-RJ1={13,10} · RJ2={14,05} · NO1={06,08} · NO2={11,07,01,22}.
-Filiais 52/53 são EBDN (Petrolina/Caruaru). Todas as 21 são filiais comerciais.
+> Ver **cicatriz #107** em sql-corrections.md.
 
-**Cicatriz #58 (hierarquia comercial tem dimensão pronta):** RCA→supervisor→gerente vive em
-PCUSUARI (CODUSUR, NOME, CODSUPERVISOR) + PCSUPERV (NOME, CODGERENTE) + PCGERENTE (NOMEGERENTE).
-Não montar JOIN pesado de PCUSUARI+PCSUPERV para hierarquia; usar a dimensão.
+> Ver **cicatriz #108** em sql-corrections.md.
 
-**Cicatriz #59 (OFICIAL do BRIEFING — filtro de filial depende do indicador):**
-Há DUAS regras de filial, não uma. VENDAS (faturamento/carteira/meta): 20 filiais comerciais,
-SEM os depósitos fechados — `CODFILIAL IN ('01','02','03','04','05','06','07','08','09','10','11','12','13','14','15','16','18','21','52','53')`.
-OPERAÇÃO/RUPTURA (PCFALTA): INCLUI os depósitos 17 e 23 REMAPEADOS para a filial-mãe
-(movimentam mas somam na filial de venda): `CASE CODFILIAL WHEN '17' THEN '10' (São Pedro da Aldeia→São Gonçalo) WHEN '19' THEN '04' (CD São Luís→São Luís) WHEN '23' THEN '14' (Petrópolis→Piraí) ELSE CODFILIAL END`.
-Ruptura BR TOTAL (fórmula #9) é SEM filtro nenhum (o BI inclui CDs no consolidado nacional).
-Depósitos fechados não aparecem no mapa regional (não faturam). São Luís é staging sem movimento (não entra).
+> Ver **cicatriz #42** em sql-corrections.md.
 
 ## T240 — Faturamento por regional BR (mês corrente · usa mapa oficial)
 Pergunta: "faturamento por regional" / "ranking de regionais"
@@ -2211,9 +2159,7 @@ FETCH FIRST 10 ROWS ONLY
 
 # Correção da família Ruptura (20/07) — remap oficial de depósitos
 
-**Cicatriz #60:** o T230 (Parte 15) usa lista simples de filial e NÃO faz o remap dos
-depósitos fechados. Para ruptura POR FILIAL DE VENDA correta, usar T233 abaixo (com CASE
-17→10, 23→14). O T230 fica válido apenas para leitura rápida "sem depósito"; prefira T233.
+> Ver **cicatriz #42** em sql-corrections.md.
 
 ## T233 — Ruptura por filial de venda com remap oficial de depósitos (mês)
 Pergunta: "ruptura por filial" (versão correta — Petrópolis soma em Piraí, São Pedro em São Gonçalo)
@@ -2243,18 +2189,11 @@ ORDER BY VL_RUPTURA DESC
 Origem: mineração (133 queries PCFORNEC, padrão rápido ok=6 a 286ms vs lentos de 80s por retry).
 Fecha a família fornecedores e mata o risco de timeout (queries batiam 71-80s no teto de 85s).
 
-**Cicatriz #61 (fornecedor raiz):** o "fornecedor principal/raiz" é `NVL(CODFORNECPRINC, CODFORNEC)`
-— quando o fornecedor não tem principal, ele é o próprio. PCFORNEC colunas validadas:
-CODFORNEC, FORNECEDOR, CODFORNECPRINC (só essas três; nome do fornecedor = FORNECEDOR).
+> Ver **cicatriz #74** em sql-corrections.md.
 
-**Cicatriz #62 (CAUSA do timeout de 80s):** a VIEW_VENDAS_RESUMO_FATURAMENTO NÃO tem CODEMITENTE
-nem DTSAIDA_STR (ORA-00904) — o modelo inventava essas colunas, errava e retentava, e cada retry
-varria a tabela (80s). Faturamento por fornecedor: filtrar o COD_RAIZ na PCFORNEC PRIMEIRO
-(subconjunto pequeno), depois cruzar produtos→view. Nunca filtrar emitente na view.
+> Ver **cicatriz #74** em sql-corrections.md.
 
-**Cicatriz #63 (achar fornecedor por nome):** busca de fornecedor é rápida (<60ms) por
-`UPPER(FORNECEDOR) LIKE '%NOME%'` direto na PCFORNEC — não precisa de JOIN. Sempre resolver o
-código do fornecedor ANTES de montar a query de vendas (evita o modelo chutar código).
+> Ver **cicatriz #74** em sql-corrections.md.
 
 ## T250 — Localizar fornecedor por nome (ok=5+, <60ms)
 Pergunta: "qual o código do fornecedor X?" / "existe fornecedor chamado Y?"
@@ -2314,24 +2253,11 @@ FETCH FIRST 30 ROWS ONLY
 Origem: validado em produção (bateu o BI: SBC 2.885 clientes, Maurilio 203, Karyn 145).
 Fecha a família carteira de CLIENTES — conceito distinto de carteira de PEDIDOS (T220).
 
-**Cicatriz #64 (DESAMBIGUAÇÃO — "carteira" tem 3 sentidos):** antes de responder "carteira",
-distinguir: (1) CARTEIRA DE PEDIDOS = posição de pedidos em aberto por status (T220, PCPEDC —
-Liberado/Montado/Bloqueado); (2) CARTEIRA DE CLIENTES = clientes vinculados ao vendedor (T260,
-PCCLIENT); (3) ROTA = quais clientes o RCA visita e quando (PCROTACLI — snapshot vigente, ainda
-sem template). Se a pergunta for ambígua, PERGUNTAR qual das três.
+> Ver **cicatriz #40** em sql-corrections.md.
 
-**Cicatriz #65 (vendedor e filial do cliente):** na PCCLIENT o vendedor dono do cliente é
-CODUSUR1 (validado; existem também CODUSUR2/3 secundários). PCCLIENT NÃO tem CODFILIAL direta —
-a filial do cliente vem pela filial do vendedor (JOIN PCUSUARI u ON u.CODUSUR = c.CODUSUR1,
-filtra por u.CODFILIAL) OU por c.CODFILIALNF (filial da NF). Colunas validadas: CODCLI, CLIENTE
-(nome), CODUSUR1, CODFILIALNF, DTEXCLUSAO, DTULTCOMP, CODATV1, DTCADASTRO. NÃO EXISTEM: NOME
-(é CLIENTE), CODFILIAL, CIDADE, CGC.
+> Ver **cicatriz #115** em sql-corrections.md.
 
-**Cicatriz #66 (DOIS critérios de "ativo" — dão números diferentes):**
-- CADASTRAL: `DTEXCLUSAO IS NULL` = cliente não excluído do sistema (quase todos ativos).
-- COMERCIAL: 90 dias sem compra (PCCLIENT.DTULTCOMP) = cliente que parou de comprar.
-Ex. SBC: cadastral 2.885 ativos/0 inativos vs comercial 2.619 ativos/266 inativos.
-Diretor perguntando "clientes ativos" geralmente quer o COMERCIAL. Na dúvida, perguntar.
+> Ver **cicatriz #116** em sql-corrections.md.
 
 ## T260 — Carteira de clientes por vendedor (critério cadastral · validado no BI)
 Pergunta: "carteira de clientes por vendedor da filial X" / "quantos clientes cada RCA tem"
@@ -2382,24 +2308,11 @@ ORDER BY TOTAL_CLIENTES DESC
 Origem: schema completo da PCROTACLI provado (30 colunas, exemplos reais). Fecha o 3º sentido
 de "carteira" (rota) e DESCARTA a GD_FATO_ROTACLIENTE que o modelo vinha usando errado.
 
-**Cicatriz #67 (TABELA DE ROTA — descartar as erradas):** a rota vigente é PCROTACLI (144k
-linhas, snapshot atual, alimentada pela rotina 354 e atualizada pela 820 na madrugada).
-- USAR: PCROTACLI. Colunas: CODUSUR (RCA), CODCLI (cliente), DIASEMANA (texto),
-  SEQUENCIA (ordem na rota), PERIODICIDADE (7=semanal, 14=quinzenal), DTPROXVISITA (data
-  da próxima visita — a chave), DTFINAL (2999-12-31 = rota ativa sem prazo), DIAFIXO (S/N).
-- NÃO USAR GD_FATO_ROTACLIENTE: só tem CODIGORCA/CODIGOCLIENTE/DIASEMANA, dá resultado pobre
-  e frequentemente ZERO (foi o que fez a análise de rota falhar antes).
-- NUNCA USAR PCMOVROTACLI: 34M linhas, histórico desde 2003, 26s só para COUNT (timeout).
+> Ver **cicatriz #40** em sql-corrections.md.
 
-**Cicatriz #68 (rota de HOJE — DTPROXVISITA é mais preciso que DIASEMANA):** para "quem visitar
-hoje", filtrar por DTPROXVISITA = TRUNC(SYSDATE), NÃO por DIASEMANA. Motivo: clientes quinzenais
-(PERIODICIDADE=14) só devem ser visitados em semanas específicas — filtrar por DIASEMANA os
-traria toda semana (errado). DTPROXVISITA já respeita a periodicidade. Rota ativa: DTFINAL futura
-(inclui 2999-12-31). PCROTACLI NÃO tem CODFILIAL — filial vem do RCA (JOIN PCUSUARI por CODUSUR).
+> Ver **cicatriz #40** em sql-corrections.md.
 
-**Cicatriz #69 (DIASEMANA é texto acentuado):** DIASEMANA vem como texto em maiúsculas
-(SEGUNDA, TERÇA, QUARTA, QUINTA, SEXTA, SÁBADO) — TERÇA e SÁBADO têm acento. Comparar com
-cuidado (UPPER + acento) ou preferir DTPROXVISITA que é data e não sofre disso.
+> Ver **cicatriz #40** em sql-corrections.md.
 
 ## T270 — Rota de hoje por vendedor (quem visitar hoje · DTPROXVISITA)
 Pergunta: "rota de hoje da filial X" / "quem o vendedor Y visita hoje"
@@ -2907,7 +2820,7 @@ ORDER BY PCT_DIVERGENCIA DESC
 ## T-LOG10 — Volume de O.S. por tipo (carga de trabalho do CD)
 
 Usa a PCTIPOOS DA EBD, que e customizada. Filial obrigatoria: sem ela a
-consulta varre 97 mi de linhas e estoura o timeout (cicatriz #62).
+consulta varre 97 mi de linhas e estoura o timeout (cicatriz #60).
 
 ```sql
 SELECT m.TIPOOS,
@@ -3296,7 +3209,7 @@ HAVING COUNT(*) > 0
 
 ⚠️ Se voltar ZERO linhas em tudo, **PARE e pergunte ao usuario**. NAO siga
 para a analise: o resultado seria zero em todas as metricas, com aparencia de
-dado real (cicatriz #75).
+dado real (cicatriz #74).
 
 ### Depois de resolver, use o codigo — nao repita o join
 

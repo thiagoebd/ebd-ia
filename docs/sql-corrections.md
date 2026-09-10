@@ -592,52 +592,112 @@ a familia `VIEW_*`, nao a `GD_*`.
 
 ---
 
-## #39 — Excluir RCAs ÓRFÃOS/VAGOS de métricas de produtividade
+## #40 - ROTA DE VISITAS: qual tabela, qual dia, e os 3 sentidos de "carteira"
 
-RCAs com nome iniciando em 'ORFAO' ou 'RCA VAGO' são códigos fictícios
-de filial usados como "depósito" de clientes parados/desistidos. Eles
-nunca visitam. **Filtro obrigatório em qualquer métrica de rota:**
+### A tabela certa
+
+`PCROTACLI` e a rota vigente (snapshot atual, alimentada pela rotina 354 e
+atualizada pela 820 na madrugada). `PCMOVROTACLI` tem o historico com
+periodicidade. **NAO usar `GD_FATO_ROTACLIENTE`** — desativada (#38) e nao tem
+periodicidade nem DTPROXVISITA, o que infla o resultado com quinzenais e
+mensais que nao seriam visitados hoje.
+
+### Rota de HOJE
+
+`DTPROXVISITA` e mais preciso que `DIASEMANA` — ele respeita a periodicidade
+(7/14/28 dias) e avança sozinho apos a visita.
 
 ```sql
-AND UPPER(NVL(dr.RCA,'')) NOT LIKE 'ORFAO%'
-AND UPPER(NVL(dr.RCA,'')) NOT LIKE 'RCA VAGO%'
+WHERE TRUNC(r.DTPROXVISITA) <= TRUNC(:dtRef)
+  AND TRUNC(r.DTPROXVISITA) >= TRUNC(:dtRef) - 7   -- janela, evita historico
 ```
 
-## #40 — DIASEMANA tem inconsistências TERCA/TERÇA e SABADO/SÁBADO
+Se precisar de `DIASEMANA`: e texto em maiusculas e **TERÇA e SÁBADO tem
+acento**, com cadastro misturado. Comparar sempre com as duas variantes:
 
-Cadastro misturado. Sempre usar:
 ```sql
-WHERE UPPER(DIASEMANA) IN (NOME, REPLACE(NOME,'C','Ç'))
+WHERE UPPER(r.DIASEMANA) IN (:nome, REPLACE(:nome,'C','Ç'))
 ```
 
-## #41 — Cobertura de rota entre RCAs
+### Cobertura entre RCAs
 
-Aproveitamento por RCA NÃO pode usar CODUSUR = CODIGORCA do par
-da rota. Quando RCA falta, colega cobre. Métrica correta:
-"clientes DA rota do RCA X atendidos hoje (por qualquer um)".
+RCA pode cobrir a rota do colega. Nao restringir as visitas ao mesmo
+`CODUSUR` — usar o conjunto de clientes da rota.
 
+⚠️ `PCROTACLI` NAO e limpa quando o RCA e desligado: o cadastro fica e o
+desligado reaparece com clientes orfaos. Aplicar sempre o filtro da #90.
+
+### "Carteira" tem 3 sentidos — perguntar antes
+
+| Sentido | Onde |
+|---|---|
+| carteira de **pedidos** (posicao em aberto) | `PCPEDC`, `POSICAO IN ('L','M')` |
+| carteira de **clientes** (quem e do RCA) | `PCCLIENT` |
+| carteira de **rota** (quem ele visita) | `PCROTACLI` |
 
 ---
 
-## #42 — Ruptura BR = PCFALTA sem filtro filial (BI inclui CDs)
+## #42 - RUPTURA: PCFALTA, filtro de filial e a pegadinha do BI
 
-A view BI de ruptura nao filtra CODFILIAL — soma CDs no total geral.
-Filiais "fantasmas" 17 (R$ 705K mes) e 23 (R$ 346K mes) sao CDs reais
-com ruptura fisica. Devem entrar.
+Ruptura vive na **PCFALTA**. Valor perdido = `SUM(QT * PVENDA)`. Colunas:
+`CODFILIAL, DATA, QT, PVENDA, CODUSUR, CODCLI, CODPROD, NUMPED`.
+**Nao existe DTFALTA** — a data e `DATA`.
 
-## #43 — Remapeamento CD → filial mae em ruptura/operacao
+### O filtro de filial DEPENDE do indicador (regra do briefing)
 
-CDs 17 (São Pedro da Aldeia) e 23 (Petrópolis) servem fisicamente
-as filiais 10 (São Gonçalo) e 14 (Piraí) respectivamente. Em VENDAS
-o sistema integra automaticamente. Em RUPTURA precisa forcar via CASE.
+| Indicador | Filiais |
+|---|---|
+| **Vendas** (faturamento, carteira, meta) | as 20 comerciais, **sem** depositos |
+| **Operacao / ruptura por filial** | INCLUI 17, 19 e 23 **remapeados** para a filial-mae |
+| **Ruptura BR total** | **sem filtro nenhum** — o BI inclui os CDs no consolidado |
 
-## #44 — PCFALTA tem CODUSUR + CODCLI direto
+```sql
+-- remapeamento para ruptura POR FILIAL DE VENDA
+CASE CODFILIAL WHEN '17' THEN '10'   -- Sao Pedro da Aldeia -> Sao Goncalo
+               WHEN '19' THEN '04'   -- CD Sao Luis -> Sao Luis
+               WHEN '23' THEN '14'   -- Petropolis -> Pirai
+               ELSE CODFILIAL END
+```
 
-PCFALTA contem 10 colunas, incluindo CODUSUR (vendedor) e CODCLI
-(cliente) DIRETO. Nao precisa fazer JOIN com PCPEDC para descobrir
-quem vendeu / pra quem. JOIN só com GD_DIM_RCA pra puxar
-supervisor/gerente.
+⚠️ Pegadinha: a ruptura BR do BI e MAIOR que a soma das filiais comerciais,
+porque inclui os depositos. Se o numero nao bate com o BI, e provavelmente
+isto. Os depositos movimentam mas nao faturam — por isso nao aparecem no mapa
+regional (#107).
 
+---
+
+## #45 - PCUSUARI: use TIPOVEND para funcao/cargo, nao FUNCAO
+
+NÃO misturar vocabulário VIEW × FATO (ORA-00904 dentro da fonte canônica):
+VIEW_VENDAS_RESUMO_FATURAMENTO → data=DTSAIDA, valor=VLATEND.
+VIEW_VENDAS_RESUMO_FATURAMENTO → data=DTSAIDA (DATE), valor=VLATEND, filtro CONDVENDA=1.
+Nunca usar o par de uma na outra.
+
+---
+
+## #46 - Colunas que o modelo inventa (o pre-voo ja recusa)
+
+⚠️ Desde 10/09/2026 o **pre-voo do MCP valida toda coluna contra o dicionario
+do Oracle e RECUSA antes de executar**. Esta tabela e referencia de onde esta
+o campo certo — nao e mais preciso decorar.
+
+| Tabela | Coluna inventada | Onde esta de verdade |
+|---|---|---|
+| PCPRODUT | `CODFILIAL`, `ATIVO`, `FORALINHA` | **PCPRODFILIAL** (status e por filial) |
+| PCPRODUT | `DTULTENT` | **PCEST** |
+| PCPRODUT | `CODFORNECPRINC` | **PCFORNEC** |
+| PCPRODUT | `CODEAN` | e **`CODAUXILIAR`** |
+| PCUSUARI | `FUNCAO` | e **`TIPOVEND`** |
+| PCUSUARI | `ATIVO` | e `DTTERMINO` (ver #90) |
+| PCVISITAFV | `CODFILIAL` | JOIN PCUSUARI -> `u.CODFILIAL` |
+| PCVISITAFV | `DTVISITA`, `DTCHECKIN` | e **`DATA`** |
+| PCCARREG | `CODFILIAL`, `DATA` | `CODFILIALDESTINO` e `DTSAIDA` |
+| PCCARREG | `DTCANCEL` | e **`DT_CANCEL`** (com underscore) |
+| PCNFSAID | `VLATEND`, `DTEMISSAO` | `VLTOTAL` e `DTSAIDA` (ver #89) |
+| VIEW_VENDAS_RESUMO_FATURAMENTO | `QUANTIDADE` | e **`QT`** |
+
+`PCMOVENDPEND` exige SEMPRE `CODFILIAL` **e** `DATA` no WHERE — sao 97 milhoes
+de linhas e sem os dois a consulta estoura o tempo.
 
 ---
 
@@ -716,107 +776,6 @@ NAO acrescentar filtro de `DTULTENT` — gera efetividade acima de 100%. E a
 
 ---
 
-## #90 - RCA de campo: o filtro canonico (unico e obrigatorio)
-
-Consolida quatro regras que estavam soltas dentro da #54 e se contradiziam
-(jul/2026) — uma delas ensinava `NOT IN` sem `IS NOT NULL`, que zera o
-resultado. Usar ESTE filtro em toda metrica de força de vendas: checkin,
-cobertura, efetividade, positivacao, rota, produtividade.
-
-```sql
-FROM EBD.PCUSUARI u
-WHERE u.CODUSUR NOT IN (SELECT COD_CADRCA FROM EBD.PCSUPERV
-                         WHERE COD_CADRCA IS NOT NULL)
-  AND (u.DTTERMINO IS NULL OR u.DTTERMINO >= TRUNC(SYSDATE))
-  AND UPPER(NVL(u.NOME,'')) NOT LIKE '%ECOMMERCE%'
-  AND UPPER(NVL(u.NOME,'')) NOT LIKE '%GM-RM%'
-  AND UPPER(NVL(u.NOME,'')) NOT LIKE 'ORFAO%'
-  AND UPPER(NVL(u.NOME,'')) NOT LIKE 'RCA VAGO%'
-  AND UPPER(NVL(u.NOME,'')) NOT LIKE '%B2B%'
-  AND UPPER(NVL(u.NOME,'')) NOT LIKE '%GERENTE%'
-```
-
-### As tres armadilhas
-
-1. **`NOT IN` sem `IS NOT NULL` devolve ZERO linhas.** Comportamento do Oracle
-   com NULL no subselect — silencioso, sem erro.
-2. **`DTEXCLUSAO` e sempre NULL na PCUSUARI** — nao filtra nada. Quem marca
-   desligamento e `DTTERMINO`.
-3. **`PCROTACLI` nao e limpa quando o RCA sai.** O cadastro de rota fica e o
-   desligado reaparece com clientes orfaos. Sempre juntar com PCUSUARI.
-
-### Referencia (jul/2026)
-
-| | |
-|---|---|
-| `DTTERMINO IS NULL` | 1.203 |
-| desligados | 2.095 |
-| **RCAs ativos BR, filtro completo** | **1.205** |
-| EBD SBC sem filtro / com filtro | 34+ / **27** |
-
-⚠️ O MESMO filtro no resumo e no detalhe. Resumo com "X vendedores sem pedido"
-e detalhe com outro criterio gera numero que nao fecha.
-
----
-
-## #91 - Projecao de faturamento do mes
-
-Validada em 28/05/2026 com jan-mai:
-
-- Projecao linear simples ERRA — o faturamento nao e uniforme no mes.
-- A ultima semana concentra volume acima da media; projetar sem considerar
-  isso subestima o fechamento.
-- **Loja EBD (`ORIGEMPED='W'` + `CODEMITENTE=7777`) tem curva propria** e nao
-  segue o padrao do canal tradicional.
-- Dias uteis: contar seg a sab (domingo nao conta).
-
----
-
-## #92 - Produtividade em rota: o valor vem do PEDIDO
-
-O valor faturado sai de `PCPEDC.VLATEND`, nao e derivado da visita.
-
-Relatorio de rota precisa trazer, alem do RCA: clientes na rota, visitados,
-com pedido, valor e percentual de efetividade. Resumo sem essas colunas nao
-permite conferir.
-
-Aplicar o filtro de RCA de campo da cicatriz #90.
-
----
-
-## #55 - PCCARREG NAO tem CODFILIAL nem coluna DATA
-
-Erro cometido em 27/07/2026: assumi `CODFILIAL` e `DATA` na PCCARREG. Nao
-existem. `CODFILIALSAIDA` EXISTE mas esta preenchida em 0 de 1.153.949 cargas.
-
-  Data da carga  -> DTSAIDA (99,99% preenchida)
-  Filial         -> so via JOIN: PCPEDC.NUMCAR = PCCARREG.NUMCAR
-                    (ou PCNFSAID.NUMCAR), pegando PCPEDC.CODFILIAL
-
-Outras datas da PCCARREG: DTFECHA, DTFAT, DTSAIDAVEICULO, DTRETORNO,
-DATAMAPA, DATAHORAMAPA, DTINICIOCHECKOUT, DTFIMCHECKOUT.
-
-## #56 - PCCARREG.DT_CANCEL tem UNDERSCORE e cancela metade das cargas
-
-E `DT_CANCEL`, nao `DTCANCEL`. E nao e detalhe: 49,9% das cargas de 2026 estao
-canceladas (era 35,4% em 2022). Filtro obrigatorio em TODO template de carga:
-
-  AND DT_CANCEL IS NULL
-
-Quase nenhuma cancelada tem nota (38 em 68 mil) — e montagem desfeita na 901,
-nao cancelamento fiscal.
-
-## #57 - KM e prazo de rota NAO EXISTEM (nao insistir)
-
-PCCARREG.KMINICIAL / KMFINAL: preenchidas em ~34% das linhas mas com valor
-ZERO em 100% dos casos, em todos os anos desde 2019.
-PCROTAEXP: 227 rotas, e KMROTA, DIASENTREGA, PRAZOPREVENT e QTENTREGA com
-ZERO rotas preenchidas.
-
-Nao ha como calcular km rodado, desvio de roteiro nem prazo prometido. Esse
-dado vive na MaximaTech/MyFrota, e a integracao e de mao unica
-(PCMYFROTA_FILA com 560 mil registros de saida, tabelas de retorno zeradas).
-
 ## #58 - Tabelas-fotografia de 2018 (BANIR)
 
 Existem copias congeladas com nome quase identico ao das tabelas vivas:
@@ -836,21 +795,41 @@ Usar qualquer uma. Ja CODFUNCEMBALADOR esta ZERADA.
 A PCCARREG usa CODFUNCCONF; a PCCORTEI tambem. So a PCMOVENDPEND tem a grafia
 dupla.
 
-## #60 - PCMOVENDPEND.HORA e carimbo da O.S., nao do movimento
+## #60 - DATAS E HORAS no Winthor: o que tem hora e o que nao tem
 
-Tentativa de medir produtividade por "hora ativa" produziu 370 linhas/hora e
-1,2 hora ativa por dia — impossivel. O HORA e estampado por O.S.; milhares de
-linhas herdam a mesma hora (36 mil linhas numa unica hora em SBC).
+### Nem toda coluna DATE tem hora
 
-MEDIDO em 28/07/2026: a coluna HORA nao e nem a hora do movimento nem a do
-fim da O.S. — bate com DTINICIOOS em 5,3% das linhas e com DTFIMOS em 0,1%.
-Nao usar para nada. Hora real sai de DTINICIOOS / DTFIMOS (ver #68).
+| COM hora | SEM hora (truncada) |
+|---|---|
+| `PCMOVENDPEND.DTINICIOOS`, `DTFIMOS` | `PCMOVENDPEND.DATA` |
+| `PCCORTEI.DATA`, `PCWMSCORTE.DATA` | `PCCARREG.DTSAIDA`, `PCPEDC.DATA` |
+| | `PCCARREG.DTFECHA` (hora em HORAFECHA/MINUTOFECHA) |
 
-Produtividade individual so por LINHAS POR DIA TRABALHADO:
-  COUNT(*) / COUNT(DISTINCT TRUNC(DATA))
+`PCMOVENDPEND.HORA` e carimbo da O.S., nao do movimento — bate com
+`DTINICIOOS` em apenas 5,3% das linhas. **E ruido: nao usar.**
 
-E o tempo decorrido da O.S. (DTFIMOS - DTINICIOOS) tambem nao serve: a O.S.
-fica aberta (mediana de 1.110 minutos em Teresina).
+### EXTRACT(HOUR FROM coluna DATE) da ORA-30076
+
+O Oracle so aceita EXTRACT de TIMESTAMP. Para hora de uma coluna DATE:
+
+```sql
+TO_CHAR(m.DTINICIOOS, 'HH24')          -- correto
+EXTRACT(HOUR FROM m.DTINICIOOS)        -- ORA-30076
+```
+
+### Turno que vira o dia
+
+A separacao roda das 21h as 07h, com 57% do volume DEPOIS da meia-noite.
+`TRUNC(DATA)` sozinho parte o turno em dois dias. Deslocar:
+
+```sql
+TRUNC(m.DTINICIOOS - 12/24) AS DIA_OPERACIONAL
+```
+
+`PCMOVENDPEND` exige SEMPRE `CODFILIAL` **e** `DATA` no WHERE — 97 milhoes de
+linhas.
+
+---
 
 ## #61 - Motivo de corte: PCTABDEV com TIPO = 'CO'
 
@@ -865,12 +844,6 @@ para nao tomar ORA-01722:
   LEFT JOIN EBD.PCTABDEV d ON TO_CHAR(d.CODDEVOL) = TRIM(c.MOTIVO)
 
 PCWMSCORTE.CODMOTIVO ja e NUMBER e junta direto.
-
-## #62 - PCMOVENDPEND exige CODFILIAL + DATA
-
-97,3 milhoes de linhas. Agrupar por TIPOOS sem filtrar filial levou 204s
-(acima do timeout de 85s). Os indices uteis sao (CODFILIAL, POSICAO, DATA) e
-(DATA, CODFILIAL). SEMPRE filtrar os dois.
 
 ## #63 - "O.S." e ambiguo no Winthor
 
@@ -899,80 +872,6 @@ PRATICAMENTE zeradas: 17 linhas preenchidas em ~31.600 cortes de 90 dias
 DTSAIDAVEICULO parece morta olhando a tabela inteira (16,9%) e esta viva nos
 ultimos 3 meses (70,6%). Historico antigo dilui e faz campo vivo parecer morto.
 Ao avaliar se uma coluna serve, filtrar os ultimos 90 dias.
-
-
-## #66 - EXTRACT(HOUR FROM coluna DATE) da ORA-30076
-
-Oracle so extrai HOUR/MINUTE/SECOND de TIMESTAMP ou INTERVAL. De uma coluna
-DATE (que e o tipo de praticamente toda data do Winthor) so sai YEAR, MONTH e
-DAY. Isso quebrou uma pergunta real de turno noturno em 27/07/2026.
-
-  ERRADO:  EXTRACT(HOUR FROM m.DATA)
-  ERRADO:  EXTRACT(HOUR FROM c.DTSAIDA)
-
-  CERTO:   TO_NUMBER(TO_CHAR(m.DTINICIOOS, 'HH24'))    -- hora como numero
-  CERTO:   TO_CHAR(m.DTINICIOOS, 'HH24')               -- hora como texto '23'
-  CERTO:   TO_CHAR(m.DTINICIOOS, 'DD/MM HH24:MI')      -- data e hora
-  CERTO:   EXTRACT(HOUR FROM CAST(m.DTINICIOOS AS TIMESTAMP))
-
-ATENCAO ao escolher a coluna: TO_CHAR sobre coluna TRUNCADA nao da erro, so
-devolve '00' em tudo. PCMOVENDPEND.DATA e truncada — ver #68.
-
-EXTRACT(YEAR FROM ...) e EXTRACT(MONTH FROM ...) funcionam em DATE — o erro so
-aparece com campo de tempo.
-
-CUIDADO ADICIONAL na PCMOVENDPEND: existe a coluna HORA, mas ela e carimbo da
-O.S., nao do movimento (cicatriz #60). Para saber a hora REAL de um movimento,
-usar TO_CHAR sobre DTINICIOOS ou DTFIMOS, nunca a coluna HORA.
-
-## #67 - Turno que vira o dia: nao usar TRUNC(DATA) sozinho
-
-A operacao de armazem da EBD e NOTURNA e ATRAVESSA A MEIA-NOITE. Medido na
-filial 18, 14 dias, pela hora de DTINICIOOS: turno das 21h as 07h, PICO A
-MEIA-NOITE (18% dos inicios de O.S.), 57% do trabalho DEPOIS da meia-noite
-contra 38% entre 18h e 23h.
-
-Logo, "domingo para segunda" ou "turno da noite" NAO pode agrupar por dia
-calendario: a maior metade da jornada cai no dia seguinte.
-
-Para tratar a jornada que atravessa a meia-noite, deslocar a hora do CARIMBO
-DE TRABALHO (nunca a DATA, que e truncada):
-
-  TRUNC(m.DTINICIOOS - 12/24)   AS JORNADA
-
-Assim tudo que acontece das 12h de um dia as 11h59 do seguinte conta como a
-mesma jornada operacional — o turno 21h-07h cabe inteiro. Usar so quando a
-pergunta for de turno; para faturamento e venda, TRUNC(DATA) normal.
-
-
-## #68 - Nem toda coluna de data do Winthor tem hora
-
-Medido em 28/07/2026 (14 dias, filial 18). CONFERIR antes de extrair hora:
-
-  SEM HORA (truncada na meia-noite):
-    PCMOVENDPEND.DATA
-    PCCARREG.DTSAIDA
-    PCPEDC.DATA
-
-  COM HORA:
-    PCMOVENDPEND.DTINICIOOS / DTFIMOS / DTFIMSEPARACAO / DTINICIOCONFERENCIA
-    PCCARREG.DTSAIDAVEICULO
-    PCCORTEI.DATA
-    PCWMSCORTE.DATA
-
-Nao da para adivinhar pelo nome nem pelo tipo: DATA e truncada na
-PCMOVENDPEND e tem hora na PCCORTEI.
-
-TO_CHAR sobre coluna truncada NAO DA ERRO — devolve '00' em todas as linhas.
-A query roda, agrupa e apresenta resultado errado com cara de certo. Foi assim
-que o T-LOG11 nasceu quebrado e passou no teste de execucao.
-
-Teste antes de usar qualquer coluna para analise de hora:
-
-  SELECT COUNT(DISTINCT TO_CHAR(<coluna>,'HH24')) FROM <tabela> WHERE ...
-
-Se voltar 1, a coluna e truncada e nao serve.
-
 
 ## #69 - Movimento por endereco NAO e movimento por dia
 
@@ -1025,7 +924,6 @@ NUMERO. NUNCA inferir o nome a partir do que o usuario mencionou na conversa —
 foi assim que o agente chamou o deposito 1 de "area seca" e o 4 de "camara
 fria" antes de ter qualquer confirmacao, acertando por sorte.
 
-
 ## #71 - Deposito virtual: ler do parametro, NUNCA cravar 99
 
 O Winthor mantem um deposito ARTIFICIAL por filial, que recebe a quantidade
@@ -1055,7 +953,6 @@ sistema.
 Outros parametros da mesma familia: DEPOSITOAUTOSERVICO (nulo em todas as
 filiais da EBD) e QUEBRAOSARMAZPORDEPOSITO (= 'N' em todas).
 
-
 ## #72 - PCVOLUMEOS: so serve pra CONTAR volume, e nao tem indice em DATA
 
 39,1 milhoes de linhas, viva (115 mil volumes em 7 dias, 12 mil O.S.). Mas a
@@ -1083,8 +980,7 @@ O QUE DA PRA FAZER: contar volumes por O.S., por carga e por filial — que e
 carga de trabalho de conferencia e embarque. Medido: Taquara 79,3 volumes por
 O.S. contra 27,5 em SBC. Mediana geral 2, media 9,5, maximo 1.000.
 
-
-## #73 - Baixa do romaneio e DTFECHA, nao DTRETORNO
+## #73 - Carga: baixa e DTFECHA; km e prazo NAO EXISTEM
 
 Erro que eu cometi em 27/07/2026: medi 11 das 146 colunas da PCCARREG, vi
 DTRETORNO com 3 registros e conclui que o retorno da carga nao era registrado.
@@ -1108,42 +1004,50 @@ colunas candidatas do dicionario em vez de conferir as que vieram a cabeca:
   WHERE OWNER='EBD' AND TABLE_NAME=:t AND DATA_TYPE='DATE'
 
 
-## #74 - MARCA nao e FORNECEDOR: procure nas duas tabelas
 
-Caso real (28/07/2026): pediram analise da "Havaianas em SBC". O agente buscou
-UPPER(FORNECEDOR) LIKE '%HAVAI%' na PCFORNEC, voltou ZERO linhas, e passou 7
-minutos e 18 consultas analisando um conjunto vazio.
+### KM e prazo nao existem — nao insistir
 
-  Havaianas e MARCA:      PCMARCA.CODMARCA = 1272, MARCA = 'HAVAIANAS'
-  O fornecedor e:         ALPARGATAS S.A. (CODFORNEC 25277, 25324, 25498;
-                          raiz CODFORNECPRINC = 25277)
-  Produtos:               1.771, TODOS com PCPRODUT.CODMARCA = 1272
+`PCCARREG.KMINICIAL/KMFINAL`: preenchidas em ~34% das linhas, mas com valor
+ZERO em 100% dos casos desde 2019. `PCROTAEXP`: KMROTA, DIASENTREGA,
+PRAZOPREVENT e QTENTREGA todas zeradas.
 
-A descricao do produto NAO contem 'HAVAIANAS' — a unica entrada por nome de
-marca e a PCMARCA (573 marcas cadastradas). A PCFORNEC tambem tem a coluna
-FANTASIA, alem de FORNECEDOR.
+Esse dado vive na MaximaTech/MyFrota e a integracao e de mao unica
+(PCMYFROTA_FILA com 560 mil saidas, tabelas de retorno zeradas).
 
-REGRA: nome de industria dado pelo usuario pode ser marca, razao social ou
-fantasia. Procure nos QUATRO campos antes de concluir que nao existe:
-PCFORNEC.FORNECEDOR, PCFORNEC.FANTASIA, PCMARCA.MARCA, PCPRODUT.DESCRICAO.
-Ver T-RES01.
+---
 
-## #75 - ZERO LINHAS em consulta de cadastro NAO e resposta
+## #74 - FORNECEDOR: raiz, busca por nome e o timeout de 80s
 
-'oracle_query_ok' significa "nao deu erro", nao "achou". Numa consulta de
-CADASTRO (PCFORNEC, PCMARCA, PCCLIENT, PCPRODUT...), zero linha quase sempre
-quer dizer que o termo esta na tabela errada.
+### Fornecedor raiz
 
-Seguir a analise sobre conjunto vazio produz o pior tipo de erro: numeros
-zerados com procedencia legitima. Nao e fabulacao — e conclusao falsa que
-passa em qualquer verificacao de origem.
+`NVL(f.CODFORNECPRINC, f.CODFORNEC)` — quando nao tem principal, ele e o
+proprio. `CODFORNECPRINC` fica na **PCFORNEC**, nunca na PCPRODUT.
 
-Em tabela de MOVIMENTO zero linha e resposta legitima ("nao houve venda no
-periodo"). A distincao e essa.
+### MARCA nao e FORNECEDOR
 
-O MCP passou a anexar aviso automatico quando isso acontece (funcao
-aviso_zero_linhas em app/preflight.py). Se o aviso aparecer, PARE e resolva a
-entidade antes de continuar.
+Sao coisas diferentes: Havaianas e MARCA (`PCMARCA`, cod 1272); o fornecedor
+e ALPARGATAS (`PCFORNEC`, cods 25277/25324/25498). Procurar o termo nas
+QUATRO: `PCFORNEC.FORNECEDOR`, `PCFORNEC.FANTASIA`, `PCMARCA.MARCA` e
+`PCPRODUT.DESCRICAO`.
+
+### ZERO LINHAS em cadastro NAO e resposta
+
+Se a busca por nome em tabela de cadastro volta vazia, o termo esta na tabela
+errada — nao e ausencia de dado. **Nao prosseguir com a analise sobre conjunto
+vazio.** O MCP ja avisa isso no resultado.
+
+### O timeout de 80s
+
+`NVL()` no WHERE mata o indice `PCPRODUT_IDX3`. Resolver o `CODFORNEC` UMA VEZ
+numa CTE e usar o codigo depois — 4,23s viram 0,64s.
+
+```sql
+WITH forn AS (SELECT CODFORNEC FROM EBD.PCFORNEC
+               WHERE NVL(CODFORNECPRINC, CODFORNEC) = :cod)
+SELECT ... FROM EBD.PCPRODUT p JOIN forn f ON f.CODFORNEC = p.CODFORNEC
+```
+
+---
 
 ## #76 - Resolva CODFORNEC UMA VEZ; NVL() no WHERE mata o indice
 
@@ -1170,7 +1074,6 @@ Referencia medida: os 1.771 produtos da Alpargatas em SBC, 30 dias, saem em
 
 ALL_TABLES e ALL_TAB_COLUMNS usam TABLE_NAME; ALL_VIEWS usa VIEW_NAME. O
 pre-voo NAO pega isso: ele so valida tabelas do schema EBD, nao o dicionario.
-
 
 ## #78 - PCGMMETACOMB: somar VLFATURADO sem filtro conta 2x ou 4x
 
@@ -1234,16 +1137,6 @@ Validado ao centavo na meta 118452 (diferenca 0,0000 nas 3 industrias).
 A comissao varia por PRODUTO dentro da mesma industria (Alpargatas tem 3%, 4%
 e 5% na mesma meta). NAO existe "percentual da industria".
 
-## #81 - CODFORNECPRINC esta na PCFORNEC, NAO na PCPRODUT
-
-  ERRADO: SELECT ... FROM EBD.PCPRODUT pr WHERE pr.CODFORNECPRINC ...
-  CERTO:  JOIN EBD.PCFORNEC f ON f.CODFORNEC = pr.CODFORNEC
-          ... NVL(f.CODFORNECPRINC, f.CODFORNEC)
-
-A PCPRODUT tem CODFORNEC (com indice PCPRODUT_IDX3); a raiz do grupo economico
-esta na PCFORNEC.
-
-
 ## #82 - Existem DUAS bases de faturamento no GM, e elas diferem 3 a 6%
 
 O `Realizado` do indicador 16 (base da META) NAO e igual ao `Valor Faturado`
@@ -1275,7 +1168,6 @@ faturado onde a pessoa tinha R$ 2,57 mi.
 
 A PCGMMETACOMBCOMPLE nao tem filial nem RCA — so CODMETA e CODCOMBINACAO.
 Sempre amarrar pelo CODMETA especifico.
-
 
 ## #84 - Preco e por REGIAO: o de-para e NUMREGIAOPADRAO, nao NUMREGIAO
 
@@ -1404,7 +1296,6 @@ SELECT COUNT(DISTINCT CODCLI) AS CLIENTES,
 FROM ped
 ```
 
-
 ## #89 - COMPRA x VENDA: tabelas parecidas que trazem numero errado calado
 
 O Winthor tem pares de tabelas com nomes proximos e as MESMAS chaves
@@ -1450,3 +1341,160 @@ Faturamento sai da PCPEDC com VLATEND — ver cicatriz #88.
 Estas o pre-voo ja recusa antes de executar. A distincao compra/venda NAO —
 ali as colunas existem nas duas, e so o contexto do negocio diz qual e a
 certa.
+
+## #90 - RCA de campo: o filtro canonico (unico e obrigatorio)
+
+Consolida quatro regras que estavam soltas dentro da #54 e se contradiziam
+(jul/2026) — uma delas ensinava `NOT IN` sem `IS NOT NULL`, que zera o
+resultado. Usar ESTE filtro em toda metrica de força de vendas: checkin,
+cobertura, efetividade, positivacao, rota, produtividade.
+
+```sql
+FROM EBD.PCUSUARI u
+WHERE u.CODUSUR NOT IN (SELECT COD_CADRCA FROM EBD.PCSUPERV
+                         WHERE COD_CADRCA IS NOT NULL)
+  AND (u.DTTERMINO IS NULL OR u.DTTERMINO >= TRUNC(SYSDATE))
+  AND UPPER(NVL(u.NOME,'')) NOT LIKE '%ECOMMERCE%'
+  AND UPPER(NVL(u.NOME,'')) NOT LIKE '%GM-RM%'
+  AND UPPER(NVL(u.NOME,'')) NOT LIKE 'ORFAO%'
+  AND UPPER(NVL(u.NOME,'')) NOT LIKE 'RCA VAGO%'
+  AND UPPER(NVL(u.NOME,'')) NOT LIKE '%B2B%'
+  AND UPPER(NVL(u.NOME,'')) NOT LIKE '%GERENTE%'
+```
+
+ORFAO e RCA VAGO sao codigos ficticios de filial usados como deposito de
+clientes parados — nunca visitam, nunca vendem, e inflam qualquer metrica
+de produtividade.
+
+### As tres armadilhas
+
+1. **`NOT IN` sem `IS NOT NULL` devolve ZERO linhas.** Comportamento do Oracle
+   com NULL no subselect — silencioso, sem erro.
+2. **`DTEXCLUSAO` e sempre NULL na PCUSUARI** — nao filtra nada. Quem marca
+   desligamento e `DTTERMINO`.
+3. **`PCROTACLI` nao e limpa quando o RCA sai.** O cadastro de rota fica e o
+   desligado reaparece com clientes orfaos. Sempre juntar com PCUSUARI.
+
+### Referencia (jul/2026)
+
+| | |
+|---|---|
+| `DTTERMINO IS NULL` | 1.203 |
+| desligados | 2.095 |
+| **RCAs ativos BR, filtro completo** | **1.205** |
+| EBD SBC sem filtro / com filtro | 34+ / **27** |
+
+⚠️ O MESMO filtro no resumo e no detalhe. Resumo com "X vendedores sem pedido"
+e detalhe com outro criterio gera numero que nao fecha.
+
+---
+
+## #91 - Projecao de faturamento do mes
+
+Validada em 28/05/2026 com jan-mai:
+
+- Projecao linear simples ERRA — o faturamento nao e uniforme no mes.
+- A ultima semana concentra volume acima da media; projetar sem considerar
+  isso subestima o fechamento.
+- **Loja EBD (`ORIGEMPED='W'` + `CODEMITENTE=7777`) tem curva propria** e nao
+  segue o padrao do canal tradicional.
+- Dias uteis: contar seg a sab (domingo nao conta).
+
+---
+
+## #92 - Produtividade em rota: o valor vem do PEDIDO
+
+O valor faturado sai de `PCPEDC.VLATEND`, nao e derivado da visita.
+
+Relatorio de rota precisa trazer, alem do RCA: clientes na rota, visitados,
+com pedido, valor e percentual de efetividade. Resumo sem essas colunas nao
+permite conferir.
+
+Aplicar o filtro de RCA de campo da cicatriz #90.
+
+---
+
+## #102 - Carteira de pedidos: os filtros canonicos da PCPEDC
+
+carteira de pedidos usa PCPEDC com os filtros canônicos:
+`POSICAO IN ('L','M')` (livre/montado) + `DTCANCEL IS NULL` + `CONDVENDA NOT IN (4,8,10,13,20,98,99)`.
+Valor = VLATEND (atendido). Pedido BLOQUEADO = `POSICAO = 'B'`. Faturado = `POSICAO = 'F'`.
+
+---
+
+## #103 - PCPEDC: as colunas validadas em producao
+
+PCPEDC — colunas validadas: CODFILIAL, DATA, VLATEND, NUMPED, POSICAO,
+CODCLI, DTCANCEL, VLTOTAL, ORIGEMPED, CODUSUR, CONDVENDA, CODEMITENTE, CODCOB.
+NÃO EXISTEM: VLPESO, BLOQUEIO (ORA-00904). Data do pedido = DATA (não DTSAIDA — essa é da VIEW).
+
+---
+
+## #104 - Meta: PCMETA com TIPOMETA='FL' (filial)
+
+meta usa PCMETA — colunas: CODFILIAL, DATA, VLVENDAPREV (valor previsto),
+TIPOMETA ('FL' = filial). Meta do mês corrente:
+`TIPOMETA='FL' AND DATA BETWEEN TRUNC(SYSDATE,'MM') AND LAST_DAY(SYSDATE)`.
+
+---
+
+## #107 - MAPA REGIONAL: a fonte e o BANCO, nao este documento
+
+```sql
+SELECT rf.FANTASIAREGIONAL AS REGIONAL, rf.CODFILIAL
+FROM EBD.EBD_REGIONAISFILIAIS rf
+WHERE rf.PARTICIPAGERENCIAL = 'S'
+```
+
+`PARTICIPAGERENCIAL='S'` separa as 9 regionais operacionais dos agrupamentos
+maiores (NORTE, NORDESTE, SAO PAULO, RIO DE JANEIRO, ORIGEM RJ), que sao 'N'.
+A sigla vem em `FANTASIAREGIONAL` — **nao juntar com PCREGIONAL**, os
+CODREGIONAL das duas divergem e o join produz lixo (NE1=Fortaleza).
+
+Mapa medido em 01/09/2026, para conferencia:
+
+| Regional | Filiais |
+|---|---|
+| N1 | 06 Manaus · 08 Boa Vista |
+| N2 | 01 Matriz · 07 Macapa · 11 Santarem · 22 Maraba |
+| NE1 | 04 Sao Luis · 12 Imperatriz |
+| NE2 | 03 Fortaleza · 09 Juazeiro · 21 Teresina |
+| NE3 | 52 Petrolina · 53 Caruaru |
+| RJ1 | 10 Sao Goncalo · 13 Taquara |
+| RJ2 | 05 Duque · 14 Pirai |
+| SP1 | 02 SP · 16 Itapevi |
+| SP2 | 15 Guarulhos · 18 SBC |
+
+⚠️ O Norte e **`N1`/`N2`** no banco — a versao anterior desta cicatriz usava
+NO1/NO2, e o T-PAINEL01 chegou a ter um mapa escrito a mao com NE1/NE2/NE3
+trocadas. Nao reescrever o mapa: ler da tabela.
+
+---
+
+## #108 - hierarquia comercial tem dimensão pronta
+
+RCA→supervisor→gerente vive em
+PCUSUARI (CODUSUR, NOME, CODSUPERVISOR) + PCSUPERV (NOME, CODGERENTE) + PCGERENTE (NOMEGERENTE).
+Não montar JOIN pesado de PCUSUARI+PCSUPERV para hierarquia; usar a dimensão.
+
+---
+
+## #115 - vendedor e filial do cliente
+
+na PCCLIENT o vendedor dono do cliente é
+CODUSUR1 (validado; existem também CODUSUR2/3 secundários). PCCLIENT NÃO tem CODFILIAL direta —
+a filial do cliente vem pela filial do vendedor (JOIN PCUSUARI u ON u.CODUSUR = c.CODUSUR1,
+filtra por u.CODFILIAL) OU por c.CODFILIALNF (filial da NF). Colunas validadas: CODCLI, CLIENTE
+(nome), CODUSUR1, CODFILIALNF, DTEXCLUSAO, DTULTCOMP, CODATV1, DTCADASTRO. NÃO EXISTEM: NOME
+(é CLIENTE), CODFILIAL, CIDADE, CGC.
+
+---
+
+## #116 - DOIS critérios de "ativo" — dão números diferentes
+
+- CADASTRAL: `DTEXCLUSAO IS NULL` = cliente não excluído do sistema (quase todos ativos).
+- COMERCIAL: 90 dias sem compra (PCCLIENT.DTULTCOMP) = cliente que parou de comprar.
+Ex. SBC: cadastral 2.885 ativos/0 inativos vs comercial 2.619 ativos/266 inativos.
+Diretor perguntando "clientes ativos" geralmente quer o COMERCIAL. Na dúvida, perguntar.
+
+---
