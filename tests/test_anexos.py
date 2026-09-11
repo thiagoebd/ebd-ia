@@ -263,3 +263,38 @@ def test_precos_do_deepseek_atualizados():
     s = _fonte("gateway/app/routes/chat.py")
     assert "0.15, 0.60, 0.003" in s
     assert "0.14, 0.28" not in s
+
+
+def test_titulo_da_imagem_usa_cliente_assincrono():
+    """`with` sincrono num AsyncAnthropic estoura e cai no fallback —
+    era por isso que o titulo ficava sempre 'Imagem enviada'."""
+    s = _fonte("gateway/app/routes/chat.py")
+    i = s.index("_titulo_da_imagem")
+    bloco = s[i:i + 1800]
+    assert "async with cli.messages.stream" in bloco
+    assert "async for _ in st.text_stream" in bloco
+    assert "await st.get_final_message()" in bloco
+
+
+def test_front_aceita_o_titulo_do_backend_sempre():
+    """O titulo so era atualizado quando o id mudava — em conversa so com
+    imagem o provisorio 'Imagem enviada' ficava para sempre."""
+    s = _fonte("frontend/src/App.tsx")
+    i = s.index('if (ev.type === "conversation")')
+    bloco = s[i:i + 700]
+    j = bloco.index("title: ev.title")
+    k = bloco.index("if (realId !== oldId)")
+    assert j < k, "o titulo tem que ser aplicado ANTES do if de id diferente"
+
+
+def test_titulo_tem_max_tokens_folgado():
+    """Com teto baixo o modelo termina em max_tokens SEM texto — o titulo
+    vinha vazio, caia no fallback e NAO registrava erro (intermitente)."""
+    s = _fonte("gateway/app/routes/chat.py")
+    i = s.index("_titulo_da_imagem")
+    assert "max_tokens=4000" in s[i:i + 1800]
+
+
+def test_titulo_vazio_e_registrado():
+    s = _fonte("gateway/app/routes/chat.py")
+    assert "titulo da imagem veio VAZIO" in s

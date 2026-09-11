@@ -260,9 +260,12 @@ function App() {
 
           if (ev.type === "conversation") {
             const realId = ev.id as string;
-            if (realId !== streamTidRef.current) {
-              const oldId = streamTidRef.current;
-              setThreads((ts) => ts.map((t) => (t.id === oldId ? { ...t, id: realId, title: ev.title || t.title } : t)));
+            const oldId = streamTidRef.current;
+            // o titulo do backend SEMPRE vence: em conversa so com imagem ele
+            // vem do proprio modelo, e o local era so o provisorio
+            setThreads((ts) => ts.map((t) => (t.id === oldId || t.id === realId
+              ? { ...t, id: realId, title: ev.title || t.title } : t)));
+            if (realId !== oldId) {
               setActiveId(realId);
               streamTidRef.current = realId;
             }

@@ -85,18 +85,33 @@ async def _titulo_da_imagem(blocos: list) -> str:
             "text": ("De um titulo de ate 6 palavras para esta imagem, em "
                      "portugues. So o titulo, sem aspas e sem ponto final."),
         }]
-        with cli.messages.stream(model=m, max_tokens=400,
-                                 messages=[{"role": "user",
-                                            "content": conteudo}]) as st:
-            for _ in st.text_stream:
+        # o cliente e ASSINCRONO (AsyncAnthropic) — `with` sincrono estoura
+        # e cai no except, deixando o titulo em "Imagem enviada"
+        # max_tokens folgado: o modelo raciocina antes de responder e com
+        # teto baixo termina em stop_reason=max_tokens SEM texto — o titulo
+        # vinha vazio e caia no fallback, sem erro no log (intermitente).
+        async with cli.messages.stream(model=m, max_tokens=4000,
+                                       messages=[{"role": "user",
+                                                  "content": conteudo}]) as st:
+            async for _ in st.text_stream:
                 pass
-            r = st.get_final_message()
+            r = await st.get_final_message()
         t = "".join(getattr(b, "text", "") for b in r.content
                     if getattr(b, "type", "") == "text").strip()
         t = t.strip(" \"'").replace("\n", " ")
-        return (t[:42] + "…") if len(t) > 42 else (t or "Imagem enviada")
+        if not t:
+            logger.warning("titulo da imagem veio VAZIO: stop=%s out=%s",
+                           getattr(r, "stop_reason", "?"),
+                           getattr(getattr(r, "usage", None),
+                                   "output_tokens", "?"))
+            return "Imagem enviada"
+        # o modelo as vezes responde "Titulo: X" ou manda frase inteira
+        if ":" in t[:12]:
+            t = t.split(":", 1)[1].strip()
+        return (t[:42] + "…") if len(t) > 42 else t
     except Exception as e:
-        logger.warning("titulo da imagem falhou: %s", type(e).__name__)
+        logger.warning("titulo da imagem falhou: %s: %s",
+                       type(e).__name__, str(e)[:160])
         return "Imagem enviada"
 
 
