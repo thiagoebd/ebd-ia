@@ -58,3 +58,22 @@ html, body, #root { min-height: 100vh; }
   border: 1px solid var(--border, #e2ddd3);
   display: block;
 }
+
+.anexo-planilha {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 30px 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border, #e2ddd3);
+  background: var(--bg-soft, #f7f4ee);
+  font-size: 13px;
+  max-width: 320px;
+}
+.anexo-planilha-icone { opacity: .6; }
+.anexo-planilha-nome {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

@@ -72,6 +72,7 @@ from app.tools.artifact_tools import CREATE_EXCEL_TOOL, CREATE_PDF_TOOL, CREATE_
 from app.tools.chart_builder import build_chart
 from app.tools.artifact_tools import CREATE_ROUTE_MAP_TOOL
 from app.tools.routemap_builder import build_route_map
+from app.tools.planilha_tools import FERRAMENTAS as PLANILHA_TOOLS
 from app.tools.template_catalog import (
     LIST_TEMPLATES_TOOL, GET_TEMPLATE_TOOL, tool_list_templates, tool_get_template,
 )
@@ -91,6 +92,7 @@ from app.tools.knowledge_append import (
 # logger do modulo. O arquivo usava `import logging` DENTRO de cada funcao,
 # mas o fluxo do stream tambem loga (SILENCIO A/C/D) e ali nao havia import —
 # NameError em toda resposta.
+import json
 import logging as _logging
 logger = _logging.getLogger("uvicorn.error")
 
@@ -109,7 +111,7 @@ def _client_for(model: str | None):
         return _deepseek_client, m
     return _client, m
 _system_prompt = build_system_prompt()
-_tools = [ORACLE_QUERY_TOOL, KNOWLEDGE_APPEND_TOOL, LIST_PROPOSALS_TOOL, CREATE_EXCEL_TOOL, CREATE_PDF_TOOL, CREATE_PPTX_TOOL, CREATE_CHART_TOOL, LIST_TEMPLATES_TOOL, GET_TEMPLATE_TOOL, CREATE_ROUTE_MAP_TOOL]
+_tools = [ORACLE_QUERY_TOOL, KNOWLEDGE_APPEND_TOOL, LIST_PROPOSALS_TOOL, CREATE_EXCEL_TOOL, CREATE_PDF_TOOL, CREATE_PPTX_TOOL, CREATE_CHART_TOOL, LIST_TEMPLATES_TOOL, GET_TEMPLATE_TOOL, CREATE_ROUTE_MAP_TOOL] + PLANILHA_TOOLS
 
 
 def reload_system_prompt() -> int:
@@ -136,7 +138,53 @@ def current_date_line() -> str:
 MAX_HISTORY_PAIRS = 10
 
 
-async def _run_tool(tool_name: str, tool_input: dict, user_id: str, user_role: str) -> str:
+async def _run_planilha(nome: str, entrada: dict, ctx: dict) -> str:
+    """Despacha as ferramentas de planilha. Devolve JSON para o modelo."""
+    from app.tools.planilha_exec import (
+        PlanilhaNaoEncontrada, executa_cruzar, executa_resolver, executa_resumo,
+    )
+
+    pool = ctx["pool"]
+    conv = ctx["conversation_id"]
+    pid = entrada.get("planilha_id") or None
+
+    async def roda_oracle(sql: str):
+        """As ferramentas precisam do resultado como lista de dicts."""
+        r = await execute_oracle_query(sql, max_rows=5000)
+        if isinstance(r, dict):
+            if r.get("erro") or r.get("error"):
+                raise RuntimeError(str(r.get("erro") or r.get("error"))[:200])
+            return r.get("rows") or r.get("linhas") or []
+        return r or []
+
+    try:
+        if nome == "planilha_resumo":
+            out = await executa_resumo(pool, conv, pid)
+        elif nome == "planilha_resolver":
+            out = await executa_resolver(
+                pool, conv, entrada.get("coluna", ""),
+                entrada.get("entidade", ""), roda_oracle, pid)
+        else:
+            out = await executa_cruzar(
+                pool, conv, ctx.get("user_oid", ""),
+                entrada.get("coluna_planilha", ""), entrada.get("sql", ""),
+                entrada.get("coluna_winthor", ""), roda_oracle,
+                entrada.get("tipo_chave", "codigo"), pid)
+    except PlanilhaNaoEncontrada as e:
+        out = {"erro": str(e)}
+    except Exception as e:
+        logger.warning("planilha %s falhou: %s: %s", nome,
+                       type(e).__name__, str(e)[:160])
+        out = {"erro": f"{type(e).__name__}: {str(e)[:160]}"}
+    return json.dumps(out, ensure_ascii=False, default=str)
+
+
+async def _run_tool(tool_name: str, tool_input: dict, user_id: str,
+                    user_role: str, planilha_ctx: dict | None = None) -> str:
+    """`planilha_ctx` vem do gateway: {pool, conversation_id, user_oid}.
+
+    O agente vive no core e o Postgres no gateway — por isso o contexto
+    desce por parametro em vez de ser importado."""
     if tool_name == "oracle_query":
         sql = tool_input.get("sql", "")
         max_rows = tool_input.get("max_rows", 100)
@@ -151,6 +199,11 @@ async def _run_tool(tool_name: str, tool_input: dict, user_id: str, user_role: s
             user_id=user_id,
             user_role=user_role,
         )
+    if tool_name in ("planilha_resumo", "planilha_resolver", "planilha_cruzar"):
+        if not planilha_ctx:
+            return json.dumps({"erro": "Planilha nao disponivel neste canal."},
+                              ensure_ascii=False)
+        return await _run_planilha(tool_name, tool_input, planilha_ctx)
     if tool_name == "list_proposals":
         return tool_list_proposals(user_id=user_id)
     if tool_name == "create_excel":
@@ -240,7 +293,8 @@ async def run_turn(
     user_filiais: str = "*",
     channel: str = "cli",
  model: str | None = None,
-    imagens: list | None = None) -> dict:
+    imagens: list | None = None,
+    planilha_ctx: dict | None = None) -> dict:
     messages = list(conversation_history or [])
     messages = _trim_history(messages)
     # com anexo, o content vira lista de blocos (imagem antes do texto)
@@ -316,7 +370,8 @@ async def run_turn(
         for block in response.content:
             if block.type == "tool_use":
                 tool_calls_log.append({"name": block.name, "input": block.input, "id": block.id})
-                result_str = await _run_tool(block.name, block.input, user_id, user_role)
+                result_str = await _run_tool(block.name, block.input, user_id, user_role,
+                                             planilha_ctx)
                 _tr = {
                     "type": "tool_result",
                     "tool_use_id": block.id,
@@ -353,6 +408,7 @@ async def run_turn_stream(
     model: str | None = None,
     user_email: str | None = None,
     imagens: list | None = None,
+    planilha_ctx: dict | None = None,
 ):
     """Versao streaming de run_turn. Em vez de retornar dict no fim,
     da yield de eventos conforme processa:
@@ -557,7 +613,8 @@ async def run_turn_stream(
                     else:
                         yield {"type": "status", "text": f"Executando {block.name}..."}
                     yield {"type": "tool", "name": block.name, "input": block.input}
-                    result_str = await _run_tool(block.name, block.input, user_id, user_role)
+                    result_str = await _run_tool(block.name, block.input, user_id, user_role,
+                                             planilha_ctx)
                     _ok = not (isinstance(result_str, str) and (result_str.startswith("ERRO") or result_str.startswith("__ORACLE_ERROR__")))
                     tool_outcomes.append((block.name, _ok))
                     yield {"type": "tool_done", "name": block.name, "success": _ok}

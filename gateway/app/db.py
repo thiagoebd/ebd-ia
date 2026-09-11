@@ -38,6 +38,18 @@ CREATE TABLE IF NOT EXISTS messages (
     content         jsonb       NOT NULL,
     created_at      timestamptz NOT NULL DEFAULT now()
 );
+CREATE TABLE IF NOT EXISTS planilhas (
+    id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    conversation_id uuid        NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+    user_oid        text        NOT NULL,
+    nome_arquivo    text        NOT NULL,
+    aba             text,
+    total_linhas    integer     NOT NULL DEFAULT 0,
+    colunas         jsonb       NOT NULL,
+    linhas          jsonb       NOT NULL,
+    created_at      timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_planilha_conv ON planilhas (conversation_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_conv_user_updated ON conversations (user_oid, updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_msg_conv_created  ON messages (conversation_id, created_at);
 """

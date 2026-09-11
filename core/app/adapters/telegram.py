@@ -30,7 +30,6 @@ logger = logging.getLogger(__name__)
 _history: dict[int, list[dict]] = {}
 _session_stats: dict[int, dict] = {}
 
-# Pricing Sonnet 4.6 (US$/MTok)
 # DeepSeek V4.1 Flash, precos off-peak (comunicado 09/09/2026).
 # Pico (22h-1h e 3h-7h BRT) e o dobro; o uso da EBD e comercial.
 PRICE_INPUT = 0.15 / 1_000_000
@@ -160,7 +159,12 @@ async def handle_message(chat_id: int, user_first_name: str, text: str,
         _cr  = int(_u.get('cache_read_input_tokens', 0) or 0)
         _cw  = int(_u.get('cache_creation_input_tokens', 0) or 0)
         _mstr = str(((result.get('model') if isinstance(result, dict) else '') or '')).lower()
-        if 'haiku' in _mstr:
+        # ⚠️ FALTAVA O DEEPSEEK AQUI. O nome do modelo caia no `else`, que tem
+        # os precos do Claude Sonnet (3,0/15,0) — 20x o real. Turnos do bot
+        # apareciam a R$ 2,14 quando custavam R$ 0,10 (medido em 11/09/2026).
+        if 'deepseek' in _mstr:
+            _pin, _pout, _prd, _pwr = 0.15, 0.60, 0.003, 0.15
+        elif 'haiku' in _mstr:
             _pin, _pout, _prd, _pwr = 1.0, 5.0, 0.10, 2.0
         elif 'opus' in _mstr:
             _pin, _pout, _prd, _pwr = 5.0, 25.0, 0.50, 10.0
@@ -176,7 +180,7 @@ async def handle_message(chat_id: int, user_first_name: str, text: str,
             conversation_id='telegram',
             input_tokens=_in, output_tokens=_out,
             cache_read_tokens=_cr, cache_creation_tokens=_cw,
-            custo_brl=round(_usd * _pr('USD_BRL','5.40'), 6),
+            custo_brl=round(_usd * _pr('USD_BRL','5.20'), 6),
             ttft_ms=0.0,
             total_ms=round((_t.perf_counter()-_llm_t0)*1000.0, 1),
             tools_executadas=len((result.get('tool_calls') if isinstance(result, dict) else None) or []),

@@ -184,7 +184,7 @@ def test_front_limita_20mb_e_so_imagem():
 def test_front_permite_enviar_so_imagem():
     """Sem texto, com anexo, tem que enviar."""
     s = _fonte("frontend/src/App.tsx")
-    assert "(!question && anexos.length === 0)" in s
+    assert "(!question && anexos.length === 0 && !planilha)" in s
 
 
 def test_front_limpa_anexos_apos_enviar():
@@ -194,7 +194,7 @@ def test_front_limpa_anexos_apos_enviar():
 def test_botao_enviar_considera_anexos():
     """Bug de 10/09: disabled={!input.trim()} travava o envio so-imagem."""
     s = _fonte("frontend/src/App.tsx")
-    assert "disabled={!input.trim() && anexos.length === 0}" in s
+    assert "disabled={!input.trim() && anexos.length === 0 && !planilha}" in s
 
 
 def test_front_reduz_a_imagem_antes_de_enviar():
@@ -298,3 +298,39 @@ def test_titulo_tem_max_tokens_folgado():
 def test_titulo_vazio_e_registrado():
     s = _fonte("gateway/app/routes/chat.py")
     assert "titulo da imagem veio VAZIO" in s
+
+
+def test_dolar_uniforme_em_520():
+    """Havia 5,40 em dois arquivos e 5,20 em outro — o painel dava valores
+    diferentes conforme o canal."""
+    for rel in ("gateway/app/routes/chat.py", "core/app/adapters/telegram.py"):
+        s = _fonte(rel)
+        assert "5.40" not in s, f"{rel} ainda tem 5,40"
+
+
+def test_precos_do_deepseek_nao_caem_no_else_do_claude():
+    """`if 'pro' in _mstr` nao pega 'deepseek-flash' — o nome novo caia no
+    else final, que usa os precos do Claude Sonnet (3,0/15,0) e inflava 4x."""
+    s = _fonte("gateway/app/routes/chat.py")
+    i = s.index("_mstr = str(model_used).lower()")
+    bloco = s[i:i + 900]
+    assert bloco.count("0.15, 0.60, 0.003") >= 2, \
+        "os dois ramos do deepseek precisam ter o preco do V4.1 Flash"
+
+
+def test_telegram_tem_ramo_do_deepseek_no_evento():
+    """O registro do bot so tinha haiku/opus/else — o deepseek caia no else
+    com precos do Claude Sonnet. Turnos a R$ 2,14 que custavam R$ 0,10."""
+    s = _fonte("core/app/adapters/telegram.py")
+    i = s.index("_mstr = str(")
+    bloco = s[i:i + 900]
+    assert "'deepseek' in _mstr" in bloco
+    assert "0.15, 0.60, 0.003" in bloco
+
+
+def test_nenhum_canal_usa_preco_do_sonnet_para_deepseek():
+    for rel in ("gateway/app/routes/chat.py", "core/app/adapters/telegram.py"):
+        s = _fonte(rel)
+        i = s.index("'deepseek' in _mstr")
+        # o ramo do deepseek vem ANTES do else do sonnet
+        assert i < s.index("3.0, 15.0, 0.30, 6.0"), rel

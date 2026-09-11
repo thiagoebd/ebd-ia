@@ -32,6 +32,8 @@ function App() {
   const [selectedModel, setSelectedModel] = useState<string>("deepseek-flash");
   // anexos: data URLs. O backend aceita ate 5 e reduz antes de mandar ao modelo.
   const [anexos, setAnexos] = useState<string[]>([]);
+  // planilha: um arquivo por vez (o cruzamento e sobre uma so)
+  const [planilha, setPlanilha] = useState<{nome: string; b64: string} | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const MAX_ANEXO_MB = 20;
 
@@ -40,8 +42,22 @@ function App() {
     const novos: string[] = [];
     let pendentes = files.length;
     Array.from(files).forEach((f) => {
+      if (/\.(xlsx|xls|csv)$/i.test(f.name)) {
+        if (f.size > MAX_ANEXO_MB * 1024 * 1024) {
+          setError(`${f.name} tem ${(f.size/1024/1024).toFixed(1)} MB — o limite e ${MAX_ANEXO_MB} MB.`);
+          pendentes--; return;
+        }
+        const rp = new FileReader();
+        rp.onload = () => {
+          setPlanilha({ nome: f.name, b64: String(rp.result) });
+          if (--pendentes === 0 && novos.length) setAnexos((a) => [...a, ...novos].slice(0, 5));
+        };
+        rp.onerror = () => { setError(`Nao consegui ler ${f.name}.`); pendentes--; };
+        rp.readAsDataURL(f);
+        return;
+      }
       if (!f.type.startsWith("image/") && !/\.(heic|heif)$/i.test(f.name)) {
-        setError("Por enquanto so imagem (PNG, JPG). PDF e planilha ainda nao.");
+        setError("Aceito imagem (PNG, JPG) e planilha (XLSX, CSV). PDF ainda nao.");
         pendentes--; return;
       }
       if (f.size > MAX_ANEXO_MB * 1024 * 1024) {
@@ -198,11 +214,13 @@ function App() {
 
   async function send(presetQuestion?: string) {
     const question = (presetQuestion ?? input).trim();
-    if ((!question && anexos.length === 0) || busy) return;
+    if ((!question && anexos.length === 0 && !planilha) || busy) return;
     const imgs = anexos;
+    const pl = planilha;
     setError(null);
     setInput("");
     setAnexos([]);
+    setPlanilha(null);
     if (taRef.current) taRef.current.style.height = "auto";
     setBusy(true);
 
@@ -211,7 +229,7 @@ function App() {
     streamTidRef.current = tid;
 
     if (isNew) {
-      const base = question || (imgs.length ? "Imagem enviada" : "Nova conversa");
+      const base = question || (pl ? pl.nome : imgs.length ? "Imagem enviada" : "Nova conversa");
       const title = base.length > 42 ? base.slice(0, 42) + "…" : base;
       setThreads((ts) => [{ id: tid, title, msgs: [], loaded: true }, ...ts]);
       setActiveId(tid);
@@ -222,7 +240,7 @@ function App() {
 
     pushMsgs((m) => [
       ...m,
-      { role: "user", text: question, imagens: imgs.length ? imgs : undefined },
+      { role: "user", text: question, imagens: imgs.length ? imgs : undefined, planilha_b64: pl ? pl.b64 : undefined, planilha_nome: pl ? pl.nome : undefined },
       { role: "assistant", text: "", status: "Pensando", tools: [] },
     ]);
 
@@ -233,7 +251,7 @@ function App() {
       const resp = await fetch(`${API_BASE}/api/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${tok}` },
-        body: JSON.stringify({ message: question, conversation_id: isNew ? null : activeId, model: selectedModel, imagens: imgs.length ? imgs : undefined }),
+        body: JSON.stringify({ message: question, conversation_id: isNew ? null : activeId, model: selectedModel, imagens: imgs.length ? imgs : undefined, planilha_b64: pl ? pl.b64 : undefined, planilha_nome: pl ? pl.nome : undefined }),
         signal: controller.signal,
       });
       if (!resp.ok || !resp.body) {
@@ -512,6 +530,20 @@ function App() {
 
             <div className="composer-wrap">
               <div className="composer">
+                {planilha && (
+                  <div className="anexos-preview">
+                    <div className="anexo-planilha">
+                      <span className="anexo-planilha-icone">▦</span>
+                      <span className="anexo-planilha-nome">{planilha.nome}</span>
+                      <button
+                        type="button"
+                        className="anexo-remove"
+                        onClick={() => setPlanilha(null)}
+                        title="Remover"
+                      >×</button>
+                    </div>
+                  </div>
+                )}
                 {anexos.length > 0 && (
                   <div className="anexos-preview">
                     {anexos.map((src, i) => (
@@ -541,14 +573,14 @@ function App() {
                       addAnexos(dt.files);
                     }
                   }}
-                  placeholder="Pergunte ao EBD.ia…  (cole ou anexe uma imagem)"
+                  placeholder="Pergunte ao EBD.ia…  (cole ou anexe imagem ou planilha)"
                   rows={1}
                   disabled={busy}
                 />
                 <input
                   ref={fileRef}
                   type="file"
-                  accept="image/*,.heic,.heif"
+                  accept="image/*,.heic,.heif,.xlsx,.xls,.csv"
                   multiple
                   style={{ display: "none" }}
                   onChange={(e) => { addAnexos(e.target.files); e.target.value = ""; }}
@@ -560,8 +592,8 @@ function App() {
                       className="chip chip-btn"
                       onClick={() => fileRef.current?.click()}
                       disabled={busy}
-                      title="Anexar imagem (ate 20 MB)"
-                    >📎 Imagem</button>
+                      title="Anexar imagem ou planilha (ate 20 MB)"
+                    >📎 Anexo</button>
                     <span className="chip"><span className="dot-ok" /> Winthor</span>
                     {(() => {
                       const current = me?.models.available.find((m) => m.id === selectedModel);
@@ -595,7 +627,7 @@ function App() {
                   {busy ? (
                     <button className="send stop" onClick={stop} title="Parar">■</button>
                   ) : (
-                    <button className="send" onClick={() => send()} disabled={!input.trim() && anexos.length === 0}>↑</button>
+                    <button className="send" onClick={() => send()} disabled={!input.trim() && anexos.length === 0 && !planilha}>↑</button>
                   )}
                 </div>
               </div>

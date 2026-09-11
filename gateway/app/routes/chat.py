@@ -48,6 +48,9 @@ class ChatRequest(BaseModel):
     # imagens em base64 (data URL ou base64 puro). O front manda no MESMO
     # corpo JSON — nao precisa de multipart nem rota separada.
     imagens: list[str] | None = None
+    # planilha: base64 do xlsx/csv + nome, no MESMO corpo JSON
+    planilha_b64: str | None = None
+    planilha_nome: str | None = None
     history: list | None = None  # compat (ignorado, janela vem do banco)
 
 
@@ -192,6 +195,38 @@ async def chat(body: ChatRequest, claims: dict = Depends(verify_token)):
             _titulo = (_title_from(body.message) if body.message.strip()
                        else await _titulo_da_imagem(_imgs))
 
+            # planilha: le, valida e guarda. O agente so vera o resumo.
+            _erro_pl = None
+            if body.planilha_b64:
+                try:
+                    import base64 as _b64p
+                    import sys as _sp
+                    from pathlib import Path as _Pp
+                    _c = str(_Pp(__file__).resolve().parents[3] / "core")
+                    if _c not in _sp.path:
+                        _sp.path.insert(0, _c)
+                    from app.planilhas import PlanilhaInvalida, le_planilha
+                    bruto = body.planilha_b64
+                    if bruto.startswith("data:"):
+                        bruto = bruto.partition(",")[2]
+                    _pl = le_planilha(_b64p.b64decode(bruto),
+                                      body.planilha_nome or "planilha.xlsx")
+                    _pl_pendente = _pl
+                    logger.info("chat: planilha %s com %d linhas",
+                                body.planilha_nome, _pl.total)
+                except PlanilhaInvalida as e:
+                    _erro_pl = str(e)
+                except Exception as e:
+                    logger.warning("planilha falhou: %s", type(e).__name__)
+                    _erro_pl = "Nao consegui ler essa planilha."
+            else:
+                _pl_pendente = None
+
+            if _erro_pl:
+                yield _sse({"type": "token", "text": f"⚠️ {_erro_pl}"})
+                yield _sse({"type": "done", "stop_reason": "anexo_invalido"})
+                return
+
             if conv_id and not _e_uuid(conv_id):
                 # frontend manda tmp-<timestamp> em conversa nova: nao e UUID,
                 # e passar isso ao Postgres derruba o stream inteiro
@@ -216,6 +251,16 @@ async def chat(body: ChatRequest, claims: dict = Depends(verify_token)):
             yield _sse({"type": "conversation", "id": conv_id,
                         "title": conv["title"], "new": new_conv,
                         "model": model_used})
+
+            _pl_ctx = None
+            if conv_id:
+                if _pl_pendente is not None:
+                    from app.tools.planilha_exec import grava as _grava_pl
+                    await _grava_pl(db._pool_or_raise(), conv_id, user_id,
+                                    body.planilha_nome or "planilha.xlsx",
+                                    _pl_pendente)
+                _pl_ctx = {"pool": db._pool_or_raise(),
+                           "conversation_id": conv_id, "user_oid": user_id}
 
             window = await db.build_model_window(conv_id, user_id)
             _lap('window pronta')
@@ -243,6 +288,7 @@ async def chat(body: ChatRequest, claims: dict = Depends(verify_token)):
                     user_email=_email,
                     model=model_used,
                     imagens=_imgs or None,
+                    planilha_ctx=_pl_ctx,
                 ):
                     etype = ev.get("type")
                     if etype == "token":
@@ -301,7 +347,7 @@ async def chat(body: ChatRequest, claims: dict = Depends(verify_token)):
                                 "conversation_id": str(conv_id),
                                 "input_tokens": _in, "output_tokens": _out,
                                 "cache_read_tokens": _cr, "cache_creation_tokens": _cw,
-                                "custo_brl": round(_usd * _pr("USD_BRL","5.40"), 6),
+                                "custo_brl": round(_usd * _pr("USD_BRL","5.20"), 6),
                                 "ttft_ms": round(getattr(event_stream, "_ttft_ms", 0.0), 1),
                                 "total_ms": round((_t.perf_counter()-_t0)*1000.0, 1),
                                 "tools_executadas": len(tool_outcomes),
