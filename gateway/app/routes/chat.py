@@ -45,6 +45,9 @@ class ChatRequest(BaseModel):
     message: str
     conversation_id: str | None = None
     model: str | None = None
+    # imagens em base64 (data URL ou base64 puro). O front manda no MESMO
+    # corpo JSON — nao precisa de multipart nem rota separada.
+    imagens: list[str] | None = None
     history: list | None = None  # compat (ignorado, janela vem do banco)
 
 
@@ -55,6 +58,46 @@ def _sse(payload: dict) -> str:
 def _title_from(text: str) -> str:
     t = text.strip().replace("\n", " ")
     return (t[:42] + "…") if len(t) > 42 else (t or "Nova conversa")
+
+
+async def _titulo_da_imagem(blocos: list) -> str:
+    """Batiza a conversa a partir da PROPRIA imagem.
+
+    Mensagem so com foto deixava o titulo vazio — a barra lateral enchia de
+    "Nova conversa" e ninguem achava a conversa depois. Aqui o modelo olha a
+    imagem e devolve um titulo curto.
+    """
+    if not blocos:
+        return "Nova conversa"
+    try:
+        import sys as _s
+        from pathlib import Path as _P
+        _core = str(_P(__file__).resolve().parents[3] / "core")
+        if _core not in _s.path:
+            _s.path.insert(0, _core)
+        from app.agent import _client_for  # type: ignore
+        import os as _o
+        modelo = _o.getenv("TITULO_MODEL") or _o.getenv("DEEPSEEK_MODEL") \
+            or "deepseek-flash"
+        cli, m = _client_for(modelo)
+        conteudo = list(blocos[:1]) + [{
+            "type": "text",
+            "text": ("De um titulo de ate 6 palavras para esta imagem, em "
+                     "portugues. So o titulo, sem aspas e sem ponto final."),
+        }]
+        with cli.messages.stream(model=m, max_tokens=400,
+                                 messages=[{"role": "user",
+                                            "content": conteudo}]) as st:
+            for _ in st.text_stream:
+                pass
+            r = st.get_final_message()
+        t = "".join(getattr(b, "text", "") for b in r.content
+                    if getattr(b, "type", "") == "text").strip()
+        t = t.strip(" \"'").replace("\n", " ")
+        return (t[:42] + "…") if len(t) > 42 else (t or "Imagem enviada")
+    except Exception as e:
+        logger.warning("titulo da imagem falhou: %s", type(e).__name__)
+        return "Imagem enviada"
 
 
 def _e_uuid(valor) -> bool:
@@ -73,6 +116,41 @@ def _e_uuid(valor) -> bool:
         return False
 
 
+MAX_IMAGENS = 5
+
+
+def _prepara_imagens(brutas: list[str] | None) -> tuple[list, str | None]:
+    """data URL ou base64 -> blocos prontos. (blocos, erro para o usuario)"""
+    if not brutas:
+        return [], None
+    if len(brutas) > MAX_IMAGENS:
+        return [], f"Manda no maximo {MAX_IMAGENS} imagens por mensagem."
+    import base64 as _b64
+    import sys as _sys
+    from pathlib import Path as _P
+    _core = str(_P(__file__).resolve().parents[3] / "core")
+    if _core not in _sys.path:
+        _sys.path.insert(0, _core)
+    from app.anexos import AnexoInvalido, prepara_imagem
+
+    blocos = []
+    for bruto in brutas:
+        try:
+            mime = "image/jpeg"
+            if bruto.startswith("data:"):
+                cabeca, _, dados = bruto.partition(",")
+                mime = cabeca[5:].split(";")[0] or mime
+            else:
+                dados = bruto
+            blocos.append(prepara_imagem(_b64.b64decode(dados), mime))
+        except AnexoInvalido as e:
+            return [], str(e)
+        except Exception:
+            logger.warning("imagem invalida no /api/chat")
+            return [], "Nao consegui ler essa imagem. Tenta outro arquivo?"
+    return blocos, None
+
+
 @router.post("/chat")
 async def chat(body: ChatRequest, claims: dict = Depends(verify_token)):
     oid = claims.get("oid")
@@ -89,6 +167,16 @@ async def chat(body: ChatRequest, claims: dict = Depends(verify_token)):
         conv_id = body.conversation_id
         new_conv = False
         try:
+            _imgs, _erro_img = _prepara_imagens(body.imagens)
+            if _erro_img:
+                yield _sse({"type": "token", "text": f"⚠️ {_erro_img}"})
+                yield _sse({"type": "done", "stop_reason": "anexo_invalido"})
+                return
+            if _imgs:
+                logger.info("chat: %d imagem(ns) anexada(s)", len(_imgs))
+            _titulo = (_title_from(body.message) if body.message.strip()
+                       else await _titulo_da_imagem(_imgs))
+
             if conv_id and not _e_uuid(conv_id):
                 # frontend manda tmp-<timestamp> em conversa nova: nao e UUID,
                 # e passar isso ao Postgres derruba o stream inteiro
@@ -99,11 +187,11 @@ async def chat(body: ChatRequest, claims: dict = Depends(verify_token)):
                 conv = await db.get_conversation(conv_id, user_id)
                 if not conv:
                     model_used = resolve_model(body.model, user_id)
-                    conv = await db.create_conversation(user_id, _title_from(body.message), model_used)
+                    conv = await db.create_conversation(user_id, _titulo, model_used)
                     new_conv = True
             else:
                 model_used = resolve_model(body.model, user_id)
-                conv = await db.create_conversation(user_id, _title_from(body.message), model_used)
+                conv = await db.create_conversation(user_id, _titulo, model_used)
                 new_conv = True
 
             conv_id = str(conv["id"])
@@ -116,7 +204,12 @@ async def chat(body: ChatRequest, claims: dict = Depends(verify_token)):
 
             window = await db.build_model_window(conv_id, user_id)
             _lap('window pronta')
-            await db.add_message(conv_id, "user", {"text": body.message})
+            # guarda as imagens junto: sem isso a proxima pergunta chega ao
+            # modelo com a mensagem VAZIA e ele perde o contexto da foto
+            _cont_user = {"text": body.message}
+            if _imgs:
+                _cont_user["imagens"] = body.imagens[:len(_imgs)]
+            await db.add_message(conv_id, "user", _cont_user)
             _lap('user msg gravada')
 
             assistant_text = ""
@@ -134,6 +227,7 @@ async def chat(body: ChatRequest, claims: dict = Depends(verify_token)):
                     channel="web",
                     user_email=_email,
                     model=model_used,
+                    imagens=_imgs or None,
                 ):
                     etype = ev.get("type")
                     if etype == "token":
@@ -169,9 +263,11 @@ async def chat(body: ChatRequest, claims: dict = Depends(verify_token)):
                             _mstr = str(model_used).lower()
                             if 'deepseek' in _mstr:
                                 if 'pro' in _mstr:
-                                    _pin, _pout, _prd, _pwr = 0.435, 0.87, 0.003625, 0.0
+                                    # o Pro e roteado para o V4.1 Flash e cobrado como Flash
+                                    _pin, _pout, _prd, _pwr = 0.15, 0.60, 0.003, 0.15
                                 else:
-                                    _pin, _pout, _prd, _pwr = 0.14, 0.28, 0.0028, 0.0
+                                    # V4.1 Flash, off-peak (comunicado 09/09/2026)
+                                    _pin, _pout, _prd, _pwr = 0.15, 0.60, 0.003, 0.15
                             elif 'haiku' in _mstr:
                                 _pin, _pout, _prd, _pwr = 1.0, 5.0, 0.10, 2.0
                             elif 'opus' in _mstr:
@@ -194,7 +290,13 @@ async def chat(body: ChatRequest, claims: dict = Depends(verify_token)):
                                 "ttft_ms": round(getattr(event_stream, "_ttft_ms", 0.0), 1),
                                 "total_ms": round((_t.perf_counter()-_t0)*1000.0, 1),
                                 "tools_executadas": len(tool_outcomes),
-                                "pergunta": (body.message or "")[:120],
+                                # mensagem so com imagem deixava a linha VAZIA
+                                # no painel — ninguem sabia o que foi perguntado
+                                "pergunta": ((body.message or "").strip()
+                                             or (f"[{len(_imgs)} imagem(ns)] "
+                                                 + (_titulo or ""))
+                                             )[:120],
+                                "imagens": len(_imgs),
                             }
                             _lf = _P(__file__).resolve().parents[3] / "logs" / "gateway" / "llm_events.jsonl"
                             with open(_lf, "a", encoding="utf-8") as _f:

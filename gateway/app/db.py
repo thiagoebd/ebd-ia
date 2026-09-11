@@ -195,11 +195,42 @@ async def build_model_window(conv_id: str, user_oid: str, max_pairs: int = 10) -
     Mantem o contexto conversacional sem reenviar tabelas SQL antigas."""
     msgs = await get_messages(conv_id, user_oid, limit=max_pairs * 2)
     window = []
-    for m in msgs:
+    # a imagem so volta na ULTIMA mensagem do usuario que tinha uma:
+    # reenviar as antigas a cada turno custaria caro e nao acrescenta —
+    # a resposta do assistant ja carrega o que foi visto.
+    ult_img = None
+    for i, m in enumerate(msgs):
+        c = m["content"]
+        if m["role"] == "user" and isinstance(c, dict) and c.get("imagens"):
+            ult_img = i
+    for i, m in enumerate(msgs):
         c = m["content"]
         text = c.get("text", "") if isinstance(c, dict) else str(c)
-        if text:
+        imgs = c.get("imagens") if isinstance(c, dict) else None
+        if i == ult_img and imgs:
+            blocos = []
+            for bruto in imgs[:3]:
+                try:
+                    import base64 as _b64
+                    mime = "image/jpeg"
+                    if bruto.startswith("data:"):
+                        cab, _, dados = bruto.partition(",")
+                        mime = cab[5:].split(";")[0] or mime
+                    else:
+                        dados = bruto
+                    blocos.append({"type": "image", "source": {
+                        "type": "base64", "media_type": mime, "data": dados}})
+                except Exception:
+                    pass
+            blocos.append({"type": "text",
+                           "text": text or "O que voce ve nesta imagem?"})
+            window.append({"role": m["role"], "content": blocos})
+        elif text:
             window.append({"role": m["role"], "content": text})
+        elif imgs:
+            # imagem antiga: marcador de texto, para o modelo saber que houve
+            window.append({"role": m["role"],
+                           "content": "[imagem enviada nesta conversa]"})
     return window
 
 async def delete_conversation(conv_id: str, user_oid: str) -> bool:

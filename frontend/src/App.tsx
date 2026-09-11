@@ -15,7 +15,7 @@ import { AccessAdmin } from "./AccessAdmin";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL;
 
-type Msg = { role: "user" | "assistant"; text: string; status?: string; tools?: string[]; artifacts?: ArtifactRef[] };
+type Msg = { role: "user" | "assistant"; text: string; imagens?: string[]; status?: string; tools?: string[]; artifacts?: ArtifactRef[] };
 type Thread = { id: string; title: string; msgs: Msg[]; loaded: boolean; model?: string };
 type ModelInfo = { id: string; label: string; tier: string };
 type MeInfo = { role: "admin" | "user"; super_admin?: boolean; models: { default: string; available: ModelInfo[] } };
@@ -30,6 +30,51 @@ function App() {
   const [error, setError] = useState<string | null>(null);
   const [me, setMe] = useState<MeInfo | null>(null);
   const [selectedModel, setSelectedModel] = useState<string>("deepseek-flash");
+  // anexos: data URLs. O backend aceita ate 5 e reduz antes de mandar ao modelo.
+  const [anexos, setAnexos] = useState<string[]>([]);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const MAX_ANEXO_MB = 20;
+
+  function addAnexos(files: FileList | null) {
+    if (!files) return;
+    const novos: string[] = [];
+    let pendentes = files.length;
+    Array.from(files).forEach((f) => {
+      if (!f.type.startsWith("image/") && !/\.(heic|heif)$/i.test(f.name)) {
+        setError("Por enquanto so imagem (PNG, JPG). PDF e planilha ainda nao.");
+        pendentes--; return;
+      }
+      if (f.size > MAX_ANEXO_MB * 1024 * 1024) {
+        setError(`${f.name} tem ${(f.size/1024/1024).toFixed(1)} MB — o limite e ${MAX_ANEXO_MB} MB.`);
+        pendentes--; return;
+      }
+      const r = new FileReader();
+      r.onload = () => {
+        // reduz no navegador: o nginx corta em 30MB e base64 infla 33%.
+        // 1568px e o que o modelo aproveita — mandar mais e desperdicio.
+        const img = new Image();
+        img.onload = () => {
+          const MAX = 1568;
+          const esc = Math.min(1, MAX / Math.max(img.width, img.height));
+          const c = document.createElement("canvas");
+          c.width = Math.round(img.width * esc);
+          c.height = Math.round(img.height * esc);
+          const ctx = c.getContext("2d");
+          ctx?.drawImage(img, 0, 0, c.width, c.height);
+          novos.push(c.toDataURL("image/jpeg", 0.85));
+          if (--pendentes === 0) setAnexos((a) => [...a, ...novos].slice(0, 5));
+        };
+        img.onerror = () => {
+          // HEIC e formatos que o canvas nao abre: manda como veio
+          novos.push(String(r.result));
+          if (--pendentes === 0) setAnexos((a) => [...a, ...novos].slice(0, 5));
+        };
+        img.src = String(r.result);
+      };
+      r.onerror = () => { setError(`Nao consegui ler ${f.name}.`); pendentes--; };
+      r.readAsDataURL(f);
+    });
+  }
   const [modelOpen, setModelOpen] = useState(false);
   const [showAccess, setShowAccess] = useState(false);
   const [mercado, setMercado] = useState<{
@@ -99,6 +144,7 @@ function App() {
       const data = await resp.json();
       const msgs: Msg[] = (data.messages || []).map((m: any) => ({
         role: m.role, text: m.text, tools: m.tools || [], artifacts: m.artifacts || [],
+        imagens: m.imagens || undefined,
       }));
       setThreads((ts) => ts.map((x) => (x.id === id ? { ...x, msgs, loaded: true, title: data.title, model: data.model } : x)));
       if (data.model) setSelectedModel(data.model);
@@ -152,9 +198,11 @@ function App() {
 
   async function send(presetQuestion?: string) {
     const question = (presetQuestion ?? input).trim();
-    if (!question || busy) return;
+    if ((!question && anexos.length === 0) || busy) return;
+    const imgs = anexos;
     setError(null);
     setInput("");
+    setAnexos([]);
     if (taRef.current) taRef.current.style.height = "auto";
     setBusy(true);
 
@@ -163,7 +211,8 @@ function App() {
     streamTidRef.current = tid;
 
     if (isNew) {
-      const title = question.length > 42 ? question.slice(0, 42) + "…" : question;
+      const base = question || (imgs.length ? "Imagem enviada" : "Nova conversa");
+      const title = base.length > 42 ? base.slice(0, 42) + "…" : base;
       setThreads((ts) => [{ id: tid, title, msgs: [], loaded: true }, ...ts]);
       setActiveId(tid);
     }
@@ -173,7 +222,7 @@ function App() {
 
     pushMsgs((m) => [
       ...m,
-      { role: "user", text: question },
+      { role: "user", text: question, imagens: imgs.length ? imgs : undefined },
       { role: "assistant", text: "", status: "Pensando", tools: [] },
     ]);
 
@@ -184,7 +233,7 @@ function App() {
       const resp = await fetch(`${API_BASE}/api/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${tok}` },
-        body: JSON.stringify({ message: question, conversation_id: isNew ? null : activeId, model: selectedModel }),
+        body: JSON.stringify({ message: question, conversation_id: isNew ? null : activeId, model: selectedModel, imagens: imgs.length ? imgs : undefined }),
         signal: controller.signal,
       });
       if (!resp.ok || !resp.body) {
@@ -422,6 +471,15 @@ function App() {
                       </div>
                       <div className="content">
                         <div className="who-line">{m.role === "assistant" ? "EBD.ia" : firstName}</div>
+                        {m.imagens && m.imagens.length > 0 && (
+                          <div className="msg-imagens">
+                            {m.imagens.map((src, k) => (
+                              <a href={src} target="_blank" rel="noreferrer" key={k}>
+                                <img src={src} alt={`imagem ${k + 1}`} />
+                              </a>
+                            ))}
+                          </div>
+                        )}
                         {m.role === "assistant" && m.tools && m.tools.length > 0 && (
                           <div className="tools"><span className="tool-chip">⚡ Winthor consultado</span></div>
                         )}
@@ -451,17 +509,56 @@ function App() {
 
             <div className="composer-wrap">
               <div className="composer">
+                {anexos.length > 0 && (
+                  <div className="anexos-preview">
+                    {anexos.map((src, i) => (
+                      <div className="anexo-thumb" key={i}>
+                        <img src={src} alt={`anexo ${i + 1}`} />
+                        <button
+                          type="button"
+                          className="anexo-remove"
+                          onClick={() => setAnexos((a) => a.filter((_, j) => j !== i))}
+                          title="Remover"
+                        >×</button>
+                      </div>
+                    ))}
+                  </div>
+                )}
                 <textarea
                   ref={taRef}
                   value={input}
                   onChange={(e) => { setInput(e.target.value); autosize(); }}
                   onKeyDown={onKey}
-                  placeholder="Pergunte ao EBD.ia…"
+                  onPaste={(e) => {
+                    const imgs = Array.from(e.clipboardData.files).filter((f) => f.type.startsWith("image/"));
+                    if (imgs.length) {
+                      e.preventDefault();
+                      const dt = new DataTransfer();
+                      imgs.forEach((f) => dt.items.add(f));
+                      addAnexos(dt.files);
+                    }
+                  }}
+                  placeholder="Pergunte ao EBD.ia…  (cole ou anexe uma imagem)"
                   rows={1}
                   disabled={busy}
                 />
+                <input
+                  ref={fileRef}
+                  type="file"
+                  accept="image/*,.heic,.heif"
+                  multiple
+                  style={{ display: "none" }}
+                  onChange={(e) => { addAnexos(e.target.files); e.target.value = ""; }}
+                />
                 <div className="composer-foot">
                   <span className="chips">
+                    <button
+                      type="button"
+                      className="chip chip-btn"
+                      onClick={() => fileRef.current?.click()}
+                      disabled={busy}
+                      title="Anexar imagem (ate 20 MB)"
+                    >📎 Imagem</button>
                     <span className="chip"><span className="dot-ok" /> Winthor</span>
                     {(() => {
                       const current = me?.models.available.find((m) => m.id === selectedModel);
@@ -495,7 +592,7 @@ function App() {
                   {busy ? (
                     <button className="send stop" onClick={stop} title="Parar">■</button>
                   ) : (
-                    <button className="send" onClick={() => send()} disabled={!input.trim()}>↑</button>
+                    <button className="send" onClick={() => send()} disabled={!input.trim() && anexos.length === 0}>↑</button>
                   )}
                 </div>
               </div>

@@ -1,3 +1,60 @@
 /* reset mínimo */
 * { box-sizing: border-box; }
 html, body, #root { min-height: 100vh; }
+
+/* --- anexo de imagem no composer (10/09/2026) --- */
+.anexos-preview {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 8px 8px 0;
+}
+.anexo-thumb {
+  position: relative;
+  width: 64px;
+  height: 64px;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid var(--border, #e2ddd3);
+  background: var(--bg-soft, #f7f4ee);
+}
+.anexo-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.anexo-remove {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 18px;
+  height: 18px;
+  line-height: 16px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.6);
+  color: #fff;
+  font-size: 14px;
+  cursor: pointer;
+}
+.anexo-remove:hover { background: rgba(0, 0, 0, 0.85); }
+.chip-btn {
+  cursor: pointer;
+  border: 1px solid var(--border, #e2ddd3);
+  background: transparent;
+  font: inherit;
+  color: inherit;
+}
+.chip-btn:hover:not(:disabled) { background: var(--bg-soft, #f7f4ee); }
+.chip-btn:disabled { opacity: .5; cursor: default; }
+
+.msg-imagens { display: flex; gap: 8px; flex-wrap: wrap; margin: 6px 0 8px; }
+.msg-imagens img {
+  max-width: 220px;
+  max-height: 220px;
+  border-radius: 10px;
+  border: 1px solid var(--border, #e2ddd3);
+  display: block;
+}
