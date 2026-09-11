@@ -112,10 +112,14 @@ class Planilha:
     aba: str
     total: int
     avisos: list[str] = field(default_factory=list)
+    # arquivo de diretoria costuma vir com varias abas; o agente precisa
+    # SABER que existem para nao analisar uma de 2 linhas achando que e
+    # o arquivo todo
+    abas: list[dict] = field(default_factory=list)
 
     def resumo_para_agente(self) -> dict:
         """O que o modelo vê. Some ~200 tokens, independente do tamanho."""
-        return {
+        d = {
             "aba": self.aba,
             "linhas": self.total,
             "colunas": [
@@ -126,6 +130,9 @@ class Planilha:
             ],
             "avisos": self.avisos,
         }
+        if len(self.abas) > 1:
+            d["outras_abas"] = [a for a in self.abas if a["nome"] != self.aba]
+        return d
 
 
 def _limpa_cabecalho(nome: Any, i: int) -> str:
@@ -153,7 +160,8 @@ def _tipo_da_coluna(valores: list) -> str:
     return "texto"
 
 
-def le_planilha(dados: bytes, nome_arquivo: str = "") -> Planilha:
+def le_planilha(dados: bytes, nome_arquivo: str = "",
+                aba_escolhida: str | None = None) -> Planilha:
     """xlsx/xls/csv -> Planilha. Levanta PlanilhaInvalida com msg ao usuário."""
     if not dados:
         raise PlanilhaInvalida("O arquivo chegou vazio.")
@@ -185,14 +193,65 @@ def le_planilha(dados: bytes, nome_arquivo: str = "") -> Planilha:
             df = pd.read_csv(io.StringIO(texto), sep=sep, dtype=str,
                              keep_default_na=False)
             aba = "csv"
+            abas_mapa = []
         else:
-            xl = pd.ExcelFile(io.BytesIO(dados))
-            aba = xl.sheet_names[0]
+            # alguns geradores escrevem atributos que o openpyxl recusa
+            # (ex.: defaultColWidthPt) — tenta os outros motores antes
+            # de desistir do arquivo
+            xl = None
+            ultimo = None
+            # calamine PRIMEIRO: e o mais tolerante a dialeto. O openpyxl
+            # recusa arquivos com atributos que nao conhece (medido com um
+            # export real que tinha defaultColWidthPt)
+            for motor in ("calamine", None, "xlrd", "odf"):
+                try:
+                    xl = (pd.ExcelFile(io.BytesIO(dados)) if motor is None
+                          else pd.ExcelFile(io.BytesIO(dados), engine=motor))
+                    break
+                except ImportError:
+                    continue
+                except Exception as e:
+                    ultimo = e
+                    continue
+            if xl is None:
+                raise PlanilhaInvalida(
+                    "Nao consegui abrir esse arquivo — ele foi gerado por uma "
+                    "ferramenta que usa um formato que eu nao leio. "
+                    "Reabra no Excel e salve como 'Pasta de Trabalho do Excel "
+                    "(.xlsx)' ou exporte em CSV."
+                ) from ultimo
+            # mapeia TODAS as abas e escolhe a de MAIS dados como principal.
+            # Um arquivo de diretoria pode ter a primeira aba com 2 linhas de
+            # resumo e a terceira com o detalhe que interessa.
+            mapa, maior, maior_n = [], None, -1
+            for nome_aba in xl.sheet_names:
+                try:
+                    d = xl.parse(nome_aba, dtype=str, keep_default_na=False)
+                except Exception:
+                    continue
+                preenchidas = int((d.astype(str) != "").sum().sum()) if len(d) else 0
+                mapa.append({"nome": nome_aba, "linhas": len(d),
+                             "colunas": [str(c) for c in d.columns][:12]})
+                if preenchidas > maior_n:
+                    maior, maior_n, df = nome_aba, preenchidas, d
+            if maior is None:
+                raise PlanilhaInvalida("Nao consegui ler nenhuma aba do arquivo.")
+            aba = maior
+            if aba_escolhida:
+                for a in mapa:
+                    if normaliza_texto(a["nome"]) == normaliza_texto(aba_escolhida):
+                        aba = a["nome"]
+                        df = xl.parse(aba, dtype=str, keep_default_na=False)
+                        break
+            abas_mapa = mapa
             if len(xl.sheet_names) > 1:
+                outras = [a["nome"] for a in mapa if a["nome"] != aba]
                 avisos.append(
-                    f"O arquivo tem {len(xl.sheet_names)} abas; li a primeira "
-                    f"('{aba}'). As outras: {', '.join(xl.sheet_names[1:4])}.")
-            df = xl.parse(aba, dtype=str, keep_default_na=False)
+                    f"O arquivo tem {len(xl.sheet_names)} abas. Analisei "
+                    f"'{aba}' (a com mais dados). As outras: "
+                    f"{', '.join(outras[:6])}"
+                    + (f" e mais {len(outras) - 6}" if len(outras) > 6 else "")
+                    + ". Peca a aba pelo nome se quiser outra.")
     except PlanilhaInvalida:
         raise
     except Exception as e:
@@ -237,7 +296,8 @@ def le_planilha(dados: bytes, nome_arquivo: str = "") -> Planilha:
         avisos.append(f"Colunas sem nenhum dado: {', '.join(vazias[:5])}.")
 
     return Planilha(colunas=colunas, linhas=linhas, aba=aba,
-                    total=len(linhas), avisos=avisos)
+                    total=len(linhas), avisos=avisos,
+                    abas=locals().get("abas_mapa") or [])
 
 
 # ─── cruzamento ────────────────────────────────────────────────────────

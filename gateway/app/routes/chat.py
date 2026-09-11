@@ -210,6 +210,9 @@ async def chat(body: ChatRequest, claims: dict = Depends(verify_token)):
 
             # planilha: le, valida e guarda. O agente so vera o resumo.
             _erro_pl = None
+            # inicializa ANTES do try: se a leitura falhar, a variavel
+            # precisa existir — senao o erro real some atras de um NameError
+            _pl_pendente = None
             if body.planilha_b64:
                 try:
                     import base64 as _b64p
@@ -284,12 +287,23 @@ async def chat(body: ChatRequest, claims: dict = Depends(verify_token)):
                            "conversation_id": conv_id, "user_oid": user_id}
                 if _pl_pendente is not None:
                     _cols = ", ".join(c.nome for c in _pl_pendente.colunas)
+                    _abas = ""
+                    if len(_pl_pendente.abas) > 1:
+                        _lista = " · ".join(
+                            f"{a['nome']} ({a['linhas']} linhas)"
+                            for a in _pl_pendente.abas)
+                        _abas = (
+                            f" O ARQUIVO TEM {len(_pl_pendente.abas)} ABAS: "
+                            f"{_lista}. Estou mostrando a aba "
+                            f"'{_pl_pendente.aba}', que e a com mais dados. "
+                            f"DIGA ao usuario quais sao as outras abas — ele "
+                            f"pode querer analisar outra.")
                     _aviso_pl = (
                         f"[O usuario anexou a planilha '{body.planilha_nome}' "
-                        f"com {_pl_pendente.total} linhas e as colunas: {_cols}. "
-                        f"Use planilha_resumo para ver os tipos e exemplos, e "
-                        f"diga a ele o que voce entendeu do arquivo antes de "
-                        f"perguntar o que fazer.]")
+                        f"com {_pl_pendente.total} linhas e as colunas: {_cols}."
+                        f"{_abas} Use planilha_resumo para ver os tipos e "
+                        f"exemplos, e diga a ele o que voce entendeu do arquivo "
+                        f"antes de perguntar o que fazer.]")
 
             window = await db.build_model_window(conv_id, user_id)
             _lap('window pronta')

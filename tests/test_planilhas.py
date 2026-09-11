@@ -499,3 +499,80 @@ def test_corpo_da_requisicao_leva_o_base64():
     s = _fonte("frontend/src/App.tsx")
     i = s.index("body: JSON.stringify")
     assert "planilha_b64: pl ? pl.b64" in s[i:i + 300]
+
+
+def test_le_xlsx_de_dialeto_estranho():
+    """Um export real tinha 'defaultColWidthPt', que o openpyxl recusa com
+    TypeError. O calamine le — por isso ele vem primeiro."""
+    s = (RAIZ / "core" / "app" / "planilhas.py").read_text(encoding="utf-8")
+    i = s.index("for motor in")
+    assert '"calamine", None' in s[i:i + 120], "calamine tem que vir primeiro"
+
+
+def test_arquivo_ilegivel_orienta_o_usuario():
+    """Mensagem que diz O QUE FAZER, nao so que falhou."""
+    s = (RAIZ / "core" / "app" / "planilhas.py").read_text(encoding="utf-8")
+    assert "salve como" in s.lower() or "exporte em CSV" in s
+
+
+def test_pl_pendente_existe_mesmo_se_a_leitura_falhar():
+    """Bug de 11/09: a variavel so era criada no else, entao quando a
+    leitura lancava excecao o erro real sumia atras de um NameError."""
+    s = (RAIZ / "gateway" / "app" / "routes" / "chat.py").read_text(encoding="utf-8")
+    i = s.index("_erro_pl = None")
+    j = s.index("if body.planilha_b64:")
+    assert "_pl_pendente = None" in s[i:j], \
+        "_pl_pendente tem que ser inicializada ANTES do try"
+
+
+def test_escolhe_a_aba_com_mais_dados():
+    """Um arquivo real de diretoria tinha 8 abas: a primeira com 2 linhas
+    de resumo e a ultima com 2.562 de detalhe. Ler a primeira dava uma
+    analise sobre nada."""
+    import pandas as pd
+    buf = io.BytesIO()
+    with pd.ExcelWriter(buf) as w:
+        pd.DataFrame({"A": ["1"]}).to_excel(w, sheet_name="resumo", index=False)
+        pd.DataFrame({"B": [str(i) for i in range(200)]}).to_excel(
+            w, sheet_name="detalhe", index=False)
+    p = le_planilha(buf.getvalue(), "x.xlsx")
+    assert p.aba == "detalhe"
+    assert p.total == 200
+
+
+def test_mapeia_todas_as_abas():
+    import pandas as pd
+    buf = io.BytesIO()
+    with pd.ExcelWriter(buf) as w:
+        for n in ("um", "dois", "tres"):
+            pd.DataFrame({"A": ["1"]}).to_excel(w, sheet_name=n, index=False)
+    p = le_planilha(buf.getvalue(), "x.xlsx")
+    assert len(p.abas) == 3
+    assert {a["nome"] for a in p.abas} == {"um", "dois", "tres"}
+
+
+def test_resumo_mostra_as_outras_abas():
+    """O agente precisa SABER que existem, senao analisa uma e cala."""
+    import pandas as pd
+    buf = io.BytesIO()
+    with pd.ExcelWriter(buf) as w:
+        pd.DataFrame({"A": ["1"]}).to_excel(w, sheet_name="a", index=False)
+        pd.DataFrame({"B": ["1", "2"]}).to_excel(w, sheet_name="b", index=False)
+    r = le_planilha(buf.getvalue(), "x.xlsx").resumo_para_agente()
+    assert "outras_abas" in r and len(r["outras_abas"]) == 1
+
+
+def test_permite_escolher_a_aba():
+    import pandas as pd
+    buf = io.BytesIO()
+    with pd.ExcelWriter(buf) as w:
+        pd.DataFrame({"A": ["1"]}).to_excel(w, sheet_name="pequena", index=False)
+        pd.DataFrame({"B": [str(i) for i in range(50)]}).to_excel(
+            w, sheet_name="grande", index=False)
+    p = le_planilha(buf.getvalue(), "x.xlsx", aba_escolhida="pequena")
+    assert p.aba == "pequena"
+
+
+def test_aviso_ao_agente_lista_as_abas():
+    s = _fonte("gateway/app/routes/chat.py")
+    assert "O ARQUIVO TEM" in s and "DIGA ao usuario quais sao as outras abas" in s
