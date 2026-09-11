@@ -77,3 +77,23 @@ html, body, #root { min-height: 100vh; }
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+.msg-anexo {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin: 4px 0 10px;
+  padding: 7px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border, #e2ddd3);
+  background: var(--bg-soft, #f7f4ee);
+  font-size: 13px;
+}
+.msg-anexo-icone { opacity: .55; font-size: 15px; }
+.msg-anexo-nome { font-weight: 500; }
+.msg-anexo-tag {
+  font-size: 11px;
+  opacity: .55;
+  padding-left: 6px;
+  border-left: 1px solid var(--border, #e2ddd3);
+}

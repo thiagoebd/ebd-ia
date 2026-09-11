@@ -590,12 +590,10 @@
         "current": {
           "selected": true,
           "text": [
-            "deepseek-v4-flash",
-            "deepseek-v4-pro"
+            "All"
           ],
           "value": [
-            "deepseek-v4-flash",
-            "deepseek-v4-pro"
+            "$__all"
           ]
         },
         "options": [],

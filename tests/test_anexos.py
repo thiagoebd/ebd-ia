@@ -94,7 +94,8 @@ def _fonte(rel: str) -> str:
 def test_run_turn_e_run_turn_stream_aceitam_imagens():
     s = _fonte("core/app/agent.py")
     assert s.count("imagens: list | None = None") == 2
-    assert s.count("monta_conteudo(user_message, imagens)") == 2
+    # a mensagem pode levar o aviso da planilha antes da pergunta
+    assert s.count("monta_conteudo(_msg, imagens)") == 2
 
 
 def test_adapter_repassa_imagens():

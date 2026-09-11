@@ -131,7 +131,11 @@ class Planilha:
 def _limpa_cabecalho(nome: Any, i: int) -> str:
     t = normaliza_texto(nome).replace(" ", "_")
     t = re.sub(r"[^A-Z0-9_]", "", t)
-    return t or f"COLUNA_{i + 1}"
+    # o pandas chama coluna sem cabecalho de 'Unnamed: 0' — nao e nome de
+    # verdade e polui o titulo da conversa
+    if not t or t.startswith("UNNAMED"):
+        return f"COLUNA_{i + 1}"
+    return t
 
 
 def _tipo_da_coluna(valores: list) -> str:

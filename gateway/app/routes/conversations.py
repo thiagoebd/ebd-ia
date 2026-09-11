@@ -35,6 +35,7 @@ async def get_conv(conv_id: str, claims: dict = Depends(verify_token)):
         c = m["content"] if isinstance(m["content"], dict) else {}
         out_msgs.append({"role": m["role"], "text": c.get("text", ""),
                          "imagens": c.get("imagens") or None,
+                         "anexo": c.get("anexo") or None,
                          "tools": c.get("tools", []),
                          "artifacts": m.get("artifacts", [])})
     return {"id": str(conv["id"]), "title": conv["title"],

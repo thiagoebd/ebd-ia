@@ -294,13 +294,19 @@ async def run_turn(
     channel: str = "cli",
  model: str | None = None,
     imagens: list | None = None,
-    planilha_ctx: dict | None = None) -> dict:
+    planilha_ctx: dict | None = None,
+    aviso_planilha: str | None = None) -> dict:
     messages = list(conversation_history or [])
     messages = _trim_history(messages)
     # com anexo, o content vira lista de blocos (imagem antes do texto)
     from app.anexos import monta_conteudo
+    _msg = user_message
+    if aviso_planilha:
+        # sem este aviso o agente nao sabe que ha planilha e nunca chama
+        # planilha_resumo — fica sem saber o que responder
+        _msg = f"{aviso_planilha}\n\n{user_message}".strip()
     messages.append({"role": "user",
-                     "content": monta_conteudo(user_message, imagens)})
+                     "content": monta_conteudo(_msg, imagens)})
 
     ctx_suffix = (
         f"\n\n## CONTEXTO DA CONVERSA ATUAL\n"
@@ -409,6 +415,7 @@ async def run_turn_stream(
     user_email: str | None = None,
     imagens: list | None = None,
     planilha_ctx: dict | None = None,
+    aviso_planilha: str | None = None,
 ):
     """Versao streaming de run_turn. Em vez de retornar dict no fim,
     da yield de eventos conforme processa:
@@ -422,8 +429,13 @@ async def run_turn_stream(
     messages = list(conversation_history or [])
     messages = _trim_history(messages)
     from app.anexos import monta_conteudo
+    _msg = user_message
+    if aviso_planilha:
+        # sem este aviso o agente nao sabe que ha planilha e nunca chama
+        # planilha_resumo — fica sem saber o que responder
+        _msg = f"{aviso_planilha}\n\n{user_message}".strip()
     messages.append({"role": "user",
-                     "content": monta_conteudo(user_message, imagens)})
+                     "content": monta_conteudo(_msg, imagens)})
 
     ctx_suffix = (
         f"\n\n## CONTEXTO DA CONVERSA ATUAL\n"

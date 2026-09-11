@@ -15,7 +15,7 @@ import { AccessAdmin } from "./AccessAdmin";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL;
 
-type Msg = { role: "user" | "assistant"; text: string; imagens?: string[]; status?: string; tools?: string[]; artifacts?: ArtifactRef[] };
+type Msg = { role: "user" | "assistant"; text: string; imagens?: string[]; anexo?: { nome: string; tipo: string }; status?: string; tools?: string[]; artifacts?: ArtifactRef[] };
 type Thread = { id: string; title: string; msgs: Msg[]; loaded: boolean; model?: string };
 type ModelInfo = { id: string; label: string; tier: string };
 type MeInfo = { role: "admin" | "user"; super_admin?: boolean; models: { default: string; available: ModelInfo[] } };
@@ -161,6 +161,7 @@ function App() {
       const msgs: Msg[] = (data.messages || []).map((m: any) => ({
         role: m.role, text: m.text, tools: m.tools || [], artifacts: m.artifacts || [],
         imagens: m.imagens || undefined,
+        anexo: m.anexo || undefined,
       }));
       setThreads((ts) => ts.map((x) => (x.id === id ? { ...x, msgs, loaded: true, title: data.title, model: data.model } : x)));
       if (data.model) setSelectedModel(data.model);
@@ -240,7 +241,8 @@ function App() {
 
     pushMsgs((m) => [
       ...m,
-      { role: "user", text: question, imagens: imgs.length ? imgs : undefined, planilha_b64: pl ? pl.b64 : undefined, planilha_nome: pl ? pl.nome : undefined },
+      { role: "user", text: question, imagens: imgs.length ? imgs : undefined,
+        anexo: pl ? { nome: pl.nome, tipo: "planilha" } : undefined },
       { role: "assistant", text: "", status: "Pensando", tools: [] },
     ]);
 
@@ -492,6 +494,13 @@ function App() {
                       </div>
                       <div className="content">
                         <div className="who-line">{m.role === "assistant" ? "EBD.ia" : firstName}</div>
+                        {m.anexo && (
+                          <div className="msg-anexo">
+                            <span className="msg-anexo-icone">▦</span>
+                            <span className="msg-anexo-nome">{m.anexo.nome}</span>
+                            <span className="msg-anexo-tag">salvo</span>
+                          </div>
+                        )}
                         {m.imagens && m.imagens.length > 0 && (
                           <div className="msg-imagens">
                             {m.imagens.map((src, k) => (

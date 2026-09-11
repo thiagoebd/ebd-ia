@@ -434,3 +434,68 @@ def test_front_aceita_xlsx_e_csv():
 def test_front_permite_enviar_so_planilha():
     s = _fonte("frontend/src/App.tsx")
     assert "&& !planilha" in s
+
+
+def test_agente_e_avisado_da_planilha():
+    """Sem aviso o agente nao sabe que ha planilha e nunca chama a
+    ferramenta — fica sem saber o que responder."""
+    s = _fonte("core/app/agent.py")
+    assert s.count("aviso_planilha") >= 4
+
+
+def test_aviso_entra_antes_da_pergunta():
+    s = _fonte("core/app/agent.py")
+    assert 'f"{aviso_planilha}' in s
+
+
+def test_titulo_vem_do_conteudo_nao_do_nome_do_arquivo():
+    """'filiais-ebd-cnpjs.xlsx' vira 'Filiais, Cnpj (21 linhas)'."""
+    s = _fonte("gateway/app/routes/chat.py")
+    assert "_titulo_da_planilha" in s
+    i = s.index("def _titulo_da_planilha")
+    assert "c.nome" in s[i:i + 600]
+
+
+def test_coluna_sem_cabecalho_nao_vira_unnamed():
+    """O pandas chama 'Unnamed: 0' — poluia o titulo da conversa."""
+    import pandas as pd
+    buf = io.BytesIO()
+    df = pd.DataFrame({"": ["x"], "VENDEDOR": ["a"]})
+    df.to_excel(buf, index=False)
+    p = le_planilha(buf.getvalue(), "x.xlsx")
+    assert not any("UNNAMED" in c.nome for c in p.colunas)
+
+
+def test_titulo_ignora_coluna_generica():
+    s = _fonte("gateway/app/routes/chat.py")
+    i = s.index("def _titulo_da_planilha")
+    assert 'startswith("COLUNA_")' in s[i:i + 700]
+
+
+def test_bolha_mostra_o_anexo():
+    s = _fonte("frontend/src/App.tsx")
+    assert "msg-anexo" in s
+    assert 'anexo?: { nome: string; tipo: string }' in s
+
+
+def test_anexo_fica_no_historico():
+    s = _fonte("gateway/app/routes/chat.py")
+    assert '_cont_user["anexo"]' in s
+    c = _fonte("gateway/app/routes/conversations.py")
+    assert '"anexo"' in c
+
+
+def test_push_da_mensagem_leva_anexo_nao_base64():
+    """O replace foi no objeto errado: o base64 (que e enorme) ia para a
+    bolha da UI e o campo `anexo` nunca era criado."""
+    s = _fonte("frontend/src/App.tsx")
+    i = s.index('{ role: "user", text: question')
+    msg = s[i:i + 200]
+    assert "anexo: pl ?" in msg
+    assert "planilha_b64" not in msg, "o base64 nao pode ir para a bolha"
+
+
+def test_corpo_da_requisicao_leva_o_base64():
+    s = _fonte("frontend/src/App.tsx")
+    i = s.index("body: JSON.stringify")
+    assert "planilha_b64: pl ? pl.b64" in s[i:i + 300]

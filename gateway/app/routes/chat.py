@@ -63,6 +63,20 @@ def _title_from(text: str) -> str:
     return (t[:42] + "…") if len(t) > 42 else (t or "Nova conversa")
 
 
+def _titulo_da_planilha(pl, nome_arquivo: str) -> str:
+    """Titulo a partir do que a planilha CONTEM, nao do nome do arquivo.
+
+    'filiais-ebd-cnpjs.xlsx' vira 'Filiais e CNPJs (21 linhas)' — o usuario
+    reconhece a conversa pelo assunto, nao pelo nome que o Excel deu.
+    """
+    cols = [c.nome.replace("_", " ").title() for c in pl.colunas
+            if c.preenchidas > 0 and not c.nome.startswith("COLUNA_")][:3]
+    if cols:
+        base = ", ".join(cols)
+        return (f"{base} ({pl.total} linhas)")[:42]
+    return (nome_arquivo or "Planilha")[:42]
+
+
 async def _titulo_da_imagem(blocos: list) -> str:
     """Batiza a conversa a partir da PROPRIA imagem.
 
@@ -192,8 +206,7 @@ async def chat(body: ChatRequest, claims: dict = Depends(verify_token)):
                 return
             if _imgs:
                 logger.info("chat: %d imagem(ns) anexada(s)", len(_imgs))
-            _titulo = (_title_from(body.message) if body.message.strip()
-                       else await _titulo_da_imagem(_imgs))
+            _titulo = _title_from(body.message) if body.message.strip() else None
 
             # planilha: le, valida e guarda. O agente so vera o resumo.
             _erro_pl = None
@@ -221,6 +234,13 @@ async def chat(body: ChatRequest, claims: dict = Depends(verify_token)):
                     _erro_pl = "Nao consegui ler essa planilha."
             else:
                 _pl_pendente = None
+
+            if _titulo is None:
+                if _pl_pendente is not None:
+                    _titulo = _titulo_da_planilha(_pl_pendente,
+                                                  body.planilha_nome or "")
+                else:
+                    _titulo = await _titulo_da_imagem(_imgs)
 
             if _erro_pl:
                 yield _sse({"type": "token", "text": f"⚠️ {_erro_pl}"})
@@ -252,6 +272,7 @@ async def chat(body: ChatRequest, claims: dict = Depends(verify_token)):
                         "title": conv["title"], "new": new_conv,
                         "model": model_used})
 
+            _aviso_pl = None
             _pl_ctx = None
             if conv_id:
                 if _pl_pendente is not None:
@@ -261,6 +282,14 @@ async def chat(body: ChatRequest, claims: dict = Depends(verify_token)):
                                     _pl_pendente)
                 _pl_ctx = {"pool": db._pool_or_raise(),
                            "conversation_id": conv_id, "user_oid": user_id}
+                if _pl_pendente is not None:
+                    _cols = ", ".join(c.nome for c in _pl_pendente.colunas)
+                    _aviso_pl = (
+                        f"[O usuario anexou a planilha '{body.planilha_nome}' "
+                        f"com {_pl_pendente.total} linhas e as colunas: {_cols}. "
+                        f"Use planilha_resumo para ver os tipos e exemplos, e "
+                        f"diga a ele o que voce entendeu do arquivo antes de "
+                        f"perguntar o que fazer.]")
 
             window = await db.build_model_window(conv_id, user_id)
             _lap('window pronta')
@@ -269,6 +298,9 @@ async def chat(body: ChatRequest, claims: dict = Depends(verify_token)):
             _cont_user = {"text": body.message}
             if _imgs:
                 _cont_user["imagens"] = body.imagens[:len(_imgs)]
+            if _pl_pendente is not None:
+                _cont_user["anexo"] = {"nome": body.planilha_nome or "planilha",
+                                       "tipo": "planilha"}
             await db.add_message(conv_id, "user", _cont_user)
             _lap('user msg gravada')
 
@@ -289,6 +321,7 @@ async def chat(body: ChatRequest, claims: dict = Depends(verify_token)):
                     model=model_used,
                     imagens=_imgs or None,
                     planilha_ctx=_pl_ctx,
+                    aviso_planilha=_aviso_pl,
                 ):
                     etype = ev.get("type")
                     if etype == "token":
