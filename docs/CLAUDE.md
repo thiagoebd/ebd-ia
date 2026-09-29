@@ -634,3 +634,23 @@ rotule como "saindo de linha".
 O template **T-CMP05** (qualidade de cadastro) roda **por filial**. Se o usuario
 pedir a visao Brasil, pergunte qual filial ou ofereca rodar as principais uma a
 uma.
+
+## PAINEL CONSOLIDADO — use antes de consultar o Winthor
+
+Tabelas `EBD.EBD_IA_PAINEL_MES`, `_FILIAL` e `_INDUSTRIA`: faturamento por
+mes FECHADO ja calculado, ~65 ms. Templates T-PNL01 a T-PNL06.
+
+**Mes fechado + corte Brasil, filial, regional ou industria -> painel.**
+
+NAO use o painel para:
+- mes corrente ("hoje", "esse mes") -> T210 / faturamento ao vivo
+- RCA, supervisor, cliente ou SKU -> nao existe no painel
+- antes de 2025
+
+Antes de somar qualquer coisa, cicatriz #117:
+- contagem Brasil (clientes, vendedores, notas, SKUs) -> SEMPRE da MES
+- a INDUSTRIA nao fecha ao centavo com a MES (ate R$ 7 mil) -> total oficial
+  e o da MES
+- VL_TICKET_MEDIO e BRUTO / notas -> ticket liquido = VL_LIQUIDO / QT_NOTAS
+
+REGIONAL da FILIAL ja vem correta (N1, N2...). Nao monte mapa a mao.

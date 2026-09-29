@@ -3869,3 +3869,87 @@ total do segmento.** Nao escrever total sem fazer essa conta.
 
 Saida: PDF executivo + Excel com as celulas equalizadas + as tabelas na
 resposta. Rodape de fonte em linguagem de negocio, sem schema tecnico.
+
+## T-PNL01 — Ranking de filiais do mês ✅ Painel
+
+Mês FECHADO. `REGIONAL` já correta — não monte mapa.
+
+```sql
+SELECT CODFILIAL, FILIAL, REGIONAL,
+       VL_LIQUIDO, VL_META, PERC_ATING_META,
+       VL_LIQUIDO - VL_META AS GAP,
+       PERC_PART_FAT, QT_NOTAS, QT_CLIENTES
+FROM EBD.EBD_IA_PAINEL_FILIAL
+WHERE ANO_MES = :anoMes
+ORDER BY VL_LIQUIDO DESC
+```
+
+## T-PNL02 — Série mensal Brasil ✅ Painel
+
+```sql
+SELECT ANO_MES, VL_BRUTO, VL_DEVOLUCAO, VL_LIQUIDO, VL_META,
+       PERC_ATING_META, PERC_DEV, QT_NOTAS, QT_CLIENTES,
+       ROUND(VL_LIQUIDO / NULLIF(QT_NOTAS,0), 2) AS TICKET_LIQUIDO
+FROM EBD.EBD_IA_PAINEL_MES
+WHERE ANO_MES BETWEEN :ini AND :fim
+ORDER BY ANO_MES
+```
+
+Série: 202501 a 202608.
+
+## T-PNL03 — Top indústrias do mês ✅ Painel
+
+```sql
+SELECT RANKING, CODFORNEC, FORNECEDOR, VL_LIQUIDO, VL_META,
+       PERC_ATING_META, PERC_PART_FAT, QT_SKUS, QT_CLIENTES
+FROM EBD.EBD_IA_PAINEL_INDUSTRIA
+WHERE ANO_MES = :anoMes
+  AND RANKING <= :topN
+ORDER BY RANKING
+```
+
+## T-PNL04 — Consolidado por regional ✅ Painel
+
+```sql
+SELECT REGIONAL,
+       SUM(VL_LIQUIDO) AS VL_LIQUIDO,
+       SUM(VL_META)    AS VL_META,
+       ROUND(SUM(VL_LIQUIDO) / NULLIF(SUM(VL_META),0) * 100, 1) AS PERC_ATING,
+       SUM(VL_LIQUIDO) - SUM(VL_META) AS GAP,
+       SUM(QT_NOTAS) AS QT_NOTAS,
+       COUNT(*) AS QT_FILIAIS
+FROM EBD.EBD_IA_PAINEL_FILIAL
+WHERE ANO_MES = :anoMes
+GROUP BY REGIONAL
+ORDER BY VL_LIQUIDO DESC
+```
+
+`QT_NOTAS` soma entre filiais. **Não** some `QT_SKUS` (3,71×) — #117.
+
+## T-PNL05 — Melhor mês de cada filial ✅ Painel
+
+```sql
+SELECT CODFILIAL, FILIAL, REGIONAL, ANO_MES, VL_LIQUIDO, PERC_ATING_META
+FROM (
+    SELECT f.*, ROW_NUMBER() OVER (PARTITION BY CODFILIAL
+                                   ORDER BY VL_LIQUIDO DESC) AS RN
+    FROM EBD.EBD_IA_PAINEL_FILIAL f
+    WHERE ANO_MES >= :anoMesIni
+)
+WHERE RN = 1
+ORDER BY VL_LIQUIDO DESC
+```
+
+## T-PNL06 — Uma indústria mês a mês ✅ Painel
+
+```sql
+SELECT ANO_MES, VL_LIQUIDO, VL_META, PERC_ATING_META,
+       PERC_PART_FAT, RANKING, QT_CLIENTES, QT_SKUS
+FROM EBD.EBD_IA_PAINEL_INDUSTRIA
+WHERE CODFORNEC = :codFornec
+  AND ANO_MES BETWEEN :ini AND :fim
+ORDER BY ANO_MES
+```
+
+`FORNECEDOR` traz o nome comercial — `WHERE UPPER(FORNECEDOR) LIKE
+'%NISSIN%'` funciona direto aqui.

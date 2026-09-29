@@ -1498,3 +1498,48 @@ Ex. SBC: cadastral 2.885 ativos/0 inativos vs comercial 2.619 ativos/266 inativo
 Diretor perguntando "clientes ativos" geralmente quer o COMERCIAL. Na dúvida, perguntar.
 
 ---
+
+## #117 — Painel consolidado: o que soma, o que não soma, e onde não fecha
+
+Medido em 29/09/2026 contra as tabelas `EBD_IA_PAINEL_*`, não repetido do
+texto de apresentação — que estava errado em três pontos.
+
+### 1. Contagem distinta não soma — e cada corte quebra uma diferente
+
+202608, soma dos cortes contra o total da MES:
+
+| Medida | soma FILIAL | soma INDUSTRIA |
+|---|---|---|
+| `VL_LIQUIDO`, `QT_UNIDADES` | soma | soma |
+| `QT_NOTAS` | soma | **1,94×** (uma nota tem itens de várias indústrias) |
+| `QT_CLIENTES` | ≈ 1,004× | **3,85×** |
+| `QT_VENDEDORES` | ≈ 1,005× | **7,89×** |
+| `QT_SKUS` | **3,71×** (mesmo SKU vende em várias filiais) | soma |
+
+**Regra:** para qualquer contagem Brasil, leia da `EBD_IA_PAINEL_MES`. Nunca
+agregue `QT_*` a partir dos cortes, exceto `QT_UNIDADES`.
+
+### 2. A INDUSTRIA não reconcilia ao centavo
+
+`FILIAL` fecha com a `MES` (máx. R$ 0,03). A `INDUSTRIA` **diverge em 16 de
+20 meses** — pior caso **R$ 6.992,65 em 202509**, também 202606 (R$ 3.871)
+e 202602 (R$ 874). Só fecha exatamente em 202502, 202505, 202603 e 202608.
+
+É pequeno (≈0,002%), mas não é zero. Para o **total**, use a `MES`; a soma
+da INDUSTRIA não é o total oficial.
+
+### 3. `VL_TICKET_MEDIO` é BRUTO ÷ notas
+
+Não líquido. Em 202608: 2.420,77 (bruto) contra 2.318,46 (líquido). Para
+ticket líquido, calcule `VL_LIQUIDO / QT_NOTAS`.
+
+### 4. `PERC_PART_FAT`
+
+Sempre 100 na MES — não é medida. Nos cortes soma 100 e significa
+participação.
+
+### 5. Só mês fechado
+
+Último mês é 202608. Para "como estamos hoje", use o faturamento ao vivo
+(T210). Consultar o painel para o mês corrente devolve o mês anterior sem
+aviso.

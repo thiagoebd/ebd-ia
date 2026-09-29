@@ -1554,3 +1554,79 @@ intragrupo**. Os demais codigos precisam ser levantados.
 
 Sai do banco. Ver **cicatriz #107** no sql-corrections.md.
 
+## 20. Painel consolidado — tabelas EBD_IA_PAINEL_* (cubo mensal)
+
+Quatro tabelas no schema EBD, carregadas por procedure. Não são dado bruto:
+são faturamento por **mês fechado** já calculado. Respondem em ~65 ms.
+
+**Pergunta de mês FECHADO com corte Brasil, filial, regional ou indústria:
+use estas antes de qualquer query no Winthor.**
+
+| Tabela | Grão | PK | Linhas |
+|---|---|---|---|
+| `EBD.EBD_IA_PAINEL_MES` | mês | `ANO_MES` | 20 |
+| `EBD.EBD_IA_PAINEL_FILIAL` | mês × filial | `ANO_MES, CODFILIAL` | 420 |
+| `EBD.EBD_IA_PAINEL_INDUSTRIA` | mês × fornecedor raiz | `ANO_MES, CODFORNEC` | 1.583 |
+| `EBD.EBD_IA_PAINEL_LOG` | execução da carga | `ID` | 20 |
+
+Período: **202501 a 202608**. Não há 2024 nem mês corrente
+(`DIAS_UTEIS_RESTANTES = 0` em todas as linhas). Carga completa em
+22/09/2026, 21:00→23:27. Índices extras: `FILIAL (ANO_MES, REGIONAL)` e
+`INDUSTRIA (ANO_MES, RANKING)`.
+
+### Colunas (comuns às três de dado)
+
+`COD_SEQ` (sequência, sem uso analítico), `ANO_MES` NUMBER(6) YYYYMM,
+`DT_INICIO`, `DT_FIM`, `DIAS_UTEIS_MES`, `DIAS_UTEIS_TRANSCORRIDOS`,
+`DIAS_UTEIS_RESTANTES`, `DT_CARGA`.
+
+Valores NUMBER(18,6): `VL_BRUTO`, `VL_DEVOLUCAO`, `VL_LIQUIDO`, `VL_META`,
+`VL_MEDIO_DIA`, `VL_TICKET_MEDIO`. Percentuais: `PERC_ATING_META`,
+`PERC_PART_FAT`, `PERC_DEV`. Contadores: `QT_NOTAS`, `QT_CLIENTES`,
+`QT_VENDEDORES`, `QT_SKUS`, `QT_UNIDADES`, `QT_MIX_MEDIO_CLIENTE`,
+`QT_MIX_MEDIO_PEDIDO`.
+
+### Como os derivados são calculados (medido em 202608)
+
+| Coluna | Fórmula real |
+|---|---|
+| `VL_LIQUIDO` | bruto − devolução |
+| `VL_TICKET_MEDIO` | **BRUTO ÷ notas** — não líquido. 2.420,77 contra 2.318,46 do líquido |
+| `VL_MEDIO_DIA` | líquido ÷ dias úteis |
+| `PERC_ATING_META` | líquido ÷ meta × 100 |
+
+Para ticket médio **líquido**, calcule `VL_LIQUIDO / QT_NOTAS` — não use a
+coluna.
+
+### Colunas próprias
+
+**FILIAL:** `CODFILIAL` VARCHAR2(2), `FILIAL` (fantasia, pode ser nula) e
+`REGIONAL` VARCHAR2(4) NOT NULL, já com a sigla correta: N1, N2, NE1, NE2,
+NE3, RJ1, RJ2, SP1, SP2. **Dispensa mapa regional escrito à mão** — templates
+que montam `regional_map` com `FROM DUAL` e usam NO1/NO2 estão errados
+(cicatriz #107).
+
+21 filiais por mês: 01–16, 18, 21, 22, 52, 53. Não entram 17, 19, 20, 23
+nem 70.
+
+**INDUSTRIA:** `CODFORNEC` NUMBER(6) — **raiz**, `NVL(CODFORNECPRINC,
+CODFORNEC)` (conferido nos top 6 contra o PCFORNEC). `FORNECEDOR` é a
+FANTASIA (NISSIN, RED BULL, FERRERO). `RANKING` NUMBER(4) por líquido — a
+tabela é completa, não Top N.
+
+**LOG:** `ID`, `ANO_MES`, `DT_INICIO`/`DT_FIM` (timestamp), `SEGUNDOS`,
+`STATUS`, `LINHAS_FILIAL`, `LINHAS_IND`, `VL_BRUTO`, `MSG_ERRO`. Não tem
+`DT_CARGA`. Use para saber se e quando a carga de um mês rodou.
+
+### Referência 202608
+
+Líquido R$ 344,4M · meta R$ 334,9M · 102,8% · 148.527 notas · 51.291
+clientes · 1.172 vendedores · 6.592 SKUs.
+
+Filiais: DUQUE (05/RJ2) 46,9M · TAQUARA (13/RJ1) 37,9M · MATRIZ (01/N2)
+29,5M · SÃO GONÇALO (10/RJ1) 27,6M · CARUARU (53/NE3) 25,6M.
+
+### Não responde
+
+Corte por RCA, supervisor, cliente ou SKU. Mês corrente. Antes de 2025.
+Ver cicatriz #117 antes de somar qualquer coisa.
