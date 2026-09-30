@@ -732,3 +732,24 @@ def test_eco_da_transcricao_religavel(rota, monkeypatch):
     rota.post("/api/whatsapp/webhook", json=midia("audioMessage", grupo=f"{THIAGO}@s.whatsapp.net"), headers=H)
     _espera(rota, 1)
     assert rota.enviados[0][1] == "🎙️ Entendi: «como estamos em setembro»"
+
+
+
+def test_conversor_preserva_o_padrao_visual():
+    molde = ("📊 Faturamento — Março/2026\n\n💰 **R$ 10.810.107**\n"
+             "↔️ vs Fev/26: -5,3% 🔴 | vs Mar/25: +11,9% 🟢\n\n"
+             "━━━━━━━━━━━━━━━━━━━━━━\n🎯 DIAGNÓSTICO — AÇÕES PRIORITÁRIAS\n"
+             "━━━━━━━━━━━━━━━━━━━━━━\n\n1️⃣ Nissin — ruptura com venda ativa\n"
+             "Responsável: Compras\n\nQuer aprofundar?\n- \"Margem por RCA\"")
+    s = wa.md_para_whatsapp(molde)
+    assert "💰 *R$ 10.810.107*" in s
+    for trecho in ("━━━━━━━━━━━━━━━━━━━━━━", "1️⃣ Nissin", "↔️ vs Fev/26: -5,3% 🔴",
+                   "🎯 DIAGNÓSTICO", '• "Margem por RCA"'):
+        assert trecho in s, trecho
+
+
+def test_claude_md_tem_os_moldes_e_a_trava():
+    s = (RAIZ / "docs/CLAUDE.md").read_text(encoding="utf-8")
+    assert "### Padrao visual do WhatsApp" in s
+    assert "NUNCA justifica completar dado" in s
+    assert "Nunca invente nome" in s
