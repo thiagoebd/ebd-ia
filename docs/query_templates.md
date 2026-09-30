@@ -3953,3 +3953,34 @@ ORDER BY ANO_MES
 
 `FORNECEDOR` traz o nome comercial — `WHERE UPPER(FORNECEDOR) LIKE
 '%NISSIN%'` funciona direto aqui.
+
+## T-CAL01 — Dias úteis do mês corrente por filial e Brasil ✅ Validado 30/09/2026
+
+Fonte: `PCDIASUTEIS` (calendário de VENDAS por filial, com feriado regional).
+`DIAVENDAS = 'S'` é dia útil. Sábado NÃO é dia de venda. Brasil = o número
+da maioria das filiais (STATS_MODE) — mesmo critério do painel consolidado.
+Mês FECHADO não precisa disto: use `DIAS_UTEIS_MES` do painel.
+
+```sql
+WITH cal AS (
+    SELECT CODFILIAL,
+           SUM(CASE WHEN DIAVENDAS = 'S' THEN 1 ELSE 0 END) AS UTEIS_MES,
+           SUM(CASE WHEN DIAVENDAS = 'S' AND DATA < TRUNC(SYSDATE) THEN 1 ELSE 0 END) AS ATE_ONTEM,
+           SUM(CASE WHEN DIAVENDAS = 'S' AND DATA >= TRUNC(SYSDATE) THEN 1 ELSE 0 END) AS RESTANTES_COM_HOJE,
+           MAX(CASE WHEN DATA = TRUNC(SYSDATE) THEN DIAVENDAS END) AS HOJE_E_UTIL
+    FROM EBD.PCDIASUTEIS
+    WHERE DATA >= TRUNC(SYSDATE, 'MM')
+      AND DATA < ADD_MONTHS(TRUNC(SYSDATE, 'MM'), 1)
+      AND CODFILIAL IN ('01','02','03','04','05','06','07','08','09','10','11',
+                        '12','13','14','15','16','18','21','22','52','53')
+    GROUP BY CODFILIAL
+)
+SELECT c.CODFILIAL, c.UTEIS_MES, c.ATE_ONTEM, c.RESTANTES_COM_HOJE, c.HOJE_E_UTIL,
+       b.UTEIS_BRASIL, b.ATE_ONTEM_BRASIL
+FROM cal c
+CROSS JOIN (SELECT STATS_MODE(UTEIS_MES) AS UTEIS_BRASIL,
+                   STATS_MODE(ATE_ONTEM) AS ATE_ONTEM_BRASIL
+            FROM cal) b
+ORDER BY c.CODFILIAL
+```
+

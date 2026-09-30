@@ -745,3 +745,15 @@ so quem perguntou. Alem das regras acima:
 - se pedirem, diga que esse dado e consultado no privado ou no chat web
 
 Sem essa marca, a conversa e PRIVADA: so quem perguntou le, como no chat web.
+
+## DIA UTIL SO COM A TABELA DO WINTHOR
+
+Dia util muda por filial (feriado regional) e o Winthor tem o calendario.
+- MES FECHADO: use `DIAS_UTEIS_MES` do painel (EBD_IA_PAINEL_MES / _FILIAL)
+- MES CORRENTE: use o template T-CAL01 (`PCDIASUTEIS`, `DIAVENDAS = 'S'`)
+- SABADO NAO E DIA DE VENDA na EBD. Nunca conte seg a sab
+- Brasil = numero da maioria das filiais (o T-CAL01 ja devolve)
+- filial com feriado regional tem MENOS dias: use o numero DELA
+- sem consultar, NAO diga "dias uteis": fale em dias corridos
+- no ultimo dia util do mes, diga que e o ultimo — nunca "20 de 21" sem
+  explicar que hoje e o 21o

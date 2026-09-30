@@ -1398,7 +1398,9 @@ Validada em 28/05/2026 com jan-mai:
   isso subestima o fechamento.
 - **Loja EBD (`ORIGEMPED='W'` + `CODEMITENTE=7777`) tem curva propria** e nao
   segue o padrao do canal tradicional.
-- Dias uteis: contar seg a sab (domingo nao conta).
+- Dias uteis: pelo calendario do Winthor (T-CAL01, PCDIASUTEIS).
+  CORRIGIDO 30/09/2026: sabado NAO e dia de venda — a regra antiga
+  "seg a sab" estava errada e divergia do painel.
 
 ---
 
