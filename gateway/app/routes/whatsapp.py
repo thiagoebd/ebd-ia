@@ -341,12 +341,15 @@ async def _responde(m: Mensagem) -> None:
 
 
 def _modelo_wa() -> str:
-    """O MESMO modelo padrao da web (DEFAULT_MODEL, que o troca_modelo.sh
-    ja altera). Sem isto o agente caia no CLAUDE_MODEL do config — o Opus,
-    pela API da Anthropic — e o WhatsApp rodou um dia inteiro no modelo mais
-    caro ate o credito acabar (30/09/2026). WA_MODEL forca outro, se preciso."""
+    """So DeepSeek no WhatsApp (decisao do Thiago, 30/09/2026). Sem isto o
+    agente caia no Claude Opus e gastou o credito da Anthropic num dia."""
     from gateway.app.models_catalog import DEFAULT_MODEL
-    return os.getenv("WA_MODEL", "").strip() or DEFAULT_MODEL
+    padrao = DEFAULT_MODEL if DEFAULT_MODEL.startswith("deepseek") else "deepseek-flash"
+    m = os.getenv("WA_MODEL", "").strip() or padrao
+    if not m.startswith("deepseek"):
+        logger.warning("wa: WA_MODEL=%s ignorado — o WhatsApp so usa DeepSeek", m)
+        return padrao
+    return m
 
 
 # ─── planilha recebida e arquivos gerados ────────────────────────────────

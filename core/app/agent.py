@@ -106,7 +106,9 @@ _deepseek_client = (
 def _client_for(model: str | None):
     """Roteia o client pelo prefixo do modelo: deepseek-* -> DeepSeek; senao Claude.
     Para deepseek, o nome real do modelo vem do .env (settings.deepseek_model)."""
-    m = model or settings.claude_model
+    # sem modelo -> DeepSeek. O padrao antigo (CLAUDE_MODEL = Opus) mandou o
+    # WhatsApp inteiro para a API da Anthropic ate o credito acabar (30/09/2026)
+    m = model or "deepseek-flash"
     if m.startswith("deepseek") and _deepseek_client is not None:
         return _deepseek_client, m
     return _client, m

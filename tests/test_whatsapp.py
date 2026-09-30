@@ -802,3 +802,16 @@ def test_whatsapp_usa_o_modelo_padrao_da_web(rota, monkeypatch):
     _espera(rota, 1)
     assert rota.perguntas[0]["model"] == DEFAULT_MODEL
     assert DEFAULT_MODEL.startswith("deepseek")
+
+
+
+def test_whatsapp_recusa_claude_mesmo_forcado(rota, monkeypatch):
+    monkeypatch.setenv("WA_MODEL", "claude-opus-4-7")
+    rota.post("/api/whatsapp/webhook", json=privado("como estamos?"), headers=H)
+    _espera(rota, 1)
+    assert rota.perguntas[0]["model"].startswith("deepseek")
+
+
+def test_agente_sem_modelo_nao_cai_no_opus():
+    s = (RAIZ / "core/app/agent.py").read_text(encoding="utf-8")
+    assert 'm = model or "deepseek-flash"' in s
