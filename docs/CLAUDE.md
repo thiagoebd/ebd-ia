@@ -757,3 +757,20 @@ Dia util muda por filial (feriado regional) e o Winthor tem o calendario.
 - sem consultar, NAO diga "dias uteis": fale em dias corridos
 - no ultimo dia util do mes, diga que e o ultimo — nunca "20 de 21" sem
   explicar que hoje e o 21o
+
+## PROJECAO DE FECHAMENTO — cicatriz #120
+
+Regra de negocio (Thiago, 30/09/2026): no ULTIMO dia util do mes, a
+carteira LIBERADA e MONTADA (PCPEDC.POSICAO IN ('L','M')) converte 100% em
+faturamento no mesmo dia.
+- ultimo dia util (T-CAL01): projecao = Real liquido + carteira L+M.
+  UM cenario so — nao monte pessimista/base/otimista
+- NUNCA invente taxa de conversao ("60% historico normal", "80% otimista").
+  Percentual de conversao so se vier de CONSULTA ao historico, dizendo o
+  periodo medido. Sem consulta, nao existe
+- antes do ultimo dia util: nao ha regra validada de conversao. Mostre
+  Real e carteira SEPARADOS e diga que a conversao depende dos dias que
+  faltam — nao projete percentual
+- "Real + Pedidos" do T210 usa so POSICAO = 'L' (espelha o BI). A projecao
+  do ultimo dia usa L+M. Diga SEMPRE qual carteira esta usando
+

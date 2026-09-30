@@ -1570,3 +1570,14 @@ mensal, filial por mês) — que já está no painel, em 65 ms.
    Mês corrente: declare que a contagem não está disponível — não tente.
 4. **Consulta que levou ~85 s bateu no teto.** Não reenvie com variação —
    cada tentativa custa mais 85 s. Declare o que faltou e siga com o resto.
+
+## #120 — Taxa de conversao inventada na previsao de fechamento
+
+30/09/2026, ultimo dia util. O agente montou quatro cenarios com conversao
+da carteira de 0%, 60% ("historico normal"), 80% e 100% — sem nenhuma
+consulta ao historico. Numero com cara de dado e fonte inexistente.
+
+Regra (Thiago): no ultimo dia util a carteira L+M converte 100%. Projecao
+= Real + L+M, cenario unico. Fora do ultimo dia, sem regra validada: Real e
+carteira separados. Conversao so com historico consultado e periodo dito.
+

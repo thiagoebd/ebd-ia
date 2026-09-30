@@ -783,3 +783,12 @@ def test_artefato_sem_arquivo_nao_derruba_a_resposta(rota, monkeypatch):
 def test_claude_md_proibe_card_no_whatsapp():
     s = (RAIZ / "docs/CLAUDE.md").read_text(encoding="utf-8")
     assert 'nunca "baixe pelo card"' in s
+
+
+
+def test_projecao_sem_taxa_inventada():
+    """#120: cenarios com 60%/80% de conversao sem consulta ao historico."""
+    s = (RAIZ / "docs/CLAUDE.md").read_text(encoding="utf-8")
+    assert "## PROJECAO DE FECHAMENTO" in s
+    assert "NUNCA invente taxa de conversao" in s
+    assert "POSICAO IN ('L','M')" in s
