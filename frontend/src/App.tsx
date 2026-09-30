@@ -16,7 +16,7 @@ import { AccessAdmin } from "./AccessAdmin";
 const API_BASE = import.meta.env.VITE_API_BASE_URL;
 
 type Msg = { role: "user" | "assistant"; text: string; imagens?: string[]; anexo?: { nome: string; tipo: string }; status?: string; tools?: string[]; artifacts?: ArtifactRef[] };
-type Thread = { id: string; title: string; msgs: Msg[]; loaded: boolean; model?: string };
+type Thread = { id: string; title: string; msgs: Msg[]; loaded: boolean; model?: string; pinned?: boolean };
 type ModelInfo = { id: string; label: string; tier: string };
 type MeInfo = { role: "admin" | "user"; super_admin?: boolean; models: { default: string; available: ModelInfo[] } };
 
@@ -128,7 +128,7 @@ function App() {
         });
         if (!resp.ok) return;
         const data = await resp.json();
-        setThreads(data.map((c: any) => ({ id: c.id, title: c.title, msgs: [], loaded: false, model: c.model })));
+        setThreads(data.map((c: any) => ({ id: c.id, title: c.title, msgs: [], loaded: false, model: c.model, pinned: !!c.pinned })));
         const meResp = await fetch(`${API_BASE}/api/me`, { headers: { Authorization: `Bearer ${t}` } });
         if (meResp.ok) {
           const meData = await meResp.json();
@@ -184,6 +184,31 @@ function App() {
     } catch (e: any) {
       setError(e.message);
       setConfirmingDelete(null);
+    }
+  }
+
+  async function togglePin(id: string, e: React.MouseEvent) {
+    e.stopPropagation(); // nao abre a thread
+    const atual = threads.find((t) => t.id === id);
+    if (!atual || id.startsWith("tmp-")) return;
+    const novo = !atual.pinned;
+    // otimista: muda na hora, desfaz se o servidor recusar
+    setThreads((ts) => ts.map((t) => (t.id === id ? { ...t, pinned: novo } : t)));
+    try {
+      const tok = await token();
+      const resp = await fetch(`${API_BASE}/api/conversations/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${tok}` },
+        body: JSON.stringify({ pinned: novo }),
+      });
+      if (!resp.ok) {
+        let msg = `HTTP ${resp.status}`;
+        try { msg = (await resp.json()).detail || msg; } catch { /* sem corpo */ }
+        throw new Error(msg);
+      }
+    } catch (err: any) {
+      setThreads((ts) => ts.map((t) => (t.id === id ? { ...t, pinned: !novo } : t)));
+      setError(err.message);
     }
   }
 
@@ -408,15 +433,29 @@ function App() {
                   </div>
                 </>
               )}
-              {threads
-                .filter((t) => !historySearch || t.title.toLowerCase().includes(historySearch.toLowerCase()))
-                .map((t) => (
+              {(() => {
+                const visiveis = threads.filter((t) => !historySearch || t.title.toLowerCase().includes(historySearch.toLowerCase()));
+                const fixadas = visiveis.filter((t) => t.pinned);
+                const recentes = visiveis.filter((t) => !t.pinned);
+                const linha = (t: Thread) => (
                 <div
                   key={t.id}
-                  className={`thread ${t.id === activeId ? "active" : ""} ${confirmingDelete === t.id ? "confirming" : ""}`}
+                  className={`thread ${t.id === activeId ? "active" : ""} ${confirmingDelete === t.id ? "confirming" : ""} ${t.pinned ? "pinned" : ""}`}
                   onClick={() => openThread(t.id)}
                 >
                   <span className="lbl">{t.title}</span>
+                  <button
+                    className={`thread-pin ${t.pinned ? "on" : ""}`}
+                    onClick={(e) => togglePin(t.id, e)}
+                    title={t.pinned ? "Desafixar — volta para a rotação das 8 conversas" : "Fixar — nunca é apagada pela rotação"}
+                    aria-label={t.pinned ? "Desafixar conversa" : "Fixar conversa"}
+                    aria-pressed={!!t.pinned}
+                  >
+                    <svg width="13" height="13" viewBox="0 0 24 24" aria-hidden="true">
+                      <path d="M16 3l5 5-3 1-4 4 1 5-2 2-4-4-5 5-1-1 5-5-4-4 2-2 5 1 4-4z"
+                            fill={t.pinned ? "currentColor" : "none"} stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
+                    </svg>
+                  </button>
                   <button
                     className="thread-del"
                     onClick={(e) => requestDelete(t.id, e)}
@@ -426,7 +465,16 @@ function App() {
                     {confirmingDelete === t.id ? "Apagar?" : "×"}
                   </button>
                 </div>
-              ))}
+                );
+                return (
+                  <>
+                    {fixadas.length > 0 && <div className="sb-group">Fixadas</div>}
+                    {fixadas.map(linha)}
+                    {fixadas.length > 0 && recentes.length > 0 && <div className="sb-group">Recentes</div>}
+                    {recentes.map(linha)}
+                  </>
+                );
+              })()}
               {historySearch && threads.filter((t) => t.title.toLowerCase().includes(historySearch.toLowerCase())).length === 0 && (
                 <div className="sb-empty-search">Sem resultados para "{historySearch}"</div>
               )}

@@ -324,3 +324,22 @@ aside .sb-head img,
 /* mapa de roteiro precisa de largura — escapa do max-width estreito dos artefatos */
 .artifacts:has(.mapcard) { max-width: 720px; }
 .mapcard { width: 100%; }
+
+/* ── Fixar conversa (fora da rotação das 8) ───────────────────────────── */
+.thread-pin {
+  opacity: 0; flex: none;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: transparent; border: 0; cursor: pointer;
+  padding: 3px 5px; border-radius: 6px;
+  color: rgba(0,0,0,0.4);
+  transition: opacity .12s, background .12s, color .12s;
+}
+.thread:hover .thread-pin { opacity: 1; }
+.thread-pin:hover { background: rgba(0,0,0,0.06); color: var(--text); }
+.thread-pin.on { opacity: 1; color: var(--accent, #b4532a); }
+.thread.confirming .thread-pin { display: none; }
+.sb-group {
+  margin: 10px 10px 4px;
+  font-size: 10.5px; letter-spacing: .08em; text-transform: uppercase;
+  color: var(--text-3, rgba(0,0,0,0.45));
+}

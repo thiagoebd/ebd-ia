@@ -31,6 +31,9 @@ CREATE TABLE IF NOT EXISTS conversations (
     created_at  timestamptz NOT NULL DEFAULT now(),
     updated_at  timestamptz NOT NULL DEFAULT now()
 );
+-- conversa fixada: fica fora da rotacao e so sai por desafixar ou apagar
+ALTER TABLE conversations ADD COLUMN IF NOT EXISTS pinned    boolean     NOT NULL DEFAULT false;
+ALTER TABLE conversations ADD COLUMN IF NOT EXISTS pinned_at timestamptz;
 CREATE TABLE IF NOT EXISTS messages (
     id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     conversation_id uuid        NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
@@ -82,11 +85,21 @@ def _pool_or_raise():
 
 import os
 
-MAX_CONVERSATIONS_PER_USER = int(os.getenv("MAX_CONVERSATIONS_PER_USER", "5"))
+# conversas NAO fixadas mantidas por usuario; as fixadas ficam fora da conta
+MAX_CONVERSATIONS_PER_USER = int(os.getenv("MAX_CONVERSATIONS_PER_USER", "8"))
+# teto de fixadas: sem ele a conversa (e a planilha anexada) acumula para sempre
+MAX_PINNED_PER_USER = int(os.getenv("MAX_PINNED_PER_USER", "10"))
+
+
+class LimiteFixadas(Exception):
+    """Usuario ja tem o maximo de conversas fixadas."""
 
 
 async def _enforce_conversation_cap(conn, user_oid: str) -> int:
-    """Mantém as N conversas mais recentes (updated_at) do usuário; deleta o resto.
+    """Mantém as N conversas NÃO fixadas mais recentes do usuário; deleta o resto.
+
+    Conversa fixada (pinned) nunca entra na conta nem é apagada aqui — só sai
+    por desafixar ou apagar manualmente.
 
     messages caem via ON DELETE CASCADE; artifacts sobrevivem via ON DELETE SET NULL
     (rotacionar chat não destrói entregável — ele segue na Biblioteca).
@@ -95,9 +108,11 @@ async def _enforce_conversation_cap(conn, user_oid: str) -> int:
     result = await conn.execute(
         """DELETE FROM conversations
            WHERE user_oid = $1
+             AND pinned = false
              AND id NOT IN (
                  SELECT id FROM conversations
                  WHERE user_oid = $1
+                   AND pinned = false
                  ORDER BY updated_at DESC
                  LIMIT $2
              )""",
@@ -129,9 +144,9 @@ async def get_conversation(conv_id: str, user_oid: str):
 
 async def list_conversations(user_oid: str, limit: int = 100) -> list:
     rows = await _pool_or_raise().fetch(
-        """SELECT id, title, model, updated_at
+        """SELECT id, title, model, updated_at, pinned, pinned_at
            FROM conversations WHERE user_oid = $1
-           ORDER BY updated_at DESC LIMIT $2""",
+           ORDER BY pinned DESC, updated_at DESC LIMIT $2""",
         user_oid, limit,
     )
     return [dict(r) for r in rows]
@@ -244,6 +259,37 @@ async def build_model_window(conv_id: str, user_oid: str, max_pairs: int = 10) -
             window.append({"role": m["role"],
                            "content": "[imagem enviada nesta conversa]"})
     return window
+
+async def set_pinned(conv_id: str, user_oid: str, pinned: bool):
+    """Fixa ou desafixa. Devolve a conversa, None se nao existir/nao for do user.
+
+    Nao mexe em updated_at: fixar nao reordena a conversa. Ao desafixar ela
+    volta para a rotacao — se estiver entre as mais antigas, sai na proxima
+    conversa nova criada (e o esperado: desafixar = voltar a ser comum).
+    """
+    pool = _pool_or_raise()
+    async with pool.acquire() as con:
+        async with con.transaction():
+            if pinned:
+                n = await con.fetchval(
+                    """SELECT count(*) FROM conversations
+                       WHERE user_oid = $1 AND pinned AND id <> $2::uuid""",
+                    user_oid, conv_id,
+                )
+                if n >= MAX_PINNED_PER_USER:
+                    raise LimiteFixadas(
+                        f"Limite de {MAX_PINNED_PER_USER} conversas fixadas. "
+                        f"Desafixe uma para fixar outra.")
+            row = await con.fetchrow(
+                """UPDATE conversations
+                   SET pinned = $3,
+                       pinned_at = CASE WHEN $3 THEN now() ELSE NULL END
+                   WHERE id = $1::uuid AND user_oid = $2
+                   RETURNING id, title, pinned, pinned_at, updated_at""",
+                conv_id, user_oid, pinned,
+            )
+    return dict(row) if row else None
+
 
 async def delete_conversation(conv_id: str, user_oid: str) -> bool:
     """Apaga a conversa SE pertencer ao user_oid. ON DELETE CASCADE

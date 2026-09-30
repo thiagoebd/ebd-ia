@@ -497,7 +497,9 @@ def test_push_da_mensagem_leva_anexo_nao_base64():
 
 def test_corpo_da_requisicao_leva_o_base64():
     s = _fonte("frontend/src/App.tsx")
-    i = s.index("body: JSON.stringify")
+    # o corpo DA MENSAGEM — outras chamadas (fixar conversa) tambem usam
+    # JSON.stringify e vem antes no arquivo
+    i = s.index("body: JSON.stringify({ message")
     assert "planilha_b64: pl ? pl.b64" in s[i:i + 300]
 
 
