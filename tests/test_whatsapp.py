@@ -681,10 +681,24 @@ def test_documento_nao_suportado_avisa(rota):
     assert "ainda não" in rota.enviados[0][1] and rota.perguntas == []
 
 
+def _banco_de_artefatos(monkeypatch, linhas):
+    import gateway.app as gw
+
+    class Pool:
+        async def fetchrow(self, sql, art_id):
+            return linhas.get(art_id)
+
+    falso = types.SimpleNamespace(_pool_or_raise=lambda: Pool())
+    monkeypatch.setitem(sys.modules, "gateway.app.db", falso)
+    monkeypatch.setattr(gw, "db", falso, raising=False)
+
+
 def test_arquivo_gerado_vai_como_documento(rota, monkeypatch, tmp_path):
-    (tmp_path / "abc123.xlsx").write_bytes(b"PK-EXCEL")
-    monkeypatch.setitem(sys.modules, "app.artifacts", types.SimpleNamespace(ARTIFACTS_DIR=tmp_path))
-    rota.saida["eventos"] = [{"type": "artifact", "id": "abc123", "kind": "xlsx",
+    arq = tmp_path / "outro-uuid-do-disco.xlsx"
+    arq.write_bytes(b"PK-EXCEL")
+    _banco_de_artefatos(monkeypatch, {"id-do-registro": {"file_path": str(arq),
+                                                          "filename": "x.xlsx"}})
+    rota.saida["eventos"] = [{"type": "artifact", "id": "id-do-registro", "kind": "xlsx",
                               "filename": "Faturamento_Agosto.xlsx"},
                              {"type": "token", "text": "Segue a planilha."}]
     rota.post("/api/whatsapp/webhook", json=privado("gera a planilha de agosto"), headers=H)
@@ -753,3 +767,19 @@ def test_claude_md_tem_os_moldes_e_a_trava():
     assert "### Padrao visual do WhatsApp" in s
     assert "NUNCA justifica completar dado" in s
     assert "Nunca invente nome" in s
+
+
+
+def test_artefato_sem_arquivo_nao_derruba_a_resposta(rota, monkeypatch):
+    _banco_de_artefatos(monkeypatch, {})
+    rota.saida["eventos"] = [{"type": "artifact", "id": "sumiu", "filename": "a.xlsx"},
+                             {"type": "token", "text": "Segue."}]
+    rota.post("/api/whatsapp/webhook", json=privado("gera a planilha"), headers=H)
+    _espera(rota, 1)
+    time.sleep(0.3)
+    assert rota.arquivos == [] and rota.enviados[-1][1] == "Segue."
+
+
+def test_claude_md_proibe_card_no_whatsapp():
+    s = (RAIZ / "docs/CLAUDE.md").read_text(encoding="utf-8")
+    assert 'nunca "baixe pelo card"' in s

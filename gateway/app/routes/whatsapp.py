@@ -390,14 +390,20 @@ async def _recebe_planilha(m: Mensagem, email: str, dados: bytes):
 
 
 async def _envia_artefato(chat: str, art: dict) -> None:
-    """Excel, PDF, PowerPoint ou grafico gerado pelo agente -> arquivo na conversa."""
+    """Excel, PDF, PowerPoint ou grafico gerado pelo agente -> arquivo na conversa.
+
+    O evento traz o ID do REGISTRO no banco, que nao e o nome do arquivo em
+    disco (ele e salvo com outro uuid, antes do registro). O caminho certo
+    vem da tabela artifacts.
+    """
     from pathlib import Path
-    from app.artifacts import ARTIFACTS_DIR
-    candidatos = sorted(Path(ARTIFACTS_DIR).glob(f"{art.get('id')}.*"))
-    if not candidatos:
-        logger.warning("wa: artefato %s nao encontrado em disco", art.get("id"))
+    from gateway.app import db
+    row = await db._pool_or_raise().fetchrow(
+        "SELECT file_path, filename FROM artifacts WHERE id = $1::uuid", str(art.get("id")))
+    arq = Path(row["file_path"]) if row and row["file_path"] else None
+    if not arq or not arq.exists():
+        logger.warning("wa: artefato %s sem arquivo em disco (%s)", art.get("id"), arq)
         return
-    arq = candidatos[0]
-    nome = art.get("filename") or arq.name
+    nome = art.get("filename") or row["filename"] or arq.name
     ok = await envia_arquivo(chat, arq.read_bytes(), nome)
     logger.info("wa: arquivo %s %s", nome, "enviado" if ok else "RECUSADO")
