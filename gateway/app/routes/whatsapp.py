@@ -1,4 +1,4 @@
-"""Webhook da Evolution API — o EBD.ia respondendo em grupo de WhatsApp.
+"""Webhook da Evolution API — o EBD.ia no WhatsApp, em grupo e no privado.
 
 A Evolution chama esta rota a cada mensagem do grupo. A rota decide em
 microssegundos se e com ela (grupo autorizado + chamou o @ebd.ia) e devolve
@@ -14,6 +14,10 @@ Variaveis (gateway/.env):
     WA_ENABLED=true
     WA_WEBHOOK_TOKEN=<segredo longo>          mesmo valor no webhook da Evolution
     WA_GRUPOS=1203630...@g.us                 JIDs autorizados, separados por virgula
+    WA_PRIVADO=true                           atende no privado (padrao true)
+    WA_ACK_APOS_S=15                          aviso "ja te retorno" so se demorar mais que isso
+    WA_ACK=true                               false desliga o aviso de vez
+    WA_VOZ_COM_TEXTO=true                     resposta em audio vai tambem por escrito
     WA_NUMEROS=lid:123=ciclano@...           SO para LID sem telefone (excecao)
     WA_BOT_IDS=5511888887777                  numero (e LID, se houver) do bot
     EVO_URL=http://127.0.0.1:8081
@@ -31,9 +35,14 @@ import time
 
 from fastapi import APIRouter, HTTPException, Request
 
+from app.adapters import whatsapp_voz as voz
+from app.adapters.whatsapp_ack import aviso_ligado, espera_antes_do_aviso, frase_de_aviso, primeiro_nome
+
 from app.adapters.whatsapp import (
-    Mensagem, envia_texto, foi_chamado, grupos_autorizados,
+    Mensagem, baixa_midia, envia_arquivo, envia_audio, envia_texto, foi_chamado,
+    grupos_autorizados,
     limpa_pergunta, mapa_numeros, md_para_whatsapp, normaliza_whatsapp, parse_evento,
+    privado_ligado,
 )
 
 logger = logging.getLogger("uvicorn.error")
@@ -42,11 +51,18 @@ router = APIRouter()
 HIST_TTL_S = 2 * 3600          # conversa no grupo "esfria" em 2 h
 TIMEOUT_TURNO_S = 600          # teto de um atendimento
 ROLE_GRUPO = "grupo_whatsapp"  # nao-admin: nunca propoe auto-append da KB
+AVISO_SEM_PERMISSAO_S = 24 * 3600   # "sem permissao" no maximo 1x/dia por pessoa
+# o numero pode ter sido de alguem (ex-colaborador): os contatos antigos
+# continuam escrevendo, e sem limite cada "oi" viraria resposta automatica
+MARCA_GRUPO = "[GRUPO de WhatsApp — todos os participantes leem a resposta]"
 
 _locks: dict[str, asyncio.Lock] = {}
 _hist: dict[tuple[str, str], tuple[float, list]] = {}
 _tarefas: set[asyncio.Task] = set()
 _ids_cache: tuple[float, set[str]] = (0.0, set())
+_avisados: dict[str, float] = {}
+_vistos: dict[str, float] = {}     # msg_id -> quando: a Evolution as vezes entrega 2x
+VISTO_TTL_S = 600
 
 
 def _ligado() -> bool:
@@ -120,12 +136,26 @@ async def webhook(request: Request):
         return {"ok": True}
 
     m = parse_evento(payload)
-    if m is None or m.grupo not in grupos_autorizados():
+    if m is None or m.de_mim:
+        return {"ok": True}
+    if m.privado:
+        if not privado_ligado():
+            return {"ok": True}
+    elif m.grupo not in grupos_autorizados():
         return {"ok": True}
     if not foi_chamado(m, await _ids_do_bot()):
         if os.getenv("WA_DEBUG_MENCAO", "").lower() == "true" and m.mencionados:
             logger.info("wa: mencao nao reconhecida mencionados=%s", m.mencionados)
         return {"ok": True}          # descartada, sem registro do conteudo
+
+    if m.msg_id:
+        agora = time.time()
+        for k in [k for k, v in _vistos.items() if agora - v > VISTO_TTL_S]:
+            _vistos.pop(k, None)
+        if m.msg_id in _vistos:
+            logger.info("wa: evento repetido ignorado")
+            return {"ok": True, "repetido": True}
+        _vistos[m.msg_id] = agora
 
     t = asyncio.create_task(_atende(m))
     _tarefas.add(t)
@@ -172,48 +202,200 @@ async def _responde(m: Mensagem) -> None:
     usuario = await _quem_perguntou(m, acl_store)
     if not usuario:
         # telefone mascarado; o LID vai inteiro porque e o que o admin mapeia
-        logger.info("wa: sem permissao tel=%s lid=%s", _mascara(m.telefone), m.lid)
-        await envia_texto(m.grupo, "Você não tem permissão para usar este "
-                          "recurso. Fale com a TI.", citar=m)
+        logger.info("wa: sem permissao %s tel=%s lid=%s",
+                    "privado" if m.privado else "grupo", _mascara(m.telefone), m.lid)
+        quem = f"{m.grupo}|{m.remetente_jid}"
+        if time.time() - _avisados.get(quem, 0.0) >= AVISO_SEM_PERMISSAO_S:
+            _avisados[quem] = time.time()
+            await envia_texto(m.grupo, "Você não tem permissão para usar este "
+                              "recurso. Fale com a TI.", citar=m)
         return
     email = usuario["email"]
 
-    pergunta = limpa_pergunta(m.texto)
-    if not pergunta:
+    # ── 1. o que chegou: texto, foto, audio ou planilha ──
+    texto_pergunta = limpa_pergunta(m.texto) if not m.privado else m.texto.strip()
+    imagens, planilha_ctx, aviso_planilha = None, None, None
+    modo_voz = voz.pediu_audio(texto_pergunta)
+    ja_avisou = False
+
+    if m.midia:
+        dados = await baixa_midia(m)
+        if not dados:
+            await envia_texto(m.grupo, "Não consegui baixar o arquivo. Manda de novo?", citar=m)
+            return
+        tipo = m.midia["tipo"]
+        if tipo == "audio":
+            try:
+                texto_pergunta = await asyncio.to_thread(voz.transcrever, dados)
+            except voz.VozIndisponivel:
+                await envia_texto(m.grupo, "Ainda não consigo ouvir áudio por aqui. "
+                                  "Manda por escrito?", citar=m)
+                return
+            if not texto_pergunta:
+                await envia_texto(m.grupo, "Não entendi o áudio. Pode repetir?", citar=m)
+                return
+            modo_voz = True
+            ja_avisou = True
+            # devolve o que entendeu: transcricao errada se corrige antes da resposta
+            await envia_texto(m.grupo, f"🎙️ Entendi: «{texto_pergunta}»", citar=m)
+        elif tipo == "imagem":
+            from app.anexos import AnexoInvalido, prepara_imagem
+            try:
+                imagens = [prepara_imagem(dados, m.midia["mimetype"] or "image/jpeg")]
+            except AnexoInvalido as e:
+                await envia_texto(m.grupo, str(e), citar=m)
+                return
+            texto_pergunta = texto_pergunta or "O que é isto? Relacione com o negócio da EBD se fizer sentido."
+        elif _e_planilha(m.midia):
+            planilha_ctx, aviso_planilha, erro = await _recebe_planilha(m, email, dados)
+            if erro:
+                await envia_texto(m.grupo, erro, citar=m)
+                return
+            texto_pergunta = texto_pergunta or "Analise esta planilha."
+        else:
+            await envia_texto(m.grupo, "Por aqui eu leio foto, áudio e planilha "
+                              "(xlsx, xls, csv). Esse tipo de arquivo ainda não.", citar=m)
+            return
+
+    if not texto_pergunta:
         await envia_texto(m.grupo, "Oi! Me chama com a pergunta junto — por "
                           "exemplo: @ebd.ia como está o faturamento hoje?", citar=m)
         return
+    planilha_ctx = planilha_ctx or _planilha_da_conversa(m.grupo, email)
 
-    logger.info("wa: pergunta de %s (%d chars)", email, len(pergunta))
-    await envia_texto(m.grupo, "🔎 Consultando…", citar=m)
+    logger.info("wa: pergunta %s de %s (%d chars)%s%s",
+                "privada" if m.privado else "no grupo", email, len(texto_pergunta),
+                f" [{m.midia['tipo']}]" if m.midia else "", " [voz]" if modo_voz else "")
+    # o agente precisa saber se todos leem, e se a resposta vai em audio
+    mensagem_agente = texto_pergunta if m.privado else f"{MARCA_GRUPO}\n{texto_pergunta}"
+    if modo_voz:
+        mensagem_agente += f"\n{voz.MARCA_AUDIO}"
 
-    texto, historia, t0 = "", None, time.perf_counter()
+    texto, historia, artefatos, t0 = "", None, [], time.perf_counter()
+
+    async def _consome() -> None:
+        nonlocal texto, historia
+        async for ev in run_turn_stream(
+            user_message=mensagem_agente,
+            conversation_history=_historico(m.grupo, email),
+            user_id=email,
+            user_role=ROLE_GRUPO,
+            user_filiais="*",          # o MCP restringe pelo e-mail
+            channel="whatsapp",
+            user_email=email,
+            imagens=imagens,
+            planilha_ctx=planilha_ctx,
+            aviso_planilha=aviso_planilha,
+        ):
+            tipo = ev.get("type")
+            if tipo == "token":
+                texto += ev.get("text", "")
+            elif tipo in ("tool", "tool_use"):
+                texto = ""              # fica so o que vem depois da ultima ferramenta
+            elif tipo == "artifact":
+                artefatos.append(ev)
+            elif tipo == "done":
+                historia = ev.get("history")
+
+    # ── 2. o agente comeca ja; o aviso so sai se ele nao terminar logo ──
+    tarefa = asyncio.create_task(_consome())
     try:
+        feito, _ = await asyncio.wait({tarefa}, timeout=espera_antes_do_aviso())
+        if not feito and not ja_avisou and aviso_ligado():
+            frase = frase_de_aviso(texto_pergunta, primeiro_nome(m.nome))
+            if frase:
+                await envia_texto(m.grupo, frase, citar=m)
         async with asyncio.timeout(TIMEOUT_TURNO_S):
-            async for ev in run_turn_stream(
-                user_message=pergunta,
-                conversation_history=_historico(m.grupo, email),
-                user_id=email,
-                user_role=ROLE_GRUPO,
-                user_filiais="*",          # o MCP restringe pelo e-mail
-                channel="whatsapp",
-                user_email=email,
-            ):
-                tipo = ev.get("type")
-                if tipo == "token":
-                    texto += ev.get("text", "")
-                elif tipo in ("tool", "tool_use"):
-                    texto = ""              # fica so o que vem depois da ultima ferramenta
-                elif tipo == "done":
-                    historia = ev.get("history")
+            await tarefa
     except TimeoutError:
+        tarefa.cancel()
         logger.warning("wa: turno passou de %ss", TIMEOUT_TURNO_S)
         texto = texto or ("A consulta passou de 10 minutos e parei. Tenta uma "
                           "pergunta mais específica — um mês, uma filial.")
 
     if historia:
         _hist[(m.grupo, email)] = (time.time(), historia)
-    resposta = md_para_whatsapp(texto) or "Não consegui montar a resposta dessa vez."
-    await envia_texto(m.grupo, resposta, citar=m)
-    logger.info("wa: respondido em %.0fs (%d chars)",
-                time.perf_counter() - t0, len(resposta))
+
+    # ── 3. a resposta: audio (se pedido), texto, e os arquivos gerados ──
+    falou = False
+    if modo_voz:
+        try:
+            wav = await asyncio.to_thread(voz.sintetizar, voz.extrair_fala(texto))
+            falou = await envia_audio(m.grupo, wav, citar=m)
+        except voz.VozIndisponivel:
+            logger.warning("wa: voz pedida mas o TTS nao esta instalado")
+        except Exception as e:
+            logger.warning("wa: falha no audio: %s: %s", type(e).__name__, str(e)[:160])
+    visual = voz.limpar_texto_visual(texto)
+    if not falou or os.getenv("WA_VOZ_COM_TEXTO", "true").lower() == "true":
+        resposta = md_para_whatsapp(visual) or "Não consegui montar a resposta dessa vez."
+        await envia_texto(m.grupo, resposta, citar=None if falou else m)
+    for art in artefatos:
+        await _envia_artefato(m.grupo, art)
+    logger.info("wa: respondido em %.0fs (%d chars%s%s)", time.perf_counter() - t0,
+                len(visual), ", audio" if falou else "",
+                f", {len(artefatos)} arquivo(s)" if artefatos else "")
+
+
+# ─── planilha recebida e arquivos gerados ────────────────────────────────
+
+_EXT_PLANILHA = (".xlsx", ".xls", ".csv", ".xlsm", ".ods")
+_conv_planilha: dict[tuple[str, str], tuple[float, str]] = {}
+
+
+def _e_planilha(midia: dict) -> bool:
+    nome = (midia.get("nome") or "").lower()
+    mime = midia.get("mimetype") or ""
+    return nome.endswith(_EXT_PLANILHA) or "spreadsheet" in mime or \
+        "excel" in mime or mime == "text/csv"
+
+
+def _planilha_da_conversa(chat: str, email: str) -> dict | None:
+    """Pergunta seguinte sobre a mesma planilha continua com acesso a ela."""
+    ts, conv = _conv_planilha.get((chat, email), (0.0, ""))
+    if not conv or time.time() - ts > HIST_TTL_S:
+        return None
+    from gateway.app import db
+    return {"pool": db._pool_or_raise(), "conversation_id": conv, "user_oid": email}
+
+
+async def _recebe_planilha(m: Mensagem, email: str, dados: bytes):
+    """Grava no Postgres como o chat web. -> (planilha_ctx, aviso, erro)."""
+    from gateway.app import db
+    from app.planilhas import PlanilhaInvalida, le_planilha
+    from app.tools.planilha_exec import grava
+    nome = m.midia.get("nome") or "planilha.xlsx"
+    try:
+        pl = await asyncio.to_thread(le_planilha, dados, nome)
+    except PlanilhaInvalida as e:
+        return None, None, str(e)
+    # a planilha precisa de uma conversa (FK); o WhatsApp ganha uma propria
+    conv = await db.create_conversation(f"wa:{email}", f"WhatsApp · {nome}"[:42],
+                                        "deepseek-flash")
+    conv_id = str(conv["id"])
+    await grava(db._pool_or_raise(), conv_id, email, nome, pl)
+    _conv_planilha[(m.grupo, email)] = (time.time(), conv_id)
+    cols = ", ".join(c.nome for c in pl.colunas)
+    abas = ""
+    if len(pl.abas) > 1:
+        lista = " · ".join(f"{a['nome']} ({a['linhas']} linhas)" for a in pl.abas)
+        abas = (f" O ARQUIVO TEM {len(pl.abas)} ABAS: {lista}. Estou mostrando "
+                f"'{pl.aba}'. DIGA ao usuario quais sao as outras.")
+    aviso = (f"[O usuario anexou a planilha '{nome}' com {pl.total} linhas e as "
+             f"colunas: {cols}.{abas} Use planilha_resumo e diga o que entendeu.]")
+    ctx = {"pool": db._pool_or_raise(), "conversation_id": conv_id, "user_oid": email}
+    return ctx, aviso, None
+
+
+async def _envia_artefato(chat: str, art: dict) -> None:
+    """Excel, PDF, PowerPoint ou grafico gerado pelo agente -> arquivo na conversa."""
+    from pathlib import Path
+    from app.artifacts import ARTIFACTS_DIR
+    candidatos = sorted(Path(ARTIFACTS_DIR).glob(f"{art.get('id')}.*"))
+    if not candidatos:
+        logger.warning("wa: artefato %s nao encontrado em disco", art.get("id"))
+        return
+    arq = candidatos[0]
+    nome = art.get("filename") or arq.name
+    ok = await envia_arquivo(chat, arq.read_bytes(), nome)
+    logger.info("wa: arquivo %s %s", nome, "enviado" if ok else "RECUSADO")

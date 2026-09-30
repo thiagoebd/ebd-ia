@@ -12,7 +12,7 @@ name: ebdia-evolution
 
 services:
   evolution:
-    image: evoapicloud/evolution-api:v2.2.3   # conferir tag mais nova antes
+    image: evoapicloud/evolution-api:v2.3.7   # conferir tag mais nova antes
     container_name: ebdia_evolution
     restart: unless-stopped
     env_file: .env

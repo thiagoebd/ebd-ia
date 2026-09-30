@@ -1,7 +1,10 @@
-"""WhatsApp (grupo) via Evolution API — o EBD.ia como participante de grupo.
+"""WhatsApp via Evolution API — o EBD.ia em grupo e em conversa privada.
 
-Quando alguem chama `@ebd.ia` no grupo autorizado, o agente responde citando a
-pergunta. Todo o resto do grupo e descartado sem ser guardado nem registrado.
+GRUPO: quando alguem chama `@ebd.ia` num grupo autorizado, o agente responde
+citando a pergunta. O resto do grupo e descartado sem ser guardado.
+
+PRIVADO: toda mensagem e para o bot (sem precisar de @). Mesma permissao:
+numero cadastrado no campo WhatsApp de um usuario ativo da tela de Acessos.
 
 POR QUE NAO A API OFICIAL
     A Cloud API da Meta so fala em grupos que ela mesma criou, com ate 8
@@ -12,8 +15,9 @@ POR QUE NAO A API OFICIAL
 
 SEGURANCA — as quatro portas, nesta ordem
     1. o webhook exige o segredo WA_WEBHOOK_TOKEN no cabecalho
-    2. so grupos em WA_GRUPOS (JID); conversa privada e ignorada
-    3. so mensagem que chama o bot (mencao, "@ebd.ia" ou resposta a ele)
+    2. grupo: so os de WA_GRUPOS (JID). Privado: se WA_PRIVADO=true
+    3. grupo: so mensagem que chama o bot (mencao, "@ebd.ia" ou resposta a
+       ele). Privado: toda mensagem
     4. o numero de quem chamou precisa estar cadastrado no campo WhatsApp de
        um usuario ATIVO na tela de Acessos. Sem cadastro: "sem permissao".
 
@@ -40,6 +44,8 @@ from dataclasses import dataclass, field
 # ─── configuracao ────────────────────────────────────────────────────────
 
 GATILHOS_TEXTO = ("@ebd.ia", "@ebdia", "@ebd ia")
+JID_PESSOA = ("@s.whatsapp.net", "@lid")   # conversa privada; o resto (status,
+                                          # canal, broadcast) e ignorado
 MAX_CHARS_MSG = 3500          # o WhatsApp aceita mais; o celular le mal
 JID_GRUPO = "@g.us"
 
@@ -99,9 +105,13 @@ def normaliza_whatsapp(numero: str | None) -> str | None:
 
 # ─── o evento ────────────────────────────────────────────────────────────
 
+def privado_ligado() -> bool:
+    return os.getenv("WA_PRIVADO", "true").strip().lower() == "true"
+
+
 @dataclass
 class Mensagem:
-    grupo: str                      # JID do grupo
+    grupo: str                      # JID da CONVERSA (grupo ou privada)
     msg_id: str
     texto: str
     remetente_jid: str              # como veio (pode ser @lid)
@@ -111,6 +121,9 @@ class Mensagem:
     mencionados: list[str] = field(default_factory=list)
     responde_a: str | None = None   # participante da mensagem citada
     de_mim: bool = False
+    privado: bool = False
+    # {"tipo": imagem|audio|documento, "mimetype", "nome", "base64", "bruto"}
+    midia: dict | None = None
 
 
 def _digitos_de_jid(jid: str | None, sufixo: str) -> str | None:
@@ -136,6 +149,26 @@ def _texto_de(msg: dict) -> tuple[str, dict]:
     return "", {}
 
 
+_TIPOS_MIDIA = {"imageMessage": "imagem", "audioMessage": "audio",
+               "documentMessage": "documento"}
+
+
+def _midia_de(data: dict) -> dict | None:
+    """Foto, audio ou documento do evento — com o base64 se o webhook trouxe."""
+    msg = data.get("message") or {}
+    if "documentWithCaptionMessage" in msg:                # documento com legenda
+        msg = (msg["documentWithCaptionMessage"] or {}).get("message") or msg
+    for chave, tipo in _TIPOS_MIDIA.items():
+        m = msg.get(chave)
+        if isinstance(m, dict):
+            b64 = (data.get("message") or {}).get("base64") or data.get("base64")
+            return {"tipo": tipo, "mimetype": (m.get("mimetype") or "").split(";")[0],
+                    "nome": m.get("fileName") or "", "base64": b64,
+                    "voz": bool(m.get("ptt")),
+                    "bruto": {"key": data.get("key"), "message": data.get("message")}}
+    return None
+
+
 def parse_evento(payload: dict) -> Mensagem | None:
     """Evento MESSAGES_UPSERT da Evolution -> Mensagem, ou None se nao for
     mensagem de texto de grupo. Tolerante aos formatos que variam entre
@@ -153,25 +186,40 @@ def parse_evento(payload: dict) -> Mensagem | None:
 
     key = data.get("key") or {}
     grupo = key.get("remoteJid") or ""
-    if not grupo.endswith(JID_GRUPO):
+    privado = grupo.endswith(JID_PESSOA)
+    if not (grupo.endswith(JID_GRUPO) or privado):
+        return None                 # status, canal, broadcast
+
+    msg = data.get("message") or {}
+    if "documentWithCaptionMessage" in msg:
+        msg = (msg["documentWithCaptionMessage"] or {}).get("message") or msg
+    texto, ctx = _texto_de(msg)
+    if not ctx:
+        ctx = ((msg.get("audioMessage") or {}).get("contextInfo")
+               or data.get("contextInfo") or {})
+    midia = _midia_de(data)
+    if not texto.strip() and midia is None:
         return None
 
-    texto, ctx = _texto_de(data.get("message") or {})
-    ctx = ctx or data.get("contextInfo") or {}
-    if not texto.strip():
-        return None
-
-    remetente = key.get("participant") or data.get("participant") or ""
-    # o telefone pode vir em campos alternativos quando o participant e LID
+    if privado:
+        # no privado o remetente E a conversa; o telefone pode vir no Alt
+        remetente = grupo
+        alternativos = (key.get("remoteJidAlt"), key.get("senderPn"),
+                        data.get("senderPn"), remetente)
+    else:
+        remetente = key.get("participant") or data.get("participant") or ""
+        alternativos = (key.get("participantAlt"), key.get("participantPn"),
+                        key.get("senderPn"), data.get("participantAlt"),
+                        data.get("senderPn"), remetente)
+    # o telefone pode vir em campos alternativos quando o id e LID
     telefone = None
-    for cand in (key.get("participantAlt"), key.get("participantPn"),
-                 key.get("senderPn"), data.get("participantAlt"),
-                 data.get("senderPn"), remetente):
+    for cand in alternativos:
         telefone = _digitos_de_jid(cand, "@s.whatsapp.net")
         if telefone:
             break
     lid = None
-    for cand in (remetente, key.get("participantLid"), data.get("participantLid")):
+    for cand in (remetente, key.get("participantLid"), data.get("participantLid"),
+                 key.get("remoteJidAlt")):
         lid = _digitos_de_jid(cand, "@lid")
         if lid:
             break
@@ -187,6 +235,8 @@ def parse_evento(payload: dict) -> Mensagem | None:
         mencionados=list(ctx.get("mentionedJid") or []),
         responde_a=ctx.get("participant"),
         de_mim=bool(key.get("fromMe")),
+        privado=privado,
+        midia=midia,
     )
 
 
@@ -200,10 +250,16 @@ def _base_jid(jid: str) -> str:
 def foi_chamado(m: Mensagem, ids_do_bot: set[str]) -> bool:
     """Mencao real, "@ebd.ia" digitado, ou resposta a uma mensagem do bot.
 
-    `ids_do_bot`: JIDs/LIDs do numero do bot (so a parte antes do @)."""
+    `ids_do_bot`: JIDs/LIDs do numero do bot (so a parte antes do @).
+    No privado, toda mensagem e para o bot."""
     if m.de_mim:
         return False
+    if m.privado:
+        return True
     bases = {_base_jid(x) for x in ids_do_bot if x}
+    if m.midia and m.midia["tipo"] == "audio":
+        # audio nao tem como marcar ninguem: no grupo, so se RESPONDER ao bot
+        return bool(m.responde_a and _base_jid(m.responde_a) in bases)
     if any(_base_jid(j) in bases for j in m.mencionados):
         return True
     if m.responde_a and _base_jid(m.responde_a) in bases:
@@ -344,7 +400,8 @@ def fatiar(texto: str, limite: int = MAX_CHARS_MSG) -> list[str]:
 def payload_texto(grupo: str, texto: str, citar: Mensagem | None = None) -> dict:
     """Corpo de POST /message/sendText/{instancia} (Evolution v2)."""
     corpo: dict = {"number": grupo, "text": texto}
-    if citar is not None and citar.msg_id:
+    # no privado nao cita: a conversa e so entre os dois
+    if citar is not None and citar.msg_id and not citar.privado:
         corpo["quoted"] = {
             "key": {"remoteJid": citar.grupo, "fromMe": False,
                     "id": citar.msg_id, "participant": citar.remetente_jid},
@@ -363,8 +420,103 @@ async def envia_texto(grupo: str, texto: str, citar: Mensagem | None = None) -> 
     ok = True
     async with httpx.AsyncClient(timeout=30) as cli:
         for n, parte in enumerate(fatiar(texto)):
+            cita = citar if n == 0 else None
             r = await cli.post(f"{url}/message/sendText/{inst}", headers=headers,
-                               json=payload_texto(grupo, parte, citar if n == 0 else None))
-            # a Evolution ja devolveu 400 em envio que chegou; so 5xx e falha
-            ok = ok and r.status_code < 500
+                               json=payload_texto(grupo, parte, cita))
+            if r.status_code >= 300 and cita is not None:
+                # citacao de participante @lid pode ser recusada: manda sem citar
+                import logging
+                logging.getLogger("uvicorn.error").warning(
+                    "wa: envio citando recusado (%s): %s — reenviando sem citar",
+                    r.status_code, r.text[:200])
+                r = await cli.post(f"{url}/message/sendText/{inst}", headers=headers,
+                                   json=payload_texto(grupo, parte, None))
+            if r.status_code >= 300:
+                import logging
+                logging.getLogger("uvicorn.error").warning(
+                    "wa: envio recusado (%s): %s", r.status_code, r.text[:200])
+                ok = False
     return ok
+
+
+# ─── midia: baixar, enviar audio e arquivo ───────────────────────────────
+
+def _evo():
+    url = os.getenv("EVO_URL", "http://127.0.0.1:8081").rstrip("/")
+    inst = os.getenv("EVO_INSTANCE", "ebdia")
+    headers = {"apikey": os.getenv("EVO_APIKEY", ""), "Content-Type": "application/json"}
+    return url, inst, headers
+
+
+async def _post(caminho: str, corpo: dict, timeout: int = 120):
+    import httpx
+    import logging
+    url, inst, headers = _evo()
+    async with httpx.AsyncClient(timeout=timeout) as cli:
+        r = await cli.post(f"{url}/{caminho}/{inst}", headers=headers, json=corpo)
+    if r.status_code >= 300:
+        logging.getLogger("uvicorn.error").warning(
+            "wa: %s recusado (%s): %s", caminho, r.status_code, r.text[:200])
+    return r
+
+
+async def baixa_midia(m: Mensagem) -> bytes:
+    """Bytes da midia. Usa o base64 do webhook; sem ele, pede a Evolution
+    passando a mensagem INTEIRA — so pelo ID nao funciona, porque a Evolution
+    esta configurada para nao guardar mensagens."""
+    import base64
+    if not m.midia:
+        return b""
+    b64 = m.midia.get("base64")
+    if not b64:
+        r = await _post("chat/getBase64FromMediaMessage",
+                        {"message": m.midia["bruto"], "convertToMp4": False})
+        b64 = (r.json() or {}).get("base64") if r.status_code < 300 else None
+    if not b64:
+        return b""
+    if b64.startswith("data:"):
+        b64 = b64.split(",", 1)[1]
+    return base64.b64decode(b64)
+
+
+def _citacao(citar: Mensagem | None) -> dict | None:
+    if citar is None or not citar.msg_id or citar.privado:
+        return None
+    return {"key": {"remoteJid": citar.grupo, "fromMe": False,
+                    "id": citar.msg_id, "participant": citar.remetente_jid},
+            "message": {"conversation": (citar.texto or "")[:500]}}
+
+
+async def envia_audio(chat: str, wav: bytes, citar: Mensagem | None = None) -> bool:
+    """Nota de voz. A Evolution converte o WAV para ogg/opus (encoding=true)."""
+    import base64
+    corpo = {"number": chat, "audio": base64.b64encode(wav).decode(), "encoding": True}
+    q = _citacao(citar)
+    if q:
+        corpo["quoted"] = q
+    r = await _post("message/sendWhatsAppAudio", corpo)
+    if r.status_code >= 300 and q:
+        corpo.pop("quoted")
+        r = await _post("message/sendWhatsAppAudio", corpo)
+    return r.status_code < 300
+
+
+_MIME = {"xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+         "pdf": "application/pdf",
+         "pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+         "png": "image/png", "jpg": "image/jpeg", "html": "text/html",
+         "csv": "text/csv", "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document"}
+
+
+async def envia_arquivo(chat: str, dados: bytes, nome: str, legenda: str = "") -> bool:
+    """Documento (ou imagem, se for png/jpg). A Evolution exige fileName."""
+    import base64
+    ext = nome.rsplit(".", 1)[-1].lower() if "." in nome else ""
+    tipo = "image" if ext in ("png", "jpg", "jpeg") else "document"
+    corpo = {"number": chat, "mediatype": tipo,
+             "mimetype": _MIME.get(ext, "application/octet-stream"),
+             "media": base64.b64encode(dados).decode(), "fileName": nome}
+    if legenda:
+        corpo["caption"] = legenda[:900]
+    r = await _post("message/sendMedia", corpo)
+    return r.status_code < 300
