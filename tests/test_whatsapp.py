@@ -792,3 +792,13 @@ def test_projecao_sem_taxa_inventada():
     assert "## PROJECAO DE FECHAMENTO" in s
     assert "NUNCA invente taxa de conversao" in s
     assert "POSICAO IN ('L','M')" in s
+
+
+
+def test_whatsapp_usa_o_modelo_padrao_da_web(rota, monkeypatch):
+    from gateway.app.models_catalog import DEFAULT_MODEL
+    monkeypatch.delenv("WA_MODEL", raising=False)
+    rota.post("/api/whatsapp/webhook", json=privado("como estamos?"), headers=H)
+    _espera(rota, 1)
+    assert rota.perguntas[0]["model"] == DEFAULT_MODEL
+    assert DEFAULT_MODEL.startswith("deepseek")

@@ -285,6 +285,7 @@ async def _responde(m: Mensagem) -> None:
             user_filiais="*",          # o MCP restringe pelo e-mail
             channel="whatsapp",
             user_email=email,
+            model=_modelo_wa(),
             imagens=imagens,
             planilha_ctx=planilha_ctx,
             aviso_planilha=aviso_planilha,
@@ -337,6 +338,15 @@ async def _responde(m: Mensagem) -> None:
     logger.info("wa: respondido em %.0fs (%d chars%s%s)", time.perf_counter() - t0,
                 len(visual), ", audio" if falou else "",
                 f", {len(artefatos)} arquivo(s)" if artefatos else "")
+
+
+def _modelo_wa() -> str:
+    """O MESMO modelo padrao da web (DEFAULT_MODEL, que o troca_modelo.sh
+    ja altera). Sem isto o agente caia no CLAUDE_MODEL do config — o Opus,
+    pela API da Anthropic — e o WhatsApp rodou um dia inteiro no modelo mais
+    caro ate o credito acabar (30/09/2026). WA_MODEL forca outro, se preciso."""
+    from gateway.app.models_catalog import DEFAULT_MODEL
+    return os.getenv("WA_MODEL", "").strip() or DEFAULT_MODEL
 
 
 # ─── planilha recebida e arquivos gerados ────────────────────────────────
