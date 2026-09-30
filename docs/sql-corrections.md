@@ -1543,3 +1543,28 @@ participação.
 Último mês é 202608. Para "como estamos hoje", use o faturamento ao vivo
 (T210). Consultar o painel para o mês corrente devolve o mês anterior sem
 aviso.
+
+## #118 — View de faturamento com intervalo de mês inteiro bate no teto de 85 s
+
+Medido em 29/09/2026: "como estamos em setembro?" levou **498 s, 15
+ferramentas, 58 consultas**. Oito consultas foram à
+`VIEW_VENDAS_RESUMO_FATURAMENTO` com intervalo de um mês ou mais; **sete
+pararam no teto de 85 s** — e voltam como `ok`, então o agente não percebe
+e tenta de novo com variação.
+
+**Cinco das oito pediam mês FECHADO** (set/2025 para comparativo, série
+mensal, filial por mês) — que já está no painel, em 65 ms.
+
+### Regras
+
+1. **Mês fechado — inclusive o mesmo mês do ano anterior e séries — vem do
+   `EBD_IA_PAINEL_*`.** Nunca da view.
+2. **"Mesmo período do ano anterior" com mês parcial** (01–29/09/2025): o
+   painel tem o mês inteiro. Ou compare com o mês cheio **dizendo que é o
+   mês cheio**, ou estime `VL_MEDIO_DIA × DIAS_UTEIS_TRANSCORRIDOS` do mês
+   atual **dizendo que é estimativa**. Não rode a view no intervalo.
+3. **`COUNT(DISTINCT NUMTRANSVENDA | CODCLI | CODPROD)` na view sobre um mês
+   inteiro bate no teto.** Mês fechado: leia `QT_*` da `EBD_IA_PAINEL_MES`.
+   Mês corrente: declare que a contagem não está disponível — não tente.
+4. **Consulta que levou ~85 s bateu no teto.** Não reenvie com variação —
+   cada tentativa custa mais 85 s. Declare o que faltou e siga com o resto.

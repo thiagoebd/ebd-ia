@@ -654,3 +654,10 @@ Antes de somar qualquer coisa, cicatriz #117:
 - VL_TICKET_MEDIO e BRUTO / notas -> ticket liquido = VL_LIQUIDO / QT_NOTAS
 
 REGIONAL da FILIAL ja vem correta (N1, N2...). Nao monte mapa a mao.
+
+## Comparativo com periodo anterior — cicatriz #118
+
+Mes fechado, inclusive o mesmo mes do ano anterior, vem do PAINEL, nunca da
+VIEW_VENDAS_RESUMO_FATURAMENTO. A view com intervalo de mes inteiro e COUNT
+DISTINCT para no teto de 85 s. Consulta que levou ~85 s: nao reenvie —
+declare o que faltou e siga.
