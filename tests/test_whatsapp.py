@@ -627,9 +627,9 @@ def test_audio_privado_transcreve_confirma_e_responde_em_audio(rota):
     rota.saida["eventos"] = [{"type": "token", "text": "**R$ 242,9M** no mês.\n<FALA>Setembro vai em duzentos e quarenta e três milhões.</FALA>"}]
     rota.post("/api/whatsapp/webhook", json=midia("audioMessage", grupo=f"{THIAGO}@s.whatsapp.net",
               mimetype="audio/ogg"), headers=H)
-    _espera(rota, 2)
+    _espera(rota, 1)
     time.sleep(0.2)
-    assert rota.enviados[0][1] == "🎙️ Entendi: «como estamos em setembro»"
+    assert not any("Entendi" in e[1] for e in rota.enviados)   # eco desligado por padrao
     kw = rota.perguntas[0]
     assert kw["user_message"].startswith("como estamos em setembro") and "<FALA>" in kw["user_message"]
     assert rota.audios and rota.audios[0][1] == "WAV:Setembro vai em duzentos e quarenta e três milhões.".encode()
@@ -724,3 +724,11 @@ def test_aviso_desligavel(rota, monkeypatch):
     _espera(rota, 1)
     time.sleep(0.4)
     assert len(rota.enviados) == 1
+
+
+
+def test_eco_da_transcricao_religavel(rota, monkeypatch):
+    monkeypatch.setenv("WA_VOZ_ECO", "true")
+    rota.post("/api/whatsapp/webhook", json=midia("audioMessage", grupo=f"{THIAGO}@s.whatsapp.net"), headers=H)
+    _espera(rota, 1)
+    assert rota.enviados[0][1] == "🎙️ Entendi: «como estamos em setembro»"

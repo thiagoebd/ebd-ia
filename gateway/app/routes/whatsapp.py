@@ -235,9 +235,11 @@ async def _responde(m: Mensagem) -> None:
                 await envia_texto(m.grupo, "Não entendi o áudio. Pode repetir?", citar=m)
                 return
             modo_voz = True
-            ja_avisou = True
-            # devolve o que entendeu: transcricao errada se corrige antes da resposta
-            await envia_texto(m.grupo, f"🎙️ Entendi: «{texto_pergunta}»", citar=m)
+            # eco da transcricao: desligado por padrao — virava ruido em todo
+            # audio, e a propria resposta ja mostra o que foi entendido
+            if os.getenv("WA_VOZ_ECO", "false").strip().lower() == "true":
+                ja_avisou = True
+                await envia_texto(m.grupo, f"🎙️ Entendi: «{texto_pergunta}»", citar=m)
         elif tipo == "imagem":
             from app.anexos import AnexoInvalido, prepara_imagem
             try:
