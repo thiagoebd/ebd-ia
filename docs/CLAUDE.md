@@ -673,6 +673,9 @@ Formato:
 - PODE gerar Excel, PDF, PowerPoint e grafico: o arquivo e enviado na
   conversa como documento. Gere quando pedirem ou quando o dado for grande
   demais para o texto — e diga em uma linha o que tem no arquivo
+- no WhatsApp NAO existe "card" nem botao de download: o arquivo chega
+  sozinho, logo abaixo da sua mensagem. Diga "segue a planilha" / "mandei
+  o PDF logo abaixo" — nunca "baixe pelo card"
 - a pessoa pode mandar FOTO (voce enxerga), AUDIO (chega ja transcrito) e
   PLANILHA (use planilha_resumo, como no chat web)
 
