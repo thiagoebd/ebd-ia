@@ -11,13 +11,19 @@ type Filial = {
 type ACLUser = {
   id: string; email: string; nome: string | null; role: string;
   scope_kind: string; scope_value: string[]; filiais: string[] | "*";
-  super_admin: boolean; active: boolean;
+  super_admin: boolean; active: boolean; whatsapp?: string | null;
 };
 type FormState = {
   id: string | null; email: string; nome: string; role: string;
-  scope_kind: string; scope_value: string[]; super_admin: boolean;
+  scope_kind: string; scope_value: string[]; super_admin: boolean; whatsapp: string;
 };
-const EMPTY: FormState = { id: null, email: "", nome: "", role: "admin", scope_kind: "brasil", scope_value: [], super_admin: false };
+const EMPTY: FormState = { id: null, email: "", nome: "", role: "admin", scope_kind: "brasil", scope_value: [], super_admin: false, whatsapp: "" };
+
+// +5511999998888 -> +55 11 99999-8888 (so exibicao; grava E.164)
+function fmtWhats(n?: string | null) {
+  const m = (n || "").match(/^\+55(\d{2})(\d{4,5})(\d{4})$/);
+  return m ? `+55 ${m[1]} ${m[2]}-${m[3]}` : (n || "");
+}
 
 function asList(v: unknown): string[] {
   if (Array.isArray(v)) return v.map(String);
@@ -65,12 +71,12 @@ export function AccessAdmin({ getToken, onClose }: { getToken: () => Promise<str
 
   function editar(u: ACLUser) {
     setMsg(null);
-    setForm({ id: u.id, email: u.email, nome: u.nome || "", role: u.role, scope_kind: u.scope_kind, scope_value: asList(u.scope_value), super_admin: u.super_admin });
+    setForm({ id: u.id, email: u.email, nome: u.nome || "", role: u.role, scope_kind: u.scope_kind, scope_value: asList(u.scope_value), super_admin: u.super_admin, whatsapp: fmtWhats(u.whatsapp) });
   }
 
   async function salvar() {
     setMsg(null);
-    const body = { email: form.email, nome: form.nome, role: form.role, scope_kind: form.scope_kind, scope_value: asList(form.scope_value), super_admin: form.super_admin };
+    const body = { email: form.email, nome: form.nome, role: form.role, scope_kind: form.scope_kind, scope_value: asList(form.scope_value), super_admin: form.super_admin, whatsapp: form.whatsapp.trim() || null };
     if (form.scope_kind !== "brasil" && form.scope_value.length === 0) { setMsg("✗ Selecione ao menos uma filial/regional"); return; }
     try {
       if (editando) { await api(`/${form.id}`, { method: "PATCH", body: JSON.stringify(body) }); setMsg("✓ Alterado (efetivo em ≤30s)"); }
@@ -106,6 +112,10 @@ export function AccessAdmin({ getToken, onClose }: { getToken: () => Promise<str
               onChange={(e) => setForm({ ...form, email: e.target.value })}
               style={{ padding: 8, width: 240, background: editando ? "#eee" : "#fff" }} />
             <input placeholder="Nome" value={form.nome} onChange={(e) => setForm({ ...form, nome: e.target.value })} style={{ padding: 8, width: 170 }} />
+            <input placeholder="WhatsApp +55 11 99999-8888" value={form.whatsapp}
+              onChange={(e) => setForm({ ...form, whatsapp: e.target.value })}
+              title="Quem tiver o número aqui pode chamar o @ebd.ia no grupo, com este mesmo acesso. Vazio = não pode."
+              style={{ padding: 8, width: 200 }} />
             <label style={{ fontSize: 13 }}>Papel:{" "}
               <select value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })} style={{ padding: 6 }}>
                 {ROLES.map((r) => <option key={r} value={r}>{r}</option>)}
@@ -170,12 +180,12 @@ export function AccessAdmin({ getToken, onClose }: { getToken: () => Promise<str
 
         <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
           <thead><tr style={{ textAlign: "left", borderBottom: "2px solid #e5e5e0" }}>
-            <th>Nome</th><th>Email</th><th>Papel</th><th>Escopo</th><th>Super</th><th>Status</th><th></th>
+            <th>Nome</th><th>Email</th><th>WhatsApp</th><th>Papel</th><th>Escopo</th><th>Super</th><th>Status</th><th></th>
           </tr></thead>
           <tbody>
             {users.map((u) => (
               <tr key={u.id} style={{ borderBottom: "1px solid #eee", opacity: u.active ? 1 : 0.45 }}>
-                <td>{u.nome || "—"}</td><td>{u.email}</td><td>{u.role}</td>
+                <td>{u.nome || "—"}</td><td>{u.email}</td><td style={{ whiteSpace: "nowrap" }}>{fmtWhats(u.whatsapp) || "—"}</td><td>{u.role}</td>
                 <td>{u.scope_kind === "brasil" ? "Brasil" : `${u.scope_kind}: ${(u.scope_value || []).join(", ")}`}</td>
                 <td>{u.super_admin ? "★" : ""}</td><td>{u.active ? "ativo" : "inativo"}</td>
                 <td style={{ whiteSpace: "nowrap" }}>

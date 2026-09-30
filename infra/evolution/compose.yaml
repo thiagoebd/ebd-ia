@@ -1,0 +1,51 @@
+# Evolution API — ponte do EBD.ia com o WhatsApp (piloto em grupo).
+#
+# Stack PROPRIA (Postgres e Redis separados do EBD.ia) e presa em 127.0.0.1:
+# nada disto fica exposto fora do servidor. A Evolution chama o gateway pelo
+# host-gateway do Docker, sem passar pelo nginx.
+#
+# Privacidade: DATABASE_SAVE_DATA_* desligados — a Evolution nao guarda as
+# mensagens do grupo. So a sessao do numero (instancia) e persistida.
+#
+#   cd infra/evolution && cp .env.example .env && (editar) && docker compose up -d
+name: ebdia-evolution
+
+services:
+  evolution:
+    image: evoapicloud/evolution-api:v2.2.3   # conferir tag mais nova antes
+    container_name: ebdia_evolution
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "127.0.0.1:8081:8080"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - evolution_instances:/evolution/instances
+    depends_on: [evolution-postgres, evolution-redis]
+    logging:
+      driver: json-file
+      options: { max-size: "20m", max-file: "3" }
+
+  evolution-postgres:
+    image: postgres:16-alpine
+    container_name: ebdia_evolution_pg
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: evolution
+      POSTGRES_PASSWORD: ${EVO_PG_PASSWORD}
+      POSTGRES_DB: evolution
+    volumes:
+      - evolution_pg:/var/lib/postgresql/data
+
+  evolution-redis:
+    image: redis:7-alpine
+    container_name: ebdia_evolution_redis
+    restart: unless-stopped
+    volumes:
+      - evolution_redis:/data
+
+volumes:
+  evolution_instances:
+  evolution_pg:
+  evolution_redis:

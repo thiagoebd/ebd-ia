@@ -93,6 +93,19 @@ async def get_user(email: str | None) -> dict | None:
     return u
 
 
+async def get_user_by_whatsapp(numero: str | None) -> dict | None:
+    """Usuario ATIVO dono deste WhatsApp (E.164 canonico), ou None.
+
+    Resolve o e-mail e delega ao get_user — mesmas regras de ativo, cache e
+    break-glass do login web. O numero ja chega normalizado pelo adaptador.
+    """
+    if not numero:
+        return None
+    email = await db._pool_or_raise().fetchval(
+        "SELECT email FROM acl_users WHERE whatsapp = $1", numero)
+    return await get_user(email) if email else None
+
+
 async def is_allowed(email: str | None) -> bool:
     return (await get_user(email)) is not None
 
