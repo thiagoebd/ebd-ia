@@ -65,10 +65,17 @@ def transcrever(audio: bytes, sufixo: str = ".ogg") -> str:
         bruto = f.name
     wav = bruto + ".wav"
     try:
-        subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", bruto,
-                        "-ar", "16000", "-ac", "1", wav], check=True, timeout=60)
+        # o ffmpeg entrega PCM 16 kHz mono direto em memoria. Passar o ARQUIVO
+        # ao Whisper faria ele decodificar pelo PyAV — e a versao do PyAV
+        # instalada recusa o parametro que o faster-whisper usa (30/09/2026).
+        pcm = subprocess.run(["ffmpeg", "-loglevel", "error", "-i", bruto,
+                              "-f", "s16le", "-acodec", "pcm_s16le",
+                              "-ar", "16000", "-ac", "1", "-"],
+                             check=True, timeout=60, capture_output=True).stdout
+        import numpy as np
+        amostras = np.frombuffer(pcm, dtype=np.int16).astype(np.float32) / 32768.0
         segs, info = _modelo_stt().transcribe(
-            wav, language="pt", beam_size=1, vad_filter=True,
+            amostras, language="pt", beam_size=1, vad_filter=True,
             initial_prompt=_PROMPT_EBD)
         texto = " ".join(s.text.strip() for s in segs).strip()
         log.info("voz: transcrito %.1fs (%d chars)", info.duration, len(texto))
