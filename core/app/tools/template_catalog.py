@@ -61,6 +61,18 @@ def tool_get_template(code: str) -> str:
     code = (code or "").strip().upper()
     for t in cat["templates"]:
         if t["code"] == code:
+            # alguns blocos do markdown sao remissao ("identica ao T101")
+            # ou placeholder ("ver bloco acima") — devolver isso e pior que
+            # avisar: o agente acha que tem o SQL e executa lixo
+            if t.get("incompleto"):
+                alvo = t.get("remissao")
+                if alvo:
+                    return (f"{code} nao tem SQL proprio — e uma variacao do "
+                            f"{alvo}. Peca get_template('{alvo}') e aplique a "
+                            f"diferenca descrita:\n{t['sql'][:300]}")
+                return (f"{code} nao tem SQL executavel no catalogo "
+                        f"(o texto e uma referencia, nao uma query). "
+                        f"Monte a consulta a partir do conhecimento do prompt.")
             cab = [f"-- {t['code']} — {t['title']}"]
             if t["validated"] and t.get("validation_note"):
                 cab.append(f"-- VALIDADO: {t['validation_note']}")
