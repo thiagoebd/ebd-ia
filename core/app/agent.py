@@ -88,6 +88,9 @@ _turno_ctx: _contextvars.ContextVar = _contextvars.ContextVar("ebd_turno", defau
 from app.tools.agenda_envio_tools import (
     FERRAMENTAS as AGENDA_ENVIO_TOOLS, NOMES as AGENDA_ENVIO_NOMES, executa as agenda_envio_executa,
 )
+from app.tools.resenha_tools import (
+    FERRAMENTAS as RESENHA_TOOLS, NOMES as RESENHA_NOMES, executa as resenha_executa,
+)
 from app.artifacts import now_br_str
 from app.tools.knowledge_append import (
     KNOWLEDGE_APPEND_TOOL,
@@ -128,7 +131,7 @@ def _client_for(model: str | None):
         return _deepseek_client, m
     return _client, m
 _system_prompt = build_system_prompt()
-_tools = [ORACLE_QUERY_TOOL, KNOWLEDGE_APPEND_TOOL, LIST_PROPOSALS_TOOL, CREATE_EXCEL_TOOL, CREATE_PDF_TOOL, CREATE_PPTX_TOOL, CREATE_CHART_TOOL, LIST_TEMPLATES_TOOL, GET_TEMPLATE_TOOL, CREATE_ROUTE_MAP_TOOL] + PLANILHA_TOOLS + AGENDA_ENVIO_TOOLS
+_tools = [ORACLE_QUERY_TOOL, KNOWLEDGE_APPEND_TOOL, LIST_PROPOSALS_TOOL, CREATE_EXCEL_TOOL, CREATE_PDF_TOOL, CREATE_PPTX_TOOL, CREATE_CHART_TOOL, LIST_TEMPLATES_TOOL, GET_TEMPLATE_TOOL, CREATE_ROUTE_MAP_TOOL] + PLANILHA_TOOLS + AGENDA_ENVIO_TOOLS + RESENHA_TOOLS
 
 
 def reload_system_prompt() -> int:
@@ -204,6 +207,8 @@ async def _run_tool(tool_name: str, tool_input: dict, user_id: str,
     desce por parametro em vez de ser importado."""
     if tool_name in AGENDA_ENVIO_NOMES:
         return await agenda_envio_executa(tool_name, tool_input, _origem_ctx.get(), _turno_ctx.get())
+    if tool_name in RESENHA_NOMES:
+        return await resenha_executa(tool_name, tool_input)
     if tool_name == "oracle_query":
         sql = tool_input.get("sql", "")
         max_rows = tool_input.get("max_rows", 100)

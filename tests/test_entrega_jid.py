@@ -1,5 +1,12 @@
 """JID privado real via Evolution (/chat/whatsappNumbers) — nono digito."""
+import sys
+
 import pytest
+
+from conftest import RAIZ
+
+sys.path.insert(0, str(RAIZ / "core"))
+sys.path.insert(0, str(RAIZ))
 
 class _RespFalsa:
     def __init__(self, status, corpo):
