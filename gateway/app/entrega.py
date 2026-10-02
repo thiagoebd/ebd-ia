@@ -65,12 +65,47 @@ def jid_privado(numero_e164: str) -> str:
     return f"{dig}@s.whatsapp.net"
 
 
+def _variantes_br(dig: str) -> list[str]:
+    """Celular BR com e sem o nono digito. A conta no WhatsApp pode estar registrada
+    sem o 9 (comum fora dos DDDs 11-28): o JID real e 55DD8XXXXXXX, nao 55DD98XXXXXXX."""
+    if dig.startswith("55") and len(dig) == 13 and dig[4] == "9":
+        return [dig, dig[:4] + dig[5:]]
+    if dig.startswith("55") and len(dig) == 12 and dig[4] in "6789":
+        return [dig, dig[:4] + "9" + dig[4:]]
+    return [dig]
+
+
+async def resolve_jid(chat: str) -> str:
+    """JID privado real, perguntado a Evolution (/chat/whatsappNumbers).
+    Grupo e @lid passam direto. Se a consulta falhar, segue com o JID montado."""
+    if not chat.endswith("@s.whatsapp.net"):
+        return chat
+    from app.adapters.whatsapp import _post
+    dig = chat.split("@", 1)[0]
+    try:
+        r = await _post("chat/whatsappNumbers", {"numbers": _variantes_br(dig)}, timeout=15)
+        lista = r.json() if r.status_code < 300 else None
+    except Exception as e:
+        log.warning("entrega: whatsappNumbers indisponivel (%s); seguindo com %s", e, chat)
+        return chat
+    if not isinstance(lista, list):
+        return chat
+    for item in lista:
+        if isinstance(item, dict) and item.get("exists") and item.get("jid"):
+            if item["jid"] != chat:
+                log.info("entrega: JID resolvido %s -> %s", chat, item["jid"])
+            return item["jid"]
+    raise EntregaFalhou("NUMERO_SEM_WHATSAPP",
+                        f"o numero +{dig} nao tem WhatsApp — confira o cadastro na tela de Acessos")
+
+
 async def whatsapp(chat: str, texto: str, arquivos: list[Arquivo] | None = None) -> Resultado:
     from app.adapters.whatsapp import envia_arquivo, envia_texto, md_para_whatsapp
     if not await instancia_online():
         raise EntregaFalhou("INSTANCIA_OFFLINE", "sessao da Evolution desconectada")
     if not (chat.endswith("@g.us") or chat.endswith("@s.whatsapp.net") or chat.endswith("@lid")):
         raise EntregaFalhou("CHAT_ID_INVALIDO", chat)
+    chat = await resolve_jid(chat)
     if not await envia_texto(chat, md_para_whatsapp(texto) or texto):
         raise EntregaFalhou("FALHA_CANAL", "a Evolution recusou o texto")
     enviados = []
