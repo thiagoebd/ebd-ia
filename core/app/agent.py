@@ -81,6 +81,13 @@ from app.tools.pdf_builder import build_pdf
 from app.tools.pptx_builder import build_pptx
 import contextvars as _contextvars
 _conv_id_ctx: _contextvars.ContextVar = _contextvars.ContextVar("ebd_conv_id", default=None)
+# agendamento e envio delegado: de onde veio o pedido (canal, chat, e-mail) e
+# o id desta chamada — a confirmacao so vale num turno seguinte (confirmacoes.py)
+_origem_ctx: _contextvars.ContextVar = _contextvars.ContextVar("ebd_origem", default=None)
+_turno_ctx: _contextvars.ContextVar = _contextvars.ContextVar("ebd_turno", default=None)
+from app.tools.agenda_envio_tools import (
+    FERRAMENTAS as AGENDA_ENVIO_TOOLS, NOMES as AGENDA_ENVIO_NOMES, executa as agenda_envio_executa,
+)
 from app.artifacts import now_br_str
 from app.tools.knowledge_append import (
     KNOWLEDGE_APPEND_TOOL,
@@ -109,11 +116,19 @@ def _client_for(model: str | None):
     # sem modelo -> DeepSeek. O padrao antigo (CLAUDE_MODEL = Opus) mandou o
     # WhatsApp inteiro para a API da Anthropic ate o credito acabar (30/09/2026)
     m = model or "deepseek-flash"
+    # SUBSTITUICAO TEMPORARIA: com FLASH_SUBSTITUTO no .env, o flash continua
+    # na tela mas a chamada vai para o substituto (flash travado do lado do
+    # DeepSeek em 14/09 e 01/10/2026). Quem liga e desliga e o vigia de modelo
+    # (scripts/vigia_modelo.sh). Tirar a variavel e reiniciar = volta.
+    import os as _os
+    _sub = _os.getenv("FLASH_SUBSTITUTO", "").strip()
+    if _sub and m in ("deepseek-flash", "deepseek-v4-flash"):
+        m = _sub
     if m.startswith("deepseek") and _deepseek_client is not None:
         return _deepseek_client, m
     return _client, m
 _system_prompt = build_system_prompt()
-_tools = [ORACLE_QUERY_TOOL, KNOWLEDGE_APPEND_TOOL, LIST_PROPOSALS_TOOL, CREATE_EXCEL_TOOL, CREATE_PDF_TOOL, CREATE_PPTX_TOOL, CREATE_CHART_TOOL, LIST_TEMPLATES_TOOL, GET_TEMPLATE_TOOL, CREATE_ROUTE_MAP_TOOL] + PLANILHA_TOOLS
+_tools = [ORACLE_QUERY_TOOL, KNOWLEDGE_APPEND_TOOL, LIST_PROPOSALS_TOOL, CREATE_EXCEL_TOOL, CREATE_PDF_TOOL, CREATE_PPTX_TOOL, CREATE_CHART_TOOL, LIST_TEMPLATES_TOOL, GET_TEMPLATE_TOOL, CREATE_ROUTE_MAP_TOOL] + PLANILHA_TOOLS + AGENDA_ENVIO_TOOLS
 
 
 def reload_system_prompt() -> int:
@@ -187,6 +202,8 @@ async def _run_tool(tool_name: str, tool_input: dict, user_id: str,
 
     O agente vive no core e o Postgres no gateway — por isso o contexto
     desce por parametro em vez de ser importado."""
+    if tool_name in AGENDA_ENVIO_NOMES:
+        return await agenda_envio_executa(tool_name, tool_input, _origem_ctx.get(), _turno_ctx.get())
     if tool_name == "oracle_query":
         sql = tool_input.get("sql", "")
         max_rows = tool_input.get("max_rows", 100)
@@ -418,6 +435,7 @@ async def run_turn_stream(
     imagens: list | None = None,
     planilha_ctx: dict | None = None,
     aviso_planilha: str | None = None,
+    origem: dict | None = None,
 ):
     """Versao streaming de run_turn. Em vez de retornar dict no fim,
     da yield de eventos conforme processa:
@@ -428,6 +446,10 @@ async def run_turn_stream(
 
     NAO substitui run_turn (Telegram continua usando o original).
     """
+    import uuid as _uuid
+    _turno_ctx.set(_uuid.uuid4().hex)
+    _origem_ctx.set({**(origem or {"canal": channel}), "email": user_email,
+                     "mensagem": (user_message or "")[:500]})
     messages = list(conversation_history or [])
     messages = _trim_history(messages)
     from app.anexos import monta_conteudo

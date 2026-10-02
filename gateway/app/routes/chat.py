@@ -336,6 +336,7 @@ async def chat(body: ChatRequest, claims: dict = Depends(verify_token)):
                     imagens=_imgs or None,
                     planilha_ctx=_pl_ctx,
                     aviso_planilha=_aviso_pl,
+                    origem={"canal": "web", "conversation_id": conv_id},
                 ):
                     etype = ev.get("type")
                     if etype == "token":

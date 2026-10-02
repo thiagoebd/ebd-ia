@@ -286,6 +286,7 @@ async def _responde(m: Mensagem) -> None:
             channel="whatsapp",
             user_email=email,
             model=_modelo_wa(),
+            origem={"canal": "whatsapp", "chat": m.grupo, "privado": m.privado},
             imagens=imagens,
             planilha_ctx=planilha_ctx,
             aviso_planilha=aviso_planilha,
