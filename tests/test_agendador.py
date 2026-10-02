@@ -585,6 +585,25 @@ def test_envio_artefato_de_outro_usuario_nao_sai(ambiente, tmp_path):
 
 
 @pg
+def test_envio_artefato_do_web_com_oid_da_sessao(ambiente, tmp_path):
+    """Regressao 02/10: no web o artefato e gravado com o OID do Entra e o acl_users
+    nao tem oid — o envio tem que achar o dono pela sessao (origem.user_id)."""
+    async def t(pool):
+        await _limpa(pool)
+        f = tmp_path / "fat.pdf"
+        f.write_bytes(b"%PDF")
+        art = await pool.fetchval("INSERT INTO artifacts (user_oid, filename, file_path) "
+                                  "VALUES ('oid-entra-real', 'fat.pdf', $1) RETURNING id::text", str(f))
+        s = {**(await _solic(SUPER)), "oid": None}               # acl_users sem oid, como em producao
+        r = await env.preparar(pool, s, "t1", ANDREA, "segue", [art], ["18"])
+        assert r["erro"] == "ARTEFATO_NAO_ENCONTRADO"           # sem o oid da sessao: o bug
+        r = await env.preparar(pool, {**s, "oid": "oid-entra-real"}, "t1", ANDREA, "segue",
+                               [art], ["18"])
+        assert r["status"] == "PREVIA" and "fat.pdf" in r["previa"]
+    ambiente.roda(t)
+
+
+@pg
 def test_envio_com_instancia_caida_registra_falha(ambiente):
     async def t(pool):
         await _limpa(pool)
@@ -693,3 +712,93 @@ def test_caminho_do_agente_pela_ferramenta_ponta_a_ponta(ambiente):
         assert f["status"] == "ENVIADO" and ambiente.enviados[-1][0] == "5521990000004@s.whatsapp.net"
         assert ambiente.enviados[-1][1].startswith("📨 _Conforme solicitado por Comum Teste:_")
     ambiente.roda(r)
+
+
+# ─── tela 'Tarefas agendadas' ────────────────────────────────────────────
+
+@pg
+def test_rodar_agora_antecipa_a_janela(ambiente):
+    from gateway.app import agendamentos as ag
+
+    async def t(pool):
+        await _limpa(pool)
+        i = await _job(pool, proxima_exec=datetime.now(SP) + timedelta(days=1))
+        assert await ag.reivindicar(pool) == []
+        assert (await ag.gerir(pool, SUPER, "rodar_agora", i))["status"] == "OK"
+        assert [j["id"] for j in await ag.reivindicar(pool)] == [i]
+        await ag.gerir(pool, SUPER, "pausar", i)
+        assert (await ag.gerir(pool, SUPER, "rodar_agora", i))["erro"] == "NAO_ENCONTRADO"   # pausado
+    ambiente.roda(t)
+
+
+@pg
+def test_listagem_traz_o_que_a_tela_mostra(ambiente):
+    from gateway.app import agendamentos as ag
+
+    async def t(pool):
+        await _limpa(pool)
+        i = await _job(pool, regra_dia="ULTIMO_DIA_UTIL")
+        await pool.execute("INSERT INTO ebdia_agendamento_log (id_agend, janela_agendada, status, msg_erro) "
+                           "VALUES ($1, now(), 'ERRO', 'calendario fora')", i)
+        a = (await ag.gerir(pool, SUPER, "listar"))["agendamentos"][0]
+        assert a["dono_nome"] == "Super Teste" and a["pergunta"] == "como estamos?"
+        assert a["entrega_desc"].startswith("grupo") and "ULTIMO dia util" in a["regra_desc"]
+        assert (a["ultimo_status"], a["ultimo_erro"]) == ("ERRO", "calendario fora")
+    ambiente.roda(t)
+
+
+def test_rotas_da_tela_exigem_super_admin(monkeypatch):
+    """Esconder o botao nao basta: o servidor recusa quem nao e super admin.
+    Testa o require_super_admin REAL; so banco e Azure sao dubles (padrao do
+    test_whatsapp: modulo inteiro em sys.modules + atributo no pacote)."""
+    import importlib
+    import gateway.app as gw_app
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from gateway.app import agendamentos
+
+    def verify_token():
+        return {}
+
+    async def e_super(email):
+        return email == SUPER
+
+    chamadas = []
+
+    async def gerir(pool, email, acao, id_agend=None):
+        chamadas.append((email, acao, id_agend))
+        if id_agend == 99999:
+            return {"status": "FALHA", "erro": "NAO_ENCONTRADO", "mensagem": "nao existe"}
+        return {"status": "OK", "agendamentos": [], "ativo": acao == "reativar"}
+
+    entra = types.SimpleNamespace(verify_token=verify_token)
+    db_falso = types.SimpleNamespace(_pool_or_raise=lambda: None)
+    acl_falso = types.SimpleNamespace(is_super_admin=e_super)
+    for nome, mod in (("gateway.app.auth.entra", entra), ("gateway.app.db", db_falso),
+                      ("gateway.app.acl_store", acl_falso)):
+        monkeypatch.setitem(sys.modules, nome, mod)
+    monkeypatch.setattr(gw_app, "db", db_falso, raising=False)
+    monkeypatch.setattr(gw_app, "acl_store", acl_falso, raising=False)
+    for nome in ("gateway.app.routes.admin_acl", "gateway.app.routes.agendamentos_admin"):
+        monkeypatch.delitem(sys.modules, nome, raising=False)
+    monkeypatch.setattr(agendamentos, "gerir", gerir)
+    admin_acl = importlib.import_module("gateway.app.routes.admin_acl")
+    agendamentos_admin = importlib.import_module("gateway.app.routes.agendamentos_admin")
+
+    app = FastAPI()
+    app.include_router(agendamentos_admin.router, prefix="/api")
+    quem = {"email": COMUM}
+    app.dependency_overrides[admin_acl.verify_token] = lambda: {"preferred_username": quem["email"]}
+    c = TestClient(app)
+    assert c.get("/api/admin/agendamentos").status_code == 403
+    assert c.post("/api/admin/agendamentos/1/pausar").status_code == 403
+    assert c.delete("/api/admin/agendamentos/1").status_code == 403
+    assert chamadas == []                                   # nada chegou ao gerir
+    quem["email"] = SUPER
+    assert c.get("/api/admin/agendamentos").status_code == 200
+    assert c.post("/api/admin/agendamentos/1/apagar_tudo").status_code == 400
+    assert c.post("/api/admin/agendamentos/1/pausar").json()["ativo"] is False
+    assert c.post("/api/admin/agendamentos/1/rodar_agora").status_code == 200
+    assert c.get("/api/admin/agendamentos/1/historico").status_code == 200
+    assert c.delete("/api/admin/agendamentos/99999").status_code == 404
+    assert [x[1] for x in chamadas] == ["listar", "pausar", "rodar_agora", "historico", "excluir"]

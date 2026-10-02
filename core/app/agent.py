@@ -449,6 +449,7 @@ async def run_turn_stream(
     import uuid as _uuid
     _turno_ctx.set(_uuid.uuid4().hex)
     _origem_ctx.set({**(origem or {"canal": channel}), "email": user_email,
+                     "user_id": str(user_id) if user_id else None,
                      "mensagem": (user_message or "")[:500]})
     messages = list(conversation_history or [])
     messages = _trim_history(messages)

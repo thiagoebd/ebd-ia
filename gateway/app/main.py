@@ -31,6 +31,7 @@ from gateway.app.routes import health, me, chat, conversations, artifacts
 from gateway.app.routes import admin_acl
 from gateway.app.routes import mercado
 from gateway.app.routes import whatsapp
+from gateway.app.routes import agendamentos_admin
 from gateway.app import db
 
 log = logging.getLogger("uvicorn.error")
@@ -86,6 +87,7 @@ app.include_router(artifacts.router, prefix="/api", tags=["artifacts"])
 app.include_router(admin_acl.router, prefix="/api", tags=["admin-acl"])
 app.include_router(mercado.router, prefix="/api", tags=["mercado"])
 app.include_router(whatsapp.router, prefix="/api", tags=["whatsapp"])
+app.include_router(agendamentos_admin.router, prefix="/api", tags=["agendamentos"])
 
 
 FRONTEND_DIST = ROOT / "frontend" / "dist"

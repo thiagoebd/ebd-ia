@@ -12,6 +12,7 @@ import { ArtifactCard, type ArtifactRef } from "./ArtifactCard";
 import { ChartCard } from "./ChartCard";
 import { MapCard } from "./MapCard";
 import { AccessAdmin } from "./AccessAdmin";
+import { AgendaAdmin } from "./AgendaAdmin";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL;
 
@@ -93,6 +94,19 @@ function App() {
   }
   const [modelOpen, setModelOpen] = useState(false);
   const [showAccess, setShowAccess] = useState(false);
+  const [showAgenda, setShowAgenda] = useState(false);
+  const [agendaAtivos, setAgendaAtivos] = useState<number | null>(null);
+
+  // contador do menu "Agendados": quantas tarefas estao ativas (so super admin)
+  async function carregarAgenda() {
+    try {
+      const t = await token();
+      const r = await fetch(`${API_BASE}/api/admin/agendamentos`, { headers: { Authorization: `Bearer ${t}` } });
+      if (!r.ok) return;
+      const j = await r.json();
+      setAgendaAtivos((j.agendamentos || []).filter((a: { ativo: boolean }) => a.ativo).length);
+    } catch { /* contador e so informativo */ }
+  }
   const [mercado, setMercado] = useState<{
     macro: { rotulo: string; valor: string; ref: string | null }[];
     noticias: { titulo: string; veiculo: string; link: string; quando: string }[];
@@ -133,6 +147,7 @@ function App() {
         if (meResp.ok) {
           const meData = await meResp.json();
           setMe({ role: meData.role, super_admin: meData.super_admin, models: meData.models });
+          if (meData.super_admin) carregarAgenda();
         try {
           const tok = await token();
           const rm = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/mercado`,
@@ -395,6 +410,17 @@ function App() {
             </button>
 
             {me?.super_admin && (
+              <div className="sb-list">
+                <div className="sb-link" style={{ cursor: "pointer" }} onClick={() => setShowAgenda(true)}
+                  title="Tarefas que o EBD.ia roda sozinho no horário marcado">
+                  <span aria-hidden="true">🕒</span>
+                  <span className="lbl">Agendados</span>
+                  {agendaAtivos !== null && <span className="count">{agendaAtivos}</span>}
+                </div>
+              </div>
+            )}
+
+            {me?.super_admin && (
               <>
                 <div className="sb-section">Administração</div>
                 <div className="sb-list">
@@ -490,6 +516,7 @@ function App() {
             </div>
           </aside>
           {showAccess && me?.super_admin && <AccessAdmin getToken={token} onClose={() => setShowAccess(false)} />}
+          {showAgenda && me?.super_admin && <AgendaAdmin getToken={token} onMudou={carregarAgenda} onClose={() => { setShowAgenda(false); carregarAgenda(); }} />}
 
           <main className="main">
             <div className="chat" ref={scrollRef}>

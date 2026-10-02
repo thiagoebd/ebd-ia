@@ -51,7 +51,8 @@ GERIR_AGENDAMENTOS_TOOL = {
     "input_schema": {
         "type": "object",
         "properties": {
-            "acao": {"type": "string", "enum": ["listar", "historico", "pausar", "reativar", "excluir"]},
+            "acao": {"type": "string", "enum": ["listar", "historico", "pausar", "reativar",
+                                                "rodar_agora", "excluir"]},
             "id": {"type": "integer"},
         },
         "required": ["acao"],
@@ -127,6 +128,9 @@ async def executa(nome: str, entrada: dict, origem: dict | None, turno: str) -> 
         solicitante = await acl_store.get_user(email)
         if not solicitante:
             return _j({"status": "FALHA", "erro": "SEM_PERMISSAO", "mensagem": "usuario sem acesso"})
+        # artefato e gravado com o user_id da sessao (no web = OID do Entra); o acl_users
+        # nao guarda oid, entao o dono do arquivo vem da sessao e nao do cadastro
+        solicitante = {**solicitante, "oid": solicitante.get("oid") or origem.get("user_id")}
         if e.get("codigo_confirmacao"):
             return _j(await envio_delegado.confirmar(pool, solicitante, turno, e["codigo_confirmacao"],
                                                      origem.get("mensagem", "")))
