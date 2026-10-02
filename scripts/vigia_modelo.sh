@@ -103,18 +103,29 @@ avisa() {   # WhatsApp pela Evolution, se este servidor tiver uma (so o 108)
 
 substituicao_ligada() { grep -q "^FLASH_SUBSTITUTO=" "$REPO/gateway/.env"; }
 
+# o .env so e lido quando o processo sobe: TODO processo que chama o agente
+# precisa reiniciar na troca. O worker do agendador e separado do gateway —
+# sem isto ele seguia no modelo antigo (02/10/2026).
+reinicia() {
+    systemctl restart "$SERVICO"
+    for extra in ebdia-agendador; do
+        systemctl cat "$extra" >/dev/null 2>&1 && systemctl restart "$extra"
+    done
+    return 0
+}
+
 liga() {
     if grep -q "^# *FLASH_SUBSTITUTO=" "$REPO/gateway/.env"; then
         sed -i "s|^# *FLASH_SUBSTITUTO=.*|FLASH_SUBSTITUTO=$SUBSTITUTO|" "$REPO/gateway/.env"
     else
         echo "FLASH_SUBSTITUTO=$SUBSTITUTO" >> "$REPO/gateway/.env"
     fi
-    systemctl restart "$SERVICO"
+    reinicia
 }
 
 desliga() {
     sed -i "s|^FLASH_SUBSTITUTO=|# FLASH_SUBSTITUTO=|" "$REPO/gateway/.env"
-    systemctl restart "$SERVICO"
+    reinicia
 }
 
 checar() {

@@ -38,6 +38,12 @@ async def main() -> None:
     trava = asyncio.Semaphore(int(os.getenv("AGENDA_PARALELO", "2")))
     rodando: set[asyncio.Task] = set()
     log.info("agendador: no ar (intervalo %ss)", intervalo)
+    try:
+        n = await agendamentos.recupera_interrompidos(pool)
+        if n:
+            log.warning("agendador: %s execucao(oes) interrompida(s) no reinicio — avisadas", n)
+    except Exception:
+        log.exception("agendador: falha ao recuperar execucoes interrompidas")
 
     async def roda(job):
         async with trava:

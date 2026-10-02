@@ -171,13 +171,22 @@ async def gerir(pool, email: str, acao: str, id_agend: int | None = None) -> dic
     if acao == "listar":
         rows = await pool.fetch(
             """SELECT a.id, a.titulo, a.criado_por, a.cron, a.regra_dia, a.canal, a.entrega,
-                      a.formato_saida, a.ativo, a.proxima_exec, a.ultima_exec,
-                      (SELECT status FROM ebdia_agendamento_log l WHERE l.id_agend = a.id
-                       ORDER BY l.dt_inicio DESC LIMIT 1) AS ultimo_status
-               FROM ebdia_agendamento a WHERE a.excluido_em IS NULL ORDER BY a.id""")
+                      a.destino, a.pergunta, a.filial_calendario, a.formato_saida, a.ativo,
+                      a.proxima_exec, a.ultima_exec, u.nome AS dono_nome,
+                      l.status AS ultimo_status, l.msg_erro AS ultimo_erro
+               FROM ebdia_agendamento a
+               LEFT JOIN acl_users u ON lower(u.email) = lower(a.criado_por)
+               LEFT JOIN LATERAL (SELECT status, msg_erro FROM ebdia_agendamento_log l
+                                  WHERE l.id_agend = a.id ORDER BY l.dt_inicio DESC LIMIT 1) l ON true
+               WHERE a.excluido_em IS NULL ORDER BY a.ativo DESC, a.proxima_exec NULLS LAST, a.id""")
         return {"status": "OK", "agendamentos": [
-            {**{k: r[k] for k in ("id", "titulo", "criado_por", "cron", "regra_dia", "canal",
-                                  "entrega", "formato_saida", "ativo", "ultimo_status")},
+            {**{k: r[k] for k in ("id", "titulo", "criado_por", "dono_nome", "cron", "regra_dia",
+                                  "canal", "entrega", "pergunta", "filial_calendario",
+                                  "formato_saida", "ativo", "ultimo_status", "ultimo_erro")},
+             "entrega_desc": {"grupo": f"grupo {r['destino'] or ''}".strip(),
+                              "privado": "privado do WhatsApp",
+                              "conversa": "chat web (📅 Agendamentos)"}.get(r["entrega"], r["entrega"]),
+             "regra_desc": _descreve_regra(r["regra_dia"], r["filial_calendario"]),
              "quando": cron_simples.descreve(r["cron"]),
              "proxima": f"{r['proxima_exec'].astimezone(ZoneInfo(TZ)):%d/%m %H:%M}" if r["proxima_exec"] else None,
              "ultima": f"{r['ultima_exec'].astimezone(ZoneInfo(TZ)):%d/%m %H:%M}" if r["ultima_exec"] else None}
@@ -204,13 +213,23 @@ async def gerir(pool, email: str, acao: str, id_agend: int | None = None) -> dic
                            "proxima_exec = COALESCE($3, proxima_exec) WHERE id = $1",
                            id_agend, ativo, proxima)
         return {"status": "OK", "id": id_agend, "ativo": ativo}
+    if acao == "rodar_agora":
+        # so antecipa a janela: o worker pega no proximo ciclo, com todas as travas
+        n = await pool.execute(
+            "UPDATE ebdia_agendamento SET proxima_exec = date_trunc('minute', now()) "
+            "WHERE id = $1 AND ativo AND excluido_em IS NULL", id_agend)
+        if n.endswith(" 0"):
+            return {"status": "FALHA", "erro": "NAO_ENCONTRADO",
+                    "mensagem": f"agendamento {id_agend} nao existe ou esta pausado"}
+        return {"status": "OK", "id": id_agend, "nota": "roda em ate 30 segundos"}
     if acao == "excluir":
         n = await pool.execute("UPDATE ebdia_agendamento SET ativo = false, excluido_em = now() "
                                "WHERE id = $1 AND excluido_em IS NULL", id_agend)
         if n.endswith(" 0"):
             return {"status": "FALHA", "erro": "NAO_ENCONTRADO", "mensagem": f"agendamento {id_agend} nao existe"}
         return {"status": "OK", "id": id_agend, "excluido": True, "nota": "o historico de execucao fica guardado"}
-    return {"status": "FALHA", "erro": "ACAO_INVALIDA", "mensagem": "acao: listar, historico, pausar, reativar, excluir"}
+    return {"status": "FALHA", "erro": "ACAO_INVALIDA",
+            "mensagem": "acao: listar, historico, pausar, reativar, rodar_agora, excluir"}
 
 
 # ─── Worker: reivindicar e executar ──────────────────────────────────────
@@ -347,6 +366,27 @@ async def executar(pool, job: dict, *, roda_agente=None, consulta_cal=None,
         return "FALHA_ENTREGA"
     await _fecha_log(pool, job["log_id"], "OK", t0, artefatos=artefatos)
     return "OK"
+
+
+async def recupera_interrompidos(pool) -> int:
+    """Ao subir: execucoes que ficaram EM_EXECUCAO foram cortadas por um reinicio
+    (deploy, vigia de modelo). A unique impede rodar a janela de novo — entao
+    registra e AVISA, em vez de o job sumir em silencio."""
+    from gateway.app import acl_store
+    rows = await pool.fetch(
+        """UPDATE ebdia_agendamento_log l SET status = 'ERRO', dt_fim = now(),
+                  msg_erro = 'interrompido: o agendador reiniciou durante a execucao'
+           FROM ebdia_agendamento a
+           WHERE l.id_agend = a.id AND l.status = 'EM_EXECUCAO'
+           RETURNING a.*, l.janela_agendada AS janela""")
+    for r in rows:
+        job = dict(r)
+        usuario = await acl_store.get_user(job["criado_por"]) or {}
+        usuario = {**usuario, "whatsapp": await pool.fetchval(
+            "SELECT whatsapp FROM acl_users WHERE lower(email) = lower($1)", job["criado_por"])}
+        await _avisa_falha(pool, job, usuario,
+                           "foi interrompido por um reinicio do sistema. Use 'rodar agora' na tela Agendados")
+    return len(rows)
 
 
 async def _roda_agente(job: dict, usuario: dict) -> tuple[str, list[str]]:
