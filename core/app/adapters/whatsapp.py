@@ -120,6 +120,7 @@ class Mensagem:
     nome: str = ""
     mencionados: list[str] = field(default_factory=list)
     responde_a: str | None = None   # participante da mensagem citada
+    citado: str | None = None       # texto da mensagem citada (resposta a uma mensagem)
     de_mim: bool = False
     privado: bool = False
     # {"tipo": imagem|audio|documento, "mimetype", "nome", "base64", "bruto"}
@@ -234,6 +235,7 @@ def parse_evento(payload: dict) -> Mensagem | None:
         nome=data.get("pushName") or "",
         mencionados=list(ctx.get("mentionedJid") or []),
         responde_a=ctx.get("participant"),
+        citado=(_texto_de(ctx.get("quotedMessage") or {})[0] or "").strip() or None,
         de_mim=bool(key.get("fromMe")),
         privado=privado,
         midia=midia,

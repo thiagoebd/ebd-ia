@@ -21,8 +21,11 @@ THIAGO = "5511999998888"
 
 
 def evento(texto, *, grupo=GRUPO, participant=f"{THIAGO}@s.whatsapp.net",
-           mencoes=None, responde_a=None, from_me=False, alt=None, formato="ext"):
+           mencoes=None, responde_a=None, from_me=False, alt=None, formato="ext",
+           citado=None, msg_id="ABC123"):
     ctx = {}
+    if citado:
+        ctx["quotedMessage"] = {"conversation": citado}
     if mencoes:
         ctx["mentionedJid"] = mencoes
     if responde_a:
@@ -31,7 +34,7 @@ def evento(texto, *, grupo=GRUPO, participant=f"{THIAGO}@s.whatsapp.net",
         msg = {"conversation": texto}
     else:
         msg = {"extendedTextMessage": {"text": texto, "contextInfo": ctx}}
-    key = {"remoteJid": grupo, "fromMe": from_me, "id": "ABC123",
+    key = {"remoteJid": grupo, "fromMe": from_me, "id": msg_id,
            "participant": participant}
     if alt:
         key["participantAlt"] = alt
@@ -225,7 +228,9 @@ def rota(monkeypatch):
             yield ev
         yield {"type": "done", "history": [{"role": "user", "content": "x"}]}
 
-    tabela = {"+5511999998888": {"email": "thiago@ebd.com", "role": "admin"}}
+    tabela = {"+5511999998888": {"email": "thiago@ebd.com", "role": "admin"},
+              "+5511977776666": {"email": "victor@ebd.com", "role": "admin",
+                                 "nome": "Victor Hugo"}}
 
     async def get_user_by_whatsapp(numero):
         return tabela.get(numero)
@@ -264,6 +269,7 @@ def rota(monkeypatch):
         return {f"{BOT}@s.whatsapp.net"}
     monkeypatch.setattr(r, "_ids_do_bot", ids)
     r._hist.clear()
+    r._mural.clear()
     r._avisados.clear()
     r._vistos.clear()
 
@@ -330,7 +336,8 @@ def test_pergunta_roda_como_a_pessoa_e_responde_citando(rota):
     assert kw["user_email"] == "thiago@ebd.com" and kw["channel"] == "whatsapp"
     assert kw["user_role"] != "admin"            # grupo nunca propoe auto-append
     # no grupo a pergunta vai marcada: o agente precisa saber que todos leem
-    assert kw["user_message"] == f"{rota.r.MARCA_GRUPO}\ncomo estamos em setembro?"
+    assert kw["user_message"].startswith(f"{rota.r.MARCA_GRUPO}\n[Quem fala agora: Thiago]")
+    assert kw["user_message"].endswith("\n\ncomo estamos em setembro?")
     # agente rapido: vai direto a resposta, sem aviso intermediario
     assert len(rota.enviados) == 1
     resposta = rota.enviados[0]
@@ -815,3 +822,66 @@ def test_whatsapp_recusa_claude_mesmo_forcado(rota, monkeypatch):
 def test_agente_sem_modelo_nao_cai_no_opus():
     s = (RAIZ / "core/app/agent.py").read_text(encoding="utf-8")
     assert 'm = model or "deepseek-flash"' in s
+
+
+# ─── varias pessoas no grupo: quem fala, citacao e mural ───
+
+VICTOR = "5511977776666"
+SQL_PLATAFORMA = "SELECT CODEMITENTE, SUM(VLTOTAL) FROM PCPEDC WHERE ORIGEMPED = 'W' GROUP BY CODEMITENTE"
+
+
+def test_parse_traz_o_texto_da_mensagem_citada():
+    m = wa.parse_evento(evento("@ebd.ia sql dessa mensagem", citado="Sim, dá pra separar"))
+    assert m.citado == "Sim, dá pra separar"
+    assert wa.parse_evento(evento("oi")).citado is None
+
+
+def test_citar_resposta_dada_a_outra_pessoa_traz_pergunta_e_sql(rota):
+    """Regressao 02/10 (Corporativo TI): o Victor perguntou, o Thiago citou a
+    resposta e pediu o SQL — o bot so via o historico do Thiago (uma resenha)."""
+    rota.saida["eventos"] = [
+        {"type": "tool", "name": "oracle_query", "input": {"sql": SQL_PLATAFORMA}},
+        {"type": "token", "text": "Sim, dá pra separar 👍 — o que identifica a plataforma é o *emitente*"},
+    ]
+    rota.post("/api/whatsapp/webhook",
+              json=evento("@ebd.ia de quais plataformas vem os pedidos web?",
+                          participant=f"{VICTOR}@s.whatsapp.net", msg_id="V1"), headers=H)
+    _espera(rota, 1)
+    rota.saida["eventos"] = None
+    rota.post("/api/whatsapp/webhook",
+              json=evento("@ebd.ia sql dessa mensagem", msg_id="T1",
+                          citado="Sim, dá pra separar 👍 — o que identifica a plataforma é o emitente"),
+              headers=H)
+    _espera(rota, 2)
+    msg = rota.perguntas[1]["user_message"]
+    assert "[Quem fala agora: Thiago]" in msg
+    assert "RESPONDENDO a uma resposta sua dada a Victor Hugo" in msg
+    assert "de quais plataformas vem os pedidos web?" in msg
+    assert SQL_PLATAFORMA in msg
+    assert rota.perguntas[1]["user_email"] == "thiago@ebd.com"     # roda com o acesso de quem pede
+
+
+def test_sql_so_sai_quando_citam_a_resposta(rota):
+    rota.saida["eventos"] = [
+        {"type": "tool", "name": "oracle_query", "input": {"sql": SQL_PLATAFORMA}},
+        {"type": "token", "text": "Compra Agora lidera"},
+    ]
+    rota.post("/api/whatsapp/webhook",
+              json=evento("@ebd.ia plataformas web", participant=f"{VICTOR}@s.whatsapp.net",
+                          msg_id="V2"), headers=H)
+    _espera(rota, 1)
+    rota.saida["eventos"] = None
+    rota.post("/api/whatsapp/webhook", json=evento("@ebd.ia e por filial?", msg_id="T2"), headers=H)
+    _espera(rota, 2)
+    msg = rota.perguntas[1]["user_message"]
+    assert "Victor Hugo perguntou: plataformas web" in msg and "Compra Agora lidera" in msg
+    assert SQL_PLATAFORMA not in msg
+
+
+def test_citacao_sem_registro_nao_inventa(rota):
+    rota.post("/api/whatsapp/webhook",
+              json=evento("@ebd.ia qual sql?", citado="Uma resposta antiga de ontem que nao esta no mural"),
+              headers=H)
+    _espera(rota, 1)
+    msg = rota.perguntas[0]["user_message"]
+    assert "esta respondendo a esta mensagem do grupo" in msg and "SQL que voce executou" not in msg

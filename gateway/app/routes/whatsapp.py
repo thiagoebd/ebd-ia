@@ -31,7 +31,9 @@ import asyncio
 import hmac
 import logging
 import os
+import re
 import time
+from collections import deque
 
 from fastapi import APIRouter, HTTPException, Request
 
@@ -63,6 +65,63 @@ _ids_cache: tuple[float, set[str]] = (0.0, set())
 _avisados: dict[str, float] = {}
 _vistos: dict[str, float] = {}     # msg_id -> quando: a Evolution as vezes entrega 2x
 VISTO_TTL_S = 600
+
+# MURAL do grupo: o que o bot RESPONDEU em publico (todos ja leram). Serve para
+# quem chega depois no assunto ou cita uma resposta dada a outra pessoa. O
+# historico de ferramentas continua por pessoa (_hist); aqui so o que foi postado,
+# mais o SQL usado — liberado so quando alguem CITA aquela resposta.
+MURAL_MAX = 8
+MURAL_NO_CONTEXTO = 3
+_mural: dict[str, deque] = {}
+
+
+def _uma_linha(t: str) -> str:
+    return re.sub(r"\s+", " ", t or "").strip()
+
+
+def _norm(t: str) -> str:
+    return re.sub(r"\s+", " ", re.sub(r"[*_~`>]", "", t or "")).strip().lower()
+
+
+def _no_mural(grupo: str, quem: str, pergunta: str, resposta: str, sqls: list[str]) -> None:
+    _mural.setdefault(grupo, deque(maxlen=MURAL_MAX)).append(
+        {"ts": time.time(), "quem": quem, "pergunta": pergunta[:500],
+         "resposta": resposta, "sqls": sqls[-3:]})
+
+
+def _mural_vivo(grupo: str) -> list[dict]:
+    return [x for x in _mural.get(grupo, ()) if time.time() - x["ts"] < HIST_TTL_S]
+
+
+def _acha_citada(grupo: str, citado: str) -> dict | None:
+    alvo = _norm(citado)[:160]
+    if len(alvo) < 12:
+        return None
+    for x in reversed(_mural_vivo(grupo)):
+        if alvo in _norm(x["resposta"]):
+            return x
+    return None
+
+
+def contexto_grupo(grupo: str, quem: str, citado: str | None) -> str:
+    """Cabecalho do turno no grupo: quem fala, o que citou e a conversa recente."""
+    linhas = [f"[Quem fala agora: {quem}]"]
+    alvo = _acha_citada(grupo, citado) if citado else None
+    if alvo:
+        sql = "\n\n".join(alvo["sqls"]) or "(nenhuma consulta ao Winthor nessa resposta)"
+        linhas.append(
+            f"[{quem} esta RESPONDENDO a uma resposta sua dada a {alvo['quem']}]\n"
+            f"Pergunta de {alvo['quem']}: {alvo['pergunta']}\n"
+            f"Sua resposta: {alvo['resposta'][:1500]}\n"
+            f"SQL que voce executou para ela:\n{sql}")
+    elif citado:
+        linhas.append(f"[{quem} esta respondendo a esta mensagem do grupo]\n{citado[:1500]}")
+    recentes = [x for x in _mural_vivo(grupo) if x is not alvo][-MURAL_NO_CONTEXTO:]
+    if recentes and not alvo:
+        linhas.append("[Conversa recente sua no grupo, mais antiga primeiro]\n" + "\n".join(
+            f"- {x['quem']} perguntou: {x['pergunta'][:200]} | voce respondeu: "
+            f"{_uma_linha(x['resposta'])[:300]}" for x in recentes))
+    return "\n".join(linhas)
 
 
 def _ligado() -> bool:
@@ -269,11 +328,18 @@ async def _responde(m: Mensagem) -> None:
                 "privada" if m.privado else "no grupo", email, len(texto_pergunta),
                 f" [{m.midia['tipo']}]" if m.midia else "", " [voz]" if modo_voz else "")
     # o agente precisa saber se todos leem, e se a resposta vai em audio
-    mensagem_agente = texto_pergunta if m.privado else f"{MARCA_GRUPO}\n{texto_pergunta}"
+    quem = usuario.get("nome") or primeiro_nome(m.nome) or email
+    if m.privado:
+        mensagem_agente = (f"[Respondendo a esta mensagem]\n{m.citado[:1500]}\n\n{texto_pergunta}"
+                           if m.citado else texto_pergunta)
+    else:
+        mensagem_agente = (f"{MARCA_GRUPO}\n{contexto_grupo(m.grupo, quem, m.citado)}\n\n"
+                           f"{texto_pergunta}")
     if modo_voz:
         mensagem_agente += f"\n{voz.MARCA_AUDIO}"
 
     texto, historia, artefatos, t0 = "", None, [], time.perf_counter()
+    sqls: list[str] = []
 
     async def _consome() -> None:
         nonlocal texto, historia
@@ -296,6 +362,9 @@ async def _responde(m: Mensagem) -> None:
                 texto += ev.get("text", "")
             elif tipo in ("tool", "tool_use"):
                 texto = ""              # fica so o que vem depois da ultima ferramenta
+                sql = (ev.get("input") or {}).get("sql") if ev.get("name") == "oracle_query" else None
+                if sql:
+                    sqls.append(sql.strip())
             elif tipo == "artifact":
                 artefatos.append(ev)
             elif tipo == "done":
@@ -334,6 +403,8 @@ async def _responde(m: Mensagem) -> None:
     if not falou or os.getenv("WA_VOZ_COM_TEXTO", "true").lower() == "true":
         resposta = md_para_whatsapp(visual) or "Não consegui montar a resposta dessa vez."
         await envia_texto(m.grupo, resposta, citar=None if falou else m)
+        if not m.privado:
+            _no_mural(m.grupo, quem, texto_pergunta, resposta, sqls)
     for art in artefatos:
         await _envia_artefato(m.grupo, art)
     logger.info("wa: respondido em %.0fs (%d chars%s%s)", time.perf_counter() - t0,
